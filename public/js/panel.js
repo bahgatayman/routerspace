@@ -121,6 +121,12 @@
   const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
   const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const openStack = [];
+  // Background-scroll lock: shared between the modal/drawer stack above and
+  // the mobile sidebar menu below (a separate, bespoke toggle — see side()),
+  // so either one locks the body and neither can prematurely unlock it while
+  // the other is still open.
+  let sideOpen = false;
+  const updateBodyLock = () => document.body.classList.toggle('ls-lock', sideOpen || openStack.length > 0);
   LS.open = (id) => {
     const ov = typeof id === 'string' ? document.getElementById(id) : id;
     if (!ov) return;
@@ -129,8 +135,8 @@
     ov.__lastFocus = document.activeElement;
     ov.classList.add('is-open');
     ov.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('ls-lock');
     openStack.push(ov);
+    updateBodyLock();
     const dialog = ov.querySelector('.ls-dialog') || ov;
     const first = dialog.querySelector('[autofocus]') || [...dialog.querySelectorAll('.ls-dialog-body ' + FOCUSABLE.split(', ').join(', .ls-dialog-body '))].find(visible) || dialog.querySelector('[data-ls-close]');
     setTimeout(() => { if (first) first.focus({ preventScroll: true }); }, 30);
@@ -145,7 +151,7 @@
     ov.__closeTimer = setTimeout(() => ov.classList.remove('is-open', 'is-closing'), 140);
     ov.setAttribute('aria-hidden', 'true');
     openStack.splice(openStack.indexOf(ov), 1);
-    if (!openStack.length) document.body.classList.remove('ls-lock');
+    updateBodyLock();
     if (ov.__lastFocus && ov.__lastFocus.focus && document.contains(ov.__lastFocus)) ov.__lastFocus.focus({ preventScroll: true });
     ov.dispatchEvent(new CustomEvent('ls:close'));
   };
@@ -193,6 +199,11 @@
     if (!s) return;
     s.classList.toggle('is-open', open);
     if (scrim) scrim.classList.toggle('is-open', open);
+    // Lock the background from scrolling while the mobile drawer is open —
+    // without this, scrolling the nav list past its end chains into
+    // scrolling the page behind the (fixed, overlaying) drawer.
+    sideOpen = open;
+    updateBodyLock();
     const btn = document.querySelector('[data-ls-side-open]');
     if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) { const f = s.querySelector('.ls-nav-item.is-active') || s.querySelector('a, button'); if (f) setTimeout(() => f.focus(), 60); }
