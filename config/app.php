@@ -65,7 +65,9 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // The business runs on local wall-clock time (bookings, working hours,
+    // sessions, "today"), so the app clock must be the space's timezone.
+    'timezone' => env('APP_TIMEZONE', 'Africa/Cairo'),
 
     /*
     |--------------------------------------------------------------------------

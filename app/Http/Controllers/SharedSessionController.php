@@ -143,7 +143,9 @@ class SharedSessionController extends Controller
                     return [null, "{$user->name} already has an open session in this room."];
                 }
 
-                $openedAt = Carbon::parse($request->session_date.' '.$request->start_time);
+                // Never in the future: a start time ahead of the server clock
+                // (wrong device clock/timezone) would freeze the timer at 0.
+                $openedAt = Carbon::parse($request->session_date.' '.$request->start_time)->min(now());
 
                 // Snapshotted from the room now, at open time — never read live
                 // from the room again for this session. Without this, an Owner
