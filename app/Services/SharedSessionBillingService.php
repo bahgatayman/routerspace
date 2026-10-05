@@ -42,7 +42,9 @@ class SharedSessionBillingService
      */
     public function calculate(Carbon $openedAt, Carbon $closedAt, string $billingUnit, float $pricePerHour, int $bufferMinutes = 0): array
     {
-        $totalMinutes = round($openedAt->diffInSeconds($closedAt) / 60, 2);
+        // Carbon 3's diff is signed: a start after $closedAt (bad clock data)
+        // would otherwise produce negative minutes — and a negative charge.
+        $totalMinutes = max(0.0, round($openedAt->diffInSeconds($closedAt) / 60, 2));
         $unitMinutes = self::UNIT_MINUTES[$billingUnit] ?? 1;
 
         // Continuous: no blocks, exact proportional charge — today's
@@ -79,7 +81,9 @@ class SharedSessionBillingService
     public function nextChargeAt(Carbon $openedAt, Carbon $now, string $billingUnit, int $bufferMinutes = 0): ?Carbon
     {
         $unitMinutes = self::UNIT_MINUTES[$billingUnit] ?? 1;
-        if ($unitMinutes === 1) {
+        // A start after $now (bad clock data) has no meaningful "next hour" —
+        // never show a countdown that contradicts a 0m timer.
+        if ($unitMinutes === 1 || $openedAt->gt($now)) {
             return null;
         }
 

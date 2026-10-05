@@ -10,21 +10,21 @@ use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
 /**
- * "Right now" capacity across every room an owner has. This intentionally
- * duplicates AvailabilityService::usedCapacityNow()'s exact rules (today's
+ * "Right now" capacity across every room an owner has — applies the exact
+ * same rule as AvailabilityService::usedCapacityNow() (today's
  * pending/confirmed bookings whose time window contains this instant, minus
  * any confirmed booking in a shared room that's already past its no-show
- * grace period, plus every open SharedSession's party_size) rather than
- * calling that method — AvailabilityService's method is built for a
- * single-room call site (the booking form, check-in) and issues two queries
- * per call; a dashboard needs every room's current state at once, and
- * calling it in a per-room loop would fan out to 2N queries. This batches
- * the same two underlying queries ONE time each for the whole owner and
- * reproduces the per-row exclusion rule in PHP over the already-fetched
- * rows, so the numbers match usedCapacityNow() exactly without the fan-out.
+ * grace period, plus every open SharedSession's party_size), via the shared
+ * AvailabilityService::bookingsOverlappingNow()/rejectPastGrace() primitives,
+ * so the two can never drift from each other again. Still batched for the
+ * whole owner in one query each rather than calling usedCapacityNow() in a
+ * per-room loop (built for a single-room call site — the booking form,
+ * check-in — which would fan out to 2N queries here).
  */
 class OccupancyAnalyticsService
 {
+    public function __construct(private AvailabilityService $availability) {}
+
     /**
      * @return array{
      *     capacity: int, occupied: int, available: int, percent: float,
@@ -40,15 +40,9 @@ class OccupancyAnalyticsService
             return ['capacity' => 0, 'occupied' => 0, 'available' => 0, 'percent' => 0.0, 'rooms' => []];
         }
 
-        $roomIds = $rooms->pluck('id');
+        $roomIds = $rooms->pluck('id')->all();
 
-        $overlappingNow = Booking::where('owner_id', $owner->id)
-            ->whereIn('room_id', $roomIds)
-            ->whereDate('booking_date', $now->format('Y-m-d'))
-            ->whereIn('status', ['pending', 'confirmed'])
-            ->where('start_time', '<=', $now->format('H:i:s'))
-            ->where('end_time', '>', $now->format('H:i:s'))
-            ->get(['id', 'room_id', 'status', 'booking_date', 'start_time', 'party_size']);
+        $overlappingNow = $this->availability->bookingsOverlappingNow($owner->id, ['pending', 'confirmed'], $now, $roomIds);
 
         $bookingUsageByRoom = $overlappingNow
             ->groupBy('room_id')
@@ -56,8 +50,8 @@ class OccupancyAnalyticsService
                 $room = $rooms->firstWhere('id', $roomId);
                 $isShared = $room !== null && $room->type === 'shared';
 
-                return (int) $bookings
-                    ->reject(fn (Booking $b) => $isShared && $b->status === 'confirmed' && $b->isPastNoShowGrace())
+                return (int) $this->availability
+                    ->rejectPastGrace($bookings, fn (Booking $b) => $isShared)
                     ->sum('party_size');
             });
 

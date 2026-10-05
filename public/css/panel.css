@@ -660,7 +660,14 @@ body.ls-lock { overflow: hidden; }
 html[dir="rtl"] .ls-session-items summary svg { transform: scaleX(-1); }
 html[dir="rtl"] .ls-session-items details[open] summary svg { transform: rotate(90deg); }
 .ls-session-items ul { list-style: none; margin: var(--space-2) 0 0; padding: var(--space-3); display: grid; gap: var(--space-1); background: var(--color-surface-subtle); border-radius: var(--ls-r-ctl); }
-.ls-session-items li { display: flex; justify-content: space-between; gap: var(--space-2); }
+.ls-session-items li { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.ls-session-item-end { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+/* Small remove icon on each product line of a session card */
+.ls-item-remove { display: grid; place-items: center; width: 26px; height: 26px; margin-inline-end: -6px; border: 0; border-radius: var(--ls-r-sm); background: transparent; color: var(--color-text-muted); cursor: pointer; transition: background var(--ls-t-fast) var(--ls-ease), color var(--ls-t-fast) var(--ls-ease); }
+.ls-item-remove svg { width: 14px; height: 14px; }
+.ls-item-remove:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+.ls-item-remove:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-item-remove:disabled { opacity: .5; cursor: progress; }
 .ls-session-quick { display: flex; gap: var(--space-1); align-items: center; min-width: 0; overflow: hidden; margin-top: calc(var(--space-2) * -1); }
 .ls-session-quick-label { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ls-qa { min-height: 28px; max-width: 160px; padding: 0 var(--space-2); border-radius: var(--ls-r-sm); border: 0; background: transparent; font: var(--fw-medium) 13px var(--ls-font); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; transition: background var(--ls-t-fast) var(--ls-ease), color var(--ls-t-fast) var(--ls-ease), transform 80ms var(--ls-ease); }

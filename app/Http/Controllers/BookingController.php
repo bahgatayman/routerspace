@@ -28,6 +28,7 @@ use App\Services\HourPackageService;
 use App\Services\RoomPricingService;
 use App\Services\SalesService;
 use App\Support\Duration;
+use App\Support\IdempotencyKey;
 use App\Support\Money;
 use App\Support\Pricing\PriceQuote;
 use App\Support\TenantContext;
@@ -1774,10 +1775,24 @@ class BookingController extends Controller
         $stockError = null;
         if (! $product->is_active) {
             $stockError = __('app.inventory.errors.inactive', ['name' => $product->name]);
+        } elseif (! IdempotencyKey::claim($request, 'booking-item')) {
+            // The same click delivered twice (retry, double submit) adds once.
+            return $request->wantsJson()
+                ? response()->json(['success' => true, 'duplicate' => true])
+                : back();
         } else {
             try {
-                DB::transaction(function () use ($sales, $booking, $product, $validated) {
-                    $sale = $sales->saleForBooking($booking);
+                DB::transaction(function () use ($sales, $booking, $product, $validated, &$stockError) {
+                    // Re-checked on a fresh, locked row: a checkout that finalized
+                    // this invoice a moment ago must win over a late "add".
+                    $locked = Booking::whereKey($booking->id)->where('owner_id', $booking->owner_id)
+                        ->with('room')->lockForUpdate()->firstOrFail();
+                    if (! $locked->invoiceIsEditable()) {
+                        $stockError = __('app.sales.invoice_not_editable');
+
+                        return;
+                    }
+                    $sale = $sales->saleForBooking($locked);
                     $sales->addItem($sale, $product, (int) $validated['quantity']);
                 });
             } catch (InsufficientStockException $e) {

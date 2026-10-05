@@ -1,11 +1,15 @@
 {{--
     One active-session card (refined design).
-    $row: ActiveSessionRow — a SharedSession (shared room, billed live) or an
-          in-progress Booking (exclusive room, price fixed at booking time).
+    $row: ActiveSessionRow — a SharedSession (shared room, billed live), an
+          in-progress exclusive-room Booking (price fixed at booking time), or
+          a confirmed SHARED-room Booking whose window has started but hasn't
+          been checked in yet ($needsCheckIn below) — visible immediately, but
+          never billed live: its amount stays the static total_price quoted at
+          booking time until Check In turns it into a real SharedSession.
     $estimate: server-side running estimate for shared sessions (SharedSessionBillingService).
 
     Reading order is deliberate: who → which room → how long → how much →
-    is it ending → what next (Check out is the one dominant action).
+    is it ending → what next (Check out — or Check In — is the one dominant action).
 --}}
 @php
     $isShared = $row->isShared();
@@ -35,6 +39,12 @@
     // never the fixed-progress-bar one.
     $isOpenBooking = ! $isShared && $model->isOpenSession();
 
+    // A confirmed shared-room booking: visible here the instant its window
+    // starts (no check-in required to appear), but visibility is not
+    // billing — it stays a plain reservation, priced only at its already-
+    // fixed total_price, until Check In turns it into a real SharedSession.
+    $needsCheckIn = ! $isShared && ! $isOpenBooking && $row->room->isShared();
+
     if ($isShared || $isOpenBooking) {
         // $estimate: the RoomPricingService quote for "now" (the same service
         // closePreview()/close() charge with). Only a price that's linear in
@@ -56,6 +66,16 @@
         $grace = $nextChargeAt ? (int) ($model->billing_buffer_minutes ?? 0) : 0;
         $endsAt = null;
         $endingSoon = false;
+    } elseif ($needsCheckIn) {
+        $unit = null;
+        $nextChargeAt = null;
+        $rate = null;
+        // Static — the amount quoted and stored at booking time. Never a
+        // live quote/estimate call here: that's the whole point of this
+        // branch (visible ≠ billable).
+        $roomCharge = (float) $model->total_price;
+        $endsAt = $model->endsAt();
+        $endingSoon = now()->diffInMinutes($endsAt, false) <= 15;
     } else {
         $unit = null;
         $nextChargeAt = null;
@@ -65,7 +85,9 @@
         $endingSoon = now()->diffInMinutes($endsAt, false) <= 15;
     }
     $bill = round($roomCharge + $itemsTotal, 2);
-    $liveBill = $isShared && $estimate?->liveRatePerHour !== null;
+    // Per-minute billing ticks live for shared sessions AND Open Session
+    // bookings (both bill by elapsed time); block billing steps server-side.
+    $liveBill = ($isShared || $isOpenBooking) && $estimate?->liveRatePerHour !== null;
     $liveAttrs = $liveBill
         ? 'data-ls-since="'.$startedAt->toIso8601String().'" data-ls-rate="'.$rate.'" data-ls-extra="'.$itemsTotal.'"'
         : '';
@@ -88,10 +110,11 @@
         <x-ui.avatar :name="$customer->name" />
         <div class="ls-session-who">
             <span class="ls-session-name ls-trunc" title="{{ $customer->name }}">{{ $customer->name }}</span>
-            <span class="ls-session-room {{ $isShared ? 'is-shared' : 'is-private' }}">
+            @php $roomIsShared = $row->room->isShared(); @endphp
+            <span class="ls-session-room {{ $roomIsShared ? 'is-shared' : 'is-private' }}">
                 <x-ui.icon name="door" />
                 <span class="ls-trunc">{{ $row->room->name }}</span>
-                <span class="ls-kind">· {{ $isShared ? __('app.ui.sessions.shared') : __('app.ui.sessions.private') }}@if ($isOpenBooking) · {{ __('app.booking.duration_type.badge') }}@endif</span>
+                <span class="ls-kind">· {{ $roomIsShared ? __('app.ui.sessions.shared') : __('app.ui.sessions.private') }}@if ($isOpenBooking) · {{ __('app.booking.duration_type.badge') }}@endif</span>
             </span>
         </div>
         @if ($endingSoon)
@@ -135,6 +158,13 @@
                 @if ($grace > 0)<span class="ls-faint">· {{ __('app.session.grace', ['count' => $grace]) }}</span>@endif
             </div>
         @endif
+    @elseif ($needsCheckIn)
+        <div class="ls-session-meta">
+            <span class="ls-trunc">
+                {{ __('app.ui.sessions.since', ['time' => $startedAt->translatedFormat('g:i A')]) }}@if ($model->party_size > 1) · {{ __('app.session.party_of', ['count' => $model->party_size]) }}@endif
+            </span>
+            <span class="ls-faint ls-trunc {{ $endingSoon ? 'is-soon' : '' }}">{{ __('app.ui.sessions.ends_at', ['time' => $endsAt->translatedFormat('g:i A')]) }}</span>
+        </div>
     @else
         <div class="ls-session-timing">
         <div class="ls-meter {{ $endingSoon ? 'is-warn' : '' }}" role="progressbar" aria-label="{{ $model->timeRange() }}">
@@ -157,7 +187,20 @@
                 </summary>
                 <ul>
                     @foreach ($items as $item)
-                        <li><span class="ls-trunc">{{ $item->quantity }}× {{ $item->name }}</span><x-ui.money :amount="$item->line_total" /></li>
+                        <li>
+                            <span class="ls-trunc">{{ $item->quantity }}× {{ $item->name }}</span>
+                            <span class="ls-session-item-end">
+                                <x-ui.money :amount="$item->line_total" />
+                                @if ($canSell)
+                                    {{-- Remove from this session's own bill (same endpoints as the products window). --}}
+                                    <button type="button" class="ls-item-remove" data-item-remove
+                                            data-url="{{ $isShared ? '/shared-sessions/'.$model->id.'/items/'.$item->id : '/bookings/'.$model->id.'/items/'.$item->id }}"
+                                            data-name="{{ $item->name }}"
+                                            aria-label="{{ __('app.ui.sessions.remove_item', ['product' => $item->name]) }}"
+                                            title="{{ __('app.ui.sessions.remove_item', ['product' => $item->name]) }}"><x-ui.icon name="trash" /></button>
+                                @endif
+                            </span>
+                        </li>
                     @endforeach
                 </ul>
             </details>
@@ -166,7 +209,7 @@
         @endif
     </div>
 
-    @if ($canSell && $quickProducts->isNotEmpty())
+    @if ($canSell && $quickProducts->isNotEmpty() && ! $needsCheckIn)
         <div class="ls-session-quick">
             <span class="ls-session-quick-label">{{ __('app.ui.sessions.quick_add') }}</span>
             @foreach ($quickProducts as $p)
@@ -178,7 +221,7 @@
     @endif
 
     <div class="ls-session-foot">
-        @if ($canSell)
+        @if ($canSell && ! $needsCheckIn)
             @php $addLabel = __('app.ui.sessions.add_products_aria', ['name' => $customer->name]); @endphp
             @if ($isShared)
                 <x-ui.button variant="ghost" icon="plus" :icon-only="true" :aria-label="$addLabel" :title="__('app.session.add_products')" onclick="openSessionModal({{ $model->id }}, 'products')" />
@@ -192,6 +235,17 @@
             {{-- Price isn't known until checkout (same as a shared session) — reuse the
                  AJAX preview/confirm modal, not the plain-total booking checkout form. --}}
             <x-ui.button variant="tonal" onclick="openSessionModal({{ $model->id }}, 'checkout', 'open-booking')">{!! $checkoutLabel !!}</x-ui.button>
+        @elseif ($needsCheckIn)
+            {{-- The only valid transition for a shared-room reservation — a direct
+                 "completed" checkout is rejected server-side until it's checked in
+                 (BookingController::updateStatus()). Claims the reservation's own
+                 party_size; a plain POST is enough since checkIn() already redirects
+                 back here with a flash message either way. --}}
+            <form method="POST" action="/bookings/{{ $model->id }}/check-in">
+                @csrf
+                <input type="hidden" name="party_size" value="{{ $model->party_size }}">
+                <x-ui.button type="submit" variant="tonal">{{ __('app.ui.sessions.check_in') }}</x-ui.button>
+            </form>
         @else
             <x-ui.button variant="tonal"
                 onclick="openBookingCheckoutModal({{ $model->id }}, '{{ number_format($roomCharge, 2) }}', '{{ number_format($itemsTotal, 2) }}', '{{ number_format($bill, 2) }}', {{ Illuminate\Support\Js::from($customer->name) }}, {{ Illuminate\Support\Js::from($row->room->name) }})">{!! $checkoutLabel !!}</x-ui.button>

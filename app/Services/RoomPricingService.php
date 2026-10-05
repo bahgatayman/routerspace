@@ -179,7 +179,7 @@ class RoomPricingService
         }
 
         $rules = PricingRules::fromStored($session->pricing_snapshot['model'] ?? null, $session->pricing_snapshot['rules'] ?? null);
-        $minutes = round($from->diffInSeconds($closedAt) / 60, 2);
+        $minutes = max(0.0, round($from->diffInSeconds($closedAt) / 60, 2)); // never negative (signed diff)
         $date = $session->session_date?->format('Y-m-d') ?? $session->opened_at->format('Y-m-d');
 
         return $this->quoteRules($rules, max(1, (int) $session->party_size), $minutes, $this->fullDayMinutes($session->room->owner, $date));
@@ -191,7 +191,7 @@ class RoomPricingService
      */
     private function quotePlanSession(SharedSession $session, array $plan, Carbon $closedAt): PriceQuote
     {
-        $used = round($session->opened_at->diffInSeconds($closedAt) / 60, 2);
+        $used = max(0.0, round($session->opened_at->diffInSeconds($closedAt) / 60, 2));
         $planMinutes = (float) $plan['minutes'];
         $price = (float) $plan['price'];
 

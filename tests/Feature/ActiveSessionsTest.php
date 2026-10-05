@@ -116,6 +116,18 @@ class ActiveSessionsTest extends TestCase
             'price_per_hour' => 60, 'total_hours' => 1, 'total_price' => 60, 'status' => 'confirmed',
         ]);
 
+        // Visible before check-in, but not billable: static total_price, no
+        // live-ticking amount, no invoice/items possible yet.
+        $rowsBeforeCheckIn = ActiveSessionsQuery::build($owner->id);
+        $this->assertCount(1, $rowsBeforeCheckIn);
+        $this->assertFalse($rowsBeforeCheckIn->first()->isShared());
+        $this->assertSame($booking->id, $rowsBeforeCheckIn->first()->model->id);
+        $this->assertFalse($booking->invoiceIsEditable());
+
+        $html = $this->actingAs($owner, 'owner')->get('/active-sessions')->getContent();
+        $this->assertStringContainsString(__('app.ui.sessions.check_in'), $html);
+        $this->assertStringNotContainsString('data-ls-rate', $html);
+
         $this->actingAs($owner, 'owner')
             ->post("/bookings/{$booking->id}/check-in", ['party_size' => 1])
             ->assertRedirect(route('active-sessions.index'));
@@ -136,6 +148,77 @@ class ActiveSessionsTest extends TestCase
 
         // 10 minutes @ 60/hr = 10.00, not the raised rate.
         $this->assertEquals(10.0, (float) $session->fresh()->total_price);
+    }
+
+    public function test_a_future_confirmed_shared_booking_does_not_appear(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, 'shared', 60);
+        $user = $this->member($owner);
+
+        Booking::create([
+            'owner_id' => $owner->id, 'room_id' => $room->id, 'hotspot_user_id' => $user->id,
+            'party_size' => 1, 'booking_date' => today()->toDateString(),
+            'start_time' => now()->addHour()->format('H:i'), 'end_time' => now()->addHours(2)->format('H:i'),
+            'price_per_hour' => 60, 'total_hours' => 1, 'total_price' => 60, 'status' => 'confirmed',
+        ]);
+
+        $this->assertCount(0, ActiveSessionsQuery::build($owner->id));
+    }
+
+    public function test_a_confirmed_shared_booking_past_its_end_time_does_not_appear_even_within_no_show_grace(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, 'shared', 60);
+        $user = $this->member($owner);
+        $now = Carbon::parse('2026-09-01 12:00:00');
+        Carbon::setTestNow($now);
+
+        // A 10-minute booking that ended 5 minutes ago — still well inside
+        // the 30-minute no-show grace, but its own end_time has already
+        // passed, which is the sole visibility cutoff (not the grace).
+        Booking::create([
+            'owner_id' => $owner->id, 'room_id' => $room->id, 'hotspot_user_id' => $user->id,
+            'party_size' => 1, 'booking_date' => $now->toDateString(),
+            'start_time' => '11:45', 'end_time' => '11:55',
+            'price_per_hour' => 60, 'total_hours' => 1, 'total_price' => 10, 'status' => 'confirmed',
+        ]);
+
+        $this->assertCount(0, ActiveSessionsQuery::build($owner->id));
+    }
+
+    public function test_a_pending_shared_booking_in_window_does_not_appear(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, 'shared', 60);
+        $user = $this->member($owner);
+
+        Booking::create([
+            'owner_id' => $owner->id, 'room_id' => $room->id, 'hotspot_user_id' => $user->id,
+            'party_size' => 1, 'booking_date' => today()->toDateString(),
+            'start_time' => now()->subMinutes(5)->format('H:i'), 'end_time' => now()->addHour()->format('H:i'),
+            'price_per_hour' => 60, 'total_hours' => 1, 'total_price' => 60, 'status' => 'pending',
+        ]);
+
+        $this->assertCount(0, ActiveSessionsQuery::build($owner->id));
+    }
+
+    public function test_active_sessions_count_includes_a_confirmed_shared_room_booking(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, 'shared', 60);
+        $user = $this->member($owner);
+
+        $this->assertSame(0, ActiveSessionsQuery::count($owner->id));
+
+        Booking::create([
+            'owner_id' => $owner->id, 'room_id' => $room->id, 'hotspot_user_id' => $user->id,
+            'party_size' => 1, 'booking_date' => today()->toDateString(),
+            'start_time' => now()->subMinutes(5)->format('H:i'), 'end_time' => now()->addHour()->format('H:i'),
+            'price_per_hour' => 60, 'total_hours' => 1, 'total_price' => 60, 'status' => 'confirmed',
+        ]);
+
+        $this->assertSame(1, ActiveSessionsQuery::count($owner->id));
     }
 
     public function test_an_in_progress_exclusive_booking_appears_while_future_or_past_ones_do_not(): void

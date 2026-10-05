@@ -512,6 +512,8 @@
     // (an Open Session exclusive booking, which has the identical
     // close-preview/close response shape, so no other branching is needed).
     const sessionBaseUrl = () => currentKind === 'open-booking' ? `/bookings/${currentSessionId}` : `/shared-sessions/${currentSessionId}`;
+    // One-time key per user action (see App\Support\IdempotencyKey).
+    const idemKey = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 
     window.openSessionModal = (sessionId, mode = 'checkout', kind = 'shared') => {
         currentSessionId = sessionId; currentMode = mode; currentKind = kind; itemsChanged = false; lastPreview = null;
@@ -577,20 +579,24 @@
         const btn = $('modal-add-btn');
         const select = $('modal-product');
         const name = select.options[select.selectedIndex].text.split(' — ')[0];
+        if (btn.dataset.busy) return; // a second click while the first add is in flight
+        btn.dataset.busy = '1';
         LS.busy(btn, true);
-        fetch(`/shared-sessions/${currentSessionId}/items`, {
+        // Items go to THIS session's own invoice: /bookings/{id} for an Open
+        // Session booking, /shared-sessions/{id} for a shared tab.
+        fetch(`${sessionBaseUrl()}/items`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Idempotency-Key': idemKey() },
             body: JSON.stringify({ product_id: select.value, quantity: $('modal-qty').value || 1 }),
         }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(() => { itemsChanged = true; $('modal-qty').value = 1; LS.toast(fill(S.added_to_bill, { product: name, name: lastPreview ? lastPreview.user_name : '' })); return loadPreview(); })
           .catch(() => LS.toast(S.action_failed, { tone: 'danger' }))
-          .finally(() => LS.busy(btn, false));
+          .finally(() => { LS.busy(btn, false); delete btn.dataset.busy; });
     };
 
     function sessionRemoveItem(itemId, name, btn) {
         btn.disabled = true;
-        fetch(`/shared-sessions/${currentSessionId}/items/${itemId}`, {
+        fetch(`${sessionBaseUrl()}/items/${itemId}`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
         }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
@@ -601,7 +607,7 @@
     function sessionUpdateItemQty(itemId, newQty, name, btn) {
         if (newQty <= 0) return sessionRemoveItem(itemId, name, btn);
         btn.disabled = true;
-        fetch(`/shared-sessions/${currentSessionId}/items/${itemId}`, {
+        fetch(`${sessionBaseUrl()}/items/${itemId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
             body: JSON.stringify({ quantity: newQty }),
@@ -645,14 +651,16 @@
         const btn = $('booking-add-btn');
         const select = $('booking-modal-product');
         const name = select.options[select.selectedIndex].text.split(' — ')[0];
+        if (btn.dataset.busy) return; // already adding — reload follows
+        btn.dataset.busy = '1';
         LS.busy(btn, true);
         fetch(`/bookings/${currentBookingId}/items`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Idempotency-Key': idemKey() },
             body: JSON.stringify({ product_id: select.value, quantity: $('booking-modal-qty').value || 1 }),
         }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(() => LS.reloadWithToast(fill(S.added_to_bill, { product: name, name: bookingCustomer })))
-          .catch(() => { LS.busy(btn, false); LS.toast(S.action_failed, { tone: 'danger' }); });
+          .catch(() => { delete btn.dataset.busy; LS.busy(btn, false); LS.toast(S.action_failed, { tone: 'danger' }); });
     };
 
     function bookingRemoveItem(itemId, name, btn) {
@@ -691,18 +699,43 @@
     };
     window.closeBookingCheckoutModal = () => LS.close('booking-checkout-modal');
 
+    /* ---------------- Remove a product line from a card (trash icon) ---------------- */
+    document.querySelectorAll('[data-item-remove]').forEach(btn => btn.addEventListener('click', () => {
+        if (btn.dataset.busy) return;
+        btn.dataset.busy = '1';
+        btn.disabled = true;
+        fetch(btn.dataset.url, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        }).then(r => r.json().then(b => { if (!r.ok || !b.success) throw new Error(b.message || ''); }))
+          .then(() => LS.reloadWithToast(fill(S.removed_from_bill, { product: btn.dataset.name })))
+          .catch((e) => { delete btn.dataset.busy; btn.disabled = false; LS.toast((e && e.message) || S.action_failed, { tone: 'danger' }); });
+    }));
+
     /* ---------------- Quick add (one click, one product) ---------------- */
+    // One add per click: while a card's add is in flight (until the page
+    // reloads) its chips are locked, and the request carries a one-time key
+    // so a retried/duplicated request is applied once server-side.
     document.querySelectorAll('.ls-qa[data-qa-kind]').forEach(chip => chip.addEventListener('click', () => {
         const d = chip.dataset;
+        const card = chip.closest('.ls-session-quick') || chip.parentElement;
+        if (card.dataset.busy) return;
+        card.dataset.busy = '1';
+        card.querySelectorAll('.ls-qa').forEach(c => { c.disabled = true; });
         const url = d.qaKind === 'shared' ? `/shared-sessions/${d.qaId}/items` : `/bookings/${d.qaId}/items`;
         chip.classList.add('is-busy');
         fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Idempotency-Key': idemKey() },
             body: JSON.stringify({ product_id: d.qaProduct, quantity: 1 }),
-        }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        }).then(r => r.json().then(b => { if (!r.ok || !b.success) throw new Error(b.message || r.status); return b; }))
           .then(() => LS.reloadWithToast(fill(S.added_to_bill, { product: d.qaName, name: d.qaCustomer })))
-          .catch(() => { chip.classList.remove('is-busy'); LS.toast(S.action_failed, { tone: 'danger' }); });
+          .catch((e) => {
+              chip.classList.remove('is-busy');
+              delete card.dataset.busy;
+              card.querySelectorAll('.ls-qa').forEach(c => { c.disabled = false; });
+              LS.toast(e && e.message && isNaN(e.message) ? e.message : S.action_failed, { tone: 'danger' });
+          });
     }));
 
     // Keep amounts honest for block-billed sessions: refresh the page every 5 minutes

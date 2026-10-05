@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\Room;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * The single source of truth for "is this room available." Both exclusive
@@ -386,23 +387,58 @@ class AvailabilityService
      * be replaced) seats aren't counted against the party actually walking
      * in for it.
      */
+    /**
+     * Canonical "which bookings overlap this instant" primitive, shared by
+     * usedCapacityNow(), OccupancyAnalyticsService::currentOccupancy(), and
+     * ActiveSessionsQuery — the three places that used to hand-roll this
+     * same predicate independently and had already drifted. Deliberately
+     * does NOT apply the no-show-grace rejection itself (see
+     * rejectPastGrace()) — that's a capacity/occupancy-specific business
+     * rule, not part of "do these time windows overlap right now," and
+     * ActiveSessionsQuery's visibility rule intentionally does not apply it
+     * at all (a confirmed shared-room booking stays visible until its own
+     * end_time, not until the no-show grace expires).
+     *
+     * @param  int[]|null  $roomIds  Narrow to these rooms, or null for every room the owner has.
+     * @return Collection<int, Booking>
+     */
+    public function bookingsOverlappingNow(int $ownerId, array $statuses, Carbon $now, ?array $roomIds = null, ?int $excludeBookingId = null): Collection
+    {
+        return Booking::where('owner_id', $ownerId)
+            ->when($roomIds !== null, fn ($q) => $q->whereIn('room_id', $roomIds))
+            ->whereDate('booking_date', $now->format('Y-m-d'))
+            ->whereIn('status', $statuses)
+            ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))
+            ->where('start_time', '<=', $now->format('H:i:s'))
+            ->where('end_time', '>', $now->format('H:i:s'))
+            ->get(['id', 'room_id', 'status', 'booking_date', 'start_time', 'end_time', 'party_size']);
+    }
+
+    /**
+     * Drop a still-'confirmed' (never checked in) shared-room booking once
+     * its no-show grace has elapsed — real-time safety that must not depend
+     * on a periodic sweep having already run. $isShared is a callback (not a
+     * plain bool) since a multi-room caller's bookings may span both shared
+     * and exclusive rooms.
+     *
+     * @param  Collection<int, Booking>  $bookings
+     * @return Collection<int, Booking>
+     */
+    public function rejectPastGrace(Collection $bookings, callable $isShared): Collection
+    {
+        return $bookings->reject(fn (Booking $b) => $isShared($b) && $b->status === 'confirmed' && $b->isPastNoShowGrace());
+    }
+
     public function usedCapacityNow(Room $room, ?int $excludeBookingId = null): int
     {
         $now = Carbon::now();
 
-        $overlappingNow = $room->bookings()
-            ->whereDate('booking_date', $now->format('Y-m-d'))
-            ->whereIn('status', ['pending', 'confirmed'])
-            ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))
-            ->where('start_time', '<=', $now->format('H:i:s'))
-            ->where('end_time', '>', $now->format('H:i:s'))
-            ->get(['id', 'status', 'booking_date', 'start_time', 'party_size']);
+        $overlappingNow = $this->bookingsOverlappingNow($room->owner_id, ['pending', 'confirmed'], $now, [$room->id], $excludeBookingId);
 
         // The live no-show check belongs here, not in usedCapacity(): "right
         // now" is exactly the question of real-time safety this design
         // requires not to depend on the periodic sweep having already run.
-        $bookingUsage = $overlappingNow
-            ->reject(fn ($booking) => $room->isShared() && $booking->status === 'confirmed' && $booking->isPastNoShowGrace())
+        $bookingUsage = $this->rejectPastGrace($overlappingNow, fn (Booking $b) => $room->isShared())
             ->sum('party_size');
 
         $sessionUsage = (int) $room->openSharedSessions()->sum('party_size');

@@ -279,8 +279,21 @@
   document.addEventListener('submit', (e) => { if (e.target.matches('[data-ls-busy]')) LS.busy(e.target.querySelector('[type=submit]')); });
 
   /* ------------------------------------------------------ live values */
+  // Live timers measure against the SERVER's clock: the layout stamps the
+  // server time on <html data-server-now> and we keep the device's offset
+  // from it, so a fast/slow phone or PC can't make timers, bills or
+  // countdowns disagree with what checkout will charge. Offsets under 2s
+  // (page-load latency) are ignored.
+  const SERVER_SKEW = (() => {
+    const s = parseInt(root.dataset.serverNow || '', 10);
+    if (!s) return 0;
+    const skew = s - Date.now();
+    return Math.abs(skew) > 2000 ? skew : 0;
+  })();
+  LS.now = () => Date.now() + SERVER_SKEW;
+
   function tick() {
-    const now = Date.now();
+    const now = LS.now();
     // Navbar clock (#ls-clock) is server-rendered once at page load, so it
     // otherwise goes stale the moment a tab is left open — keep it ticking
     // with the browser's own clock, same "g:i A" shape as the PHP default.
@@ -295,7 +308,8 @@
     document.querySelectorAll('[data-ls-since]').forEach((el) => {
       const secs = (now - Date.parse(el.dataset.lsSince)) / 1000;
       if (el.dataset.lsRate !== undefined) {
-        el.textContent = LS.money((secs / 3600) * parseFloat(el.dataset.lsRate) + parseFloat(el.dataset.lsExtra || 0));
+        // Never negative: a start "after now" bills nothing yet (server does the same).
+        el.textContent = LS.money((Math.max(0, secs) / 3600) * parseFloat(el.dataset.lsRate) + parseFloat(el.dataset.lsExtra || 0));
       } else if (el.dataset.lsSeconds !== undefined) {
         el.textContent = LS.durationSeconds(secs);
       } else {
@@ -314,8 +328,13 @@
       const left = (Date.parse(el.dataset.lsCountdown) - now) / 60000;
       if (left > 0) { el.textContent = el.dataset.lsTemplate.replace(':d', LS.duration(Math.max(1, Math.ceil(left)))); return; }
       el.textContent = el.dataset.lsDone || '';
-      if (!LS._countdownReload && !document.querySelector('.ls-overlay.is-open') && !(document.activeElement && document.activeElement.matches('input, textarea, select'))) {
+      // At most one such reload every 20s, even across reloads — so a clock
+      // mismatch can never turn into a reload loop.
+      let last = 0;
+      try { last = parseInt(sessionStorage.getItem('ls-countdown-reload') || '0', 10); } catch (e) { /* storage blocked */ }
+      if (!LS._countdownReload && Date.now() - last > 20000 && !document.querySelector('.ls-overlay.is-open') && !(document.activeElement && document.activeElement.matches('input, textarea, select'))) {
         LS._countdownReload = true;
+        try { sessionStorage.setItem('ls-countdown-reload', String(Date.now())); } catch (e) { /* storage blocked */ }
         setTimeout(() => location.reload(), 1500);
       }
     });

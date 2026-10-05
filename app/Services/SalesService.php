@@ -21,9 +21,9 @@ class SalesService
     /** The sale attached to a booking, creating it on first use. */
     public function saleForBooking(Booking $booking): Sale
     {
-        return $booking->sale ?? Sale::create([
-            'owner_id' => $booking->owner_id,
-            'booking_id' => $booking->id,
+        // Looked up fresh (not the possibly-stale loaded relation): one sale
+        // per booking, even when two "add product" requests race.
+        return Sale::firstOrCreate(['booking_id' => $booking->id, 'owner_id' => $booking->owner_id], [
             'hotspot_user_id' => $booking->hotspot_user_id,
             'status' => 'completed',
             'sold_at' => now(),
@@ -36,9 +36,8 @@ class SalesService
      */
     public function saleForSharedSession(SharedSession $session): Sale
     {
-        return $session->sale ?? Sale::create([
-            'owner_id' => $session->owner_id,
-            'shared_session_id' => $session->id,
+        // Fresh lookup, one tab per session (see saleForBooking()).
+        return Sale::firstOrCreate(['shared_session_id' => $session->id, 'owner_id' => $session->owner_id], [
             'hotspot_user_id' => $session->hotspot_user_id,
             'status' => 'open',
         ]);

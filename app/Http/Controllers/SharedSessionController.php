@@ -23,6 +23,7 @@ use App\Services\HourPackageService;
 use App\Services\RoomPricingService;
 use App\Services\SalesService;
 use App\Support\Duration;
+use App\Support\IdempotencyKey;
 use App\Support\TenantContext;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -303,15 +304,33 @@ class SharedSessionController extends Controller
             return response()->json(['success' => false, 'message' => __('app.inventory.errors.inactive', ['name' => $product->name])], 422);
         }
 
+        // The same click delivered twice (retry, double submit) adds once.
+        if (! IdempotencyKey::claim($request, 'shared-session-item')) {
+            return response()->json(['success' => true, 'duplicate' => true]);
+        }
+
         // Stock is checked and taken server-side inside the same transaction
-        // (InventoryService); a shortfall rolls the whole add back.
+        // (InventoryService); a shortfall rolls the whole add back. The
+        // status='open' check is repeated inside it against a fresh row, so an
+        // add can never land on a tab that a concurrent close() just finalized.
+        $closed = false;
         try {
-            DB::transaction(function () use ($sales, $session, $product, $validated) {
-                $sale = $sales->saleForSharedSession($session);
+            DB::transaction(function () use ($sales, $session, $product, $validated, &$closed) {
+                $fresh = SharedSession::whereKey($session->id)->where('owner_id', $session->owner_id)
+                    ->where('status', 'open')->lockForUpdate()->first();
+                if (! $fresh) {
+                    $closed = true;
+
+                    return;
+                }
+                $sale = $sales->saleForSharedSession($fresh);
                 $sales->addItem($sale, $product, (int) $validated['quantity']);
             });
         } catch (InsufficientStockException $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+        if ($closed) {
+            return response()->json(['success' => false, 'message' => __('app.sales.invoice_not_editable')], 422);
         }
 
         $this->activityLogger->log('shared_session.item_added', $session, "Added {$validated['quantity']}x {$product->name} to session #{$session->id}");

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 @php $locale = app()->getLocale(); $isRtl = $locale === 'ar'; @endphp
-<html lang="{{ $locale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}" data-theme="light">
+<html lang="{{ $locale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}" data-theme="light" data-server-now="{{ now()->getTimestampMs() }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">

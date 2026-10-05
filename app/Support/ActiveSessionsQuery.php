@@ -8,14 +8,19 @@ use Illuminate\Support\Collection;
 
 /**
  * "Active Sessions" is a read-only projection, not a new domain concept —
- * one row per open SharedSession (shared rooms) plus one row per in-progress
- * Booking (exclusive rooms: meeting/training/office/studio, which have no
- * live/checked-in tracking row of their own, so "in progress" is inferred
- * from status + the current instant falling inside the reserved window,
- * mirroring CompleteExpiredBookings' own "load today's candidates, filter
- * via Booking::endsAt()" pattern since start_time/end_time are bare H:i
- * strings with no cast). Nothing here is stored, summed, or written — it's
- * recomputed on every call, so there is no counter to ever desync.
+ * one row per open SharedSession, plus one row per in-progress Booking
+ * (confirmed, exclusive or shared room alike — in-progress is inferred from
+ * status + the current instant falling inside the reserved window, mirroring
+ * CompleteExpiredBookings' own "load today's candidates, filter via
+ * Booking::endsAt()" pattern since start_time/end_time are bare H:i strings
+ * with no cast), plus one row per open-status Booking (Open Session,
+ * exclusive rooms only). A confirmed shared-room booking appears the instant
+ * its window starts with no check-in required — it stays non-billable
+ * (static, already-quoted total_price; see _card.blade.php's $needsCheckIn
+ * branch) until checkIn() flips its status away from 'confirmed', at which
+ * point it's replaced by the resulting open SharedSession row, never
+ * duplicated. Nothing here is stored, summed, or written — it's recomputed
+ * on every call, so there is no counter to ever desync.
  */
 class ActiveSessionsQuery
 {
@@ -32,10 +37,16 @@ class ActiveSessionsQuery
 
         $now = now();
 
-        $exclusive = Booking::where('owner_id', $ownerId)
+        // Confirmed, currently-in-window bookings — exclusive AND shared rooms
+        // alike. A shared-room reservation appears here the instant its
+        // start_time arrives, with no check-in prerequisite: this row stays
+        // non-billable (price fixed at booking time, no live meter) until
+        // BookingController::checkIn() flips status away from 'confirmed',
+        // at which point it's cleanly replaced by the open SharedSession row
+        // below, never duplicated.
+        $confirmed = Booking::where('owner_id', $ownerId)
             ->where('status', 'confirmed')
             ->whereDate('booking_date', $now->toDateString())
-            ->whereHas('room', fn ($q) => $q->where('type', '!=', 'shared'))
             ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
             ->with(['room.workspace', 'hotspotUser', 'sale.items'])
             ->get()
@@ -53,7 +64,7 @@ class ActiveSessionsQuery
             ->get()
             ->map(fn (Booking $booking) => ActiveSessionRow::fromBooking($booking));
 
-        return $shared->concat($exclusive)->concat($openExclusive)->values();
+        return $shared->concat($confirmed)->concat($openExclusive)->values();
     }
 
     /** Live count only — used by the nav badge, never cached/stored. */

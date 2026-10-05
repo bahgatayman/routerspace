@@ -11,6 +11,7 @@ use App\Models\SharedSession;
 use App\Models\Workspace;
 use App\Services\AvailabilityService;
 use App\Services\OccupancyAnalyticsService;
+use App\Support\ActiveSessionsQuery;
 use Carbon\Carbon;
 use Database\Seeders\FeatureSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -219,6 +220,30 @@ class OccupancyAnalyticsServiceTest extends TestCase
                 "Mismatch for room {$room->name}",
             );
         }
+    }
+
+    /**
+     * The deliberate divergence between occupancy counting and Active
+     * Sessions visibility, now backed by one named primitive
+     * (AvailabilityService::bookingsOverlappingNow()/rejectPastGrace())
+     * instead of three independently hand-written queries that could drift:
+     * a confirmed shared-room booking past its no-show grace stops counting
+     * toward occupancy (business rule: probably a no-show), but Active
+     * Sessions keeps showing it until its own end_time (business rule: still
+     * visible/actionable for check-in, not the owner's internal capacity math).
+     */
+    public function test_occupancy_excludes_past_grace_booking_that_active_sessions_still_shows(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $shared = $this->room($owner, 'shared', 10);
+        // Starts 09:00 (grace expires 09:30, well before "now" 10:00) but
+        // doesn't end until 11:00 — still inside Active Sessions' own
+        // end_time-gated visibility window.
+        $this->booking($owner, $shared, '2026-08-27', '09:00', '11:00', partySize: 4, status: 'confirmed');
+
+        $this->assertSame(0, $this->occupancy->currentOccupancy($owner)['occupied']);
+        $this->assertCount(1, ActiveSessionsQuery::build($owner->id));
     }
 
     // --- availableRoomsNow ---
