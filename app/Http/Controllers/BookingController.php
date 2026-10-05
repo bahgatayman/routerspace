@@ -12,6 +12,7 @@ use App\Http\Controllers\Concerns\GeneratesTimeSlots;
 use App\Models\Booking;
 use App\Models\HotspotUser;
 use App\Models\MemberPackage;
+use App\Models\PackageUsage;
 use App\Models\Product;
 use App\Models\Room;
 use App\Models\RoomPlan;
@@ -72,7 +73,7 @@ class BookingController extends Controller
 
         $rooms = Room::where('owner_id', $ownerId)
             ->where('is_available', true)
-            ->with('workspace')
+            ->with(['workspace', 'activePricingProfiles'])
             ->get();
 
         $users = HotspotUser::where('owner_id', $ownerId)
@@ -108,6 +109,10 @@ class BookingController extends Controller
             ? response()->json(['success' => false, 'message' => $message], 422)
             : back()->withInput()->with('error', $message);
         $ownerId = $owner->id;
+
+        if ($request->input('duration_type') === 'open') {
+            return $this->storeOpenSession($request, $owner, $availability, $packages, $fail);
+        }
 
         $rules = [
             'room_id' => 'required|exists:rooms,id',
@@ -262,6 +267,130 @@ class BookingController extends Controller
         }
 
         return redirect("/bookings/{$booking->id}")->with('success', 'Booking confirmed successfully.');
+    }
+
+    /**
+     * Open Session: an exclusive-room booking that starts right now with no
+     * end time, occupying the room until BookingController::close() prices
+     * and finalizes it. Exclusive rooms only — shared rooms keep using
+     * SharedSessionController::store()'s own walk-in flow unchanged.
+     * Deliberately skips priceBooking()/resolvePackage()/coverWithPackage():
+     * there is nothing to quote yet, and a chosen package is drawn later at
+     * checkout by the actual elapsed time (mirroring
+     * SharedSessionController::store()'s identical "chosen now, drawn at
+     * close" deferral).
+     */
+    private function storeOpenSession(Request $request, $owner, AvailabilityService $availability, HourPackageService $packages, \Closure $fail): RedirectResponse|JsonResponse
+    {
+        $ownerId = $owner->id;
+
+        $rules = [
+            'room_id' => 'required|exists:rooms,id',
+            'hotspot_user_id' => 'required|exists:hotspot_users,id',
+            'room_pricing_profile_id' => 'nullable|integer',
+            'guest_count' => 'nullable|integer|min:1|max:999',
+            'member_package_id' => 'nullable|integer',
+            'notes' => 'nullable|string|max:500',
+        ];
+
+        if ($request->wantsJson()) {
+            $validator = Validator::make($request->all(), $rules);
+            if ($validator->fails()) {
+                return response()->json(['success' => false, 'message' => $validator->errors()->first(), 'errors' => $validator->errors()->toArray()], 422);
+            }
+            $validated = $validator->validated();
+        } else {
+            $validated = $request->validate($rules);
+        }
+
+        $room = Room::where('id', $validated['room_id'])->where('owner_id', $ownerId)->firstOrFail();
+
+        if ($room->isShared()) {
+            return $fail(__('app.booking.duration_type.shared_room_not_allowed'));
+        }
+
+        $hotspotUser = HotspotUser::where('id', $validated['hotspot_user_id'])->where('owner_id', $ownerId)->firstOrFail();
+
+        $profile = null;
+        if (! empty($validated['room_pricing_profile_id'])) {
+            try {
+                $profile = app(RoomPricingService::class)->resolveProfile($room, (int) $validated['room_pricing_profile_id']);
+            } catch (ModelNotFoundException) {
+                return $fail(__('app.pricing_profiles.errors.not_available'));
+            }
+        }
+
+        $packageId = null;
+        if (! empty($validated['member_package_id'])) {
+            $package = MemberPackage::where('owner_id', $ownerId)
+                ->where('hotspot_user_id', $hotspotUser->id)
+                ->whereKey($validated['member_package_id'])
+                ->firstOrFail();
+            if ($reason = $packages->eligibility($package, $room, now()->format('Y-m-d'), 1, 1)) {
+                return $fail(__('app.packages.reasons.'.$reason));
+            }
+            $packageId = $package->id;
+        }
+
+        try {
+            $booking = DB::transaction(function () use ($room, $ownerId, $hotspotUser, $profile, $packageId, $validated, $availability) {
+                $lockedRoom = Room::where('id', $room->id)->lockForUpdate()->firstOrFail();
+
+                if ($availability->availableNow($lockedRoom) < 1) {
+                    return null;
+                }
+
+                $now = now();
+
+                $newBooking = Booking::create([
+                    'owner_id' => $ownerId,
+                    'room_id' => $lockedRoom->id,
+                    'room_pricing_profile_id' => $profile?->id,
+                    'pricing_profile_name' => $profile?->name,
+                    'hotspot_user_id' => $hotspotUser->id,
+                    'party_size' => 1,
+                    'guest_count' => (int) ($validated['guest_count'] ?? 1),
+                    'booking_date' => $now->format('Y-m-d'),
+                    'start_time' => $now->format('H:i'),
+                    'end_time' => null,
+                    'price_per_hour' => $profile ? $profile->price_per_hour : $lockedRoom->price_per_hour,
+                    'billing_unit' => $lockedRoom->billing_unit,
+                    'billing_buffer_minutes' => (int) $lockedRoom->billing_buffer_minutes,
+                    'total_hours' => 0,
+                    'total_price' => 0,
+                    'amount_paid' => 0,
+                    'payment_status' => Booking::PAYMENT_UNPAID,
+                    'member_package_id' => $packageId,
+                    'status' => 'open',
+                    'notes' => $validated['notes'] ?? null,
+                ]);
+
+                if ($availability->usedCapacityNow($lockedRoom) > $lockedRoom->effectiveCapacity()) {
+                    throw new BookingCapacityExceededException;
+                }
+
+                return $newBooking;
+            });
+        } catch (BookingCapacityExceededException) {
+            $booking = null;
+        }
+
+        if (! $booking) {
+            return $fail(__('app.booking.duration_type.room_occupied'));
+        }
+
+        $this->activityLogger->log('booking.open_session_started', $booking, "Started an open session for {$booking->room->name}");
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'booking_id' => $booking->id,
+                'url' => "/bookings/{$booking->id}",
+                'message' => __('app.booking.duration_type.open_started', ['room' => $booking->room->name]),
+            ]);
+        }
+
+        return redirect("/bookings/{$booking->id}")->with('success', __('app.booking.duration_type.open_started', ['room' => $booking->room->name]));
     }
 
     /**
@@ -821,6 +950,224 @@ class BookingController extends Controller
     }
 
     /**
+     * Live preview of what checking out an Open Session would charge right
+     * now. Pure read — never writes, so close() re-running the identical
+     * quote inside its own transaction can never disagree with this.
+     */
+    public function closePreview(int $id, Request $request, RoomPricingService $pricing, CouponService $coupons, HourPackageService $packages): JsonResponse
+    {
+        $booking = Booking::where('id', $id)
+            ->where('owner_id', TenantContext::id())
+            ->where('status', 'open')
+            ->with(['room', 'hotspotUser', 'sale.items', 'memberPackage'])
+            ->firstOrFail();
+
+        $closedAt = now();
+        $quote = $pricing->quoteOpenBooking($booking, $closedAt);
+
+        $duration = $this->formatMinutes($quote->totalMinutes);
+        $billedDuration = abs($quote->totalMinutes - $quote->billedMinutes) > 0.01
+            ? $this->formatMinutes($quote->billedMinutes)
+            : null;
+
+        $itemsTotal = (float) ($booking->sale?->total ?? 0);
+        $subtotal = round($quote->totalPrice + $itemsTotal, 2);
+        $grandTotal = $subtotal;
+
+        $packagePayload = null;
+        if ($pkg = $booking->memberPackage) {
+            $minutes = Duration::packageMinutes($quote->totalMinutes);
+            $covers = $packages->eligibility($pkg, $booking->room, $booking->booking_date->format('Y-m-d'), $minutes, 1) === null;
+            $packagePayload = [
+                'name' => $pkg->name,
+                'hours' => Duration::label($minutes),
+                'remaining' => $pkg->remainingLabel(),
+                'covers' => $covers,
+                'message' => $covers
+                    ? __('app.packages.session_covered', ['name' => $pkg->name, 'hours' => Duration::label($minutes)])
+                    : __('app.packages.session_fallback', ['remaining' => $pkg->remainingLabel()]),
+            ];
+            if ($covers) {
+                $grandTotal = round($itemsTotal, 2);
+            }
+        }
+
+        $couponPayload = null;
+        $couponError = null;
+        if ($request->filled('coupon_code') && ! ($packagePayload['covers'] ?? false)) {
+            try {
+                $coupon = $coupons->find(TenantContext::id(), $request->input('coupon_code'));
+                $breakdown = $coupons->evaluate($coupon, $coupons->cartForOpenBooking($booking, $quote), $booking->hotspot_user_id);
+                $couponPayload = $breakdown->toArray();
+                $grandTotal = $breakdown->total();
+            } catch (CouponRejectedException $e) {
+                $couponError = $e->getMessage();
+            }
+        }
+
+        return response()->json([
+            'session_id' => $booking->id,
+            'user_name' => $booking->hotspotUser->name,
+            'user_phone' => $booking->hotspotUser->phone,
+            'room_name' => $booking->room->name,
+            'party_size' => 1,
+            'start_time' => $booking->startsAt()->format('h:i A'),
+            'end_time' => $closedAt->format('h:i A'),
+            'closed_at_datetime' => $closedAt->toDateTimeString(),
+            'duration' => $duration,
+            'billed_duration' => $billedDuration,
+            'total_minutes' => $quote->totalMinutes,
+            'price_per_hour' => number_format($quote->ratePerHour, 2),
+            'pricing_note' => $quote->note,
+            'total_price' => number_format($quote->totalPrice, 2),
+            'total_price_raw' => $quote->totalPrice,
+            'items' => $this->itemsPayloadFor($booking),
+            'items_total' => number_format($itemsTotal, 2),
+            'subtotal' => number_format($subtotal, 2),
+            'grand_total' => number_format($grandTotal, 2),
+            'coupon' => $couponPayload,
+            'coupon_error' => $couponError,
+            'package' => $packagePayload,
+        ]);
+    }
+
+    /**
+     * Check out an Open Session: atomically claim it (same row, no
+     * Booking::create()/transferToBooking() needed — this booking IS the
+     * live record and any Sale was attached to it the whole time), price it
+     * server-side, draw a chosen package's actual minutes, apply an optional
+     * coupon — mirroring SharedSessionController::close()'s exact shape.
+     */
+    public function close(Request $request, int $id, RoomPricingService $pricing, CouponService $coupons, HourPackageService $packages): JsonResponse
+    {
+        $ownerId = TenantContext::id();
+        $closedAt = now();
+        $couponCode = $request->input('coupon_code');
+
+        if ($couponCode) {
+            $staff = auth('staff')->user();
+            if ($staff && ! $staff->hasPermission('coupons.apply')) {
+                return response()->json(['success' => false, 'message' => __('app.msg.permission_denied')], 403);
+            }
+        }
+
+        try {
+            return DB::transaction(function () use ($id, $ownerId, $closedAt, $pricing, $coupons, $couponCode, $packages) {
+                $claimed = Booking::where('id', $id)
+                    ->where('owner_id', $ownerId)
+                    ->where('status', 'open')
+                    ->update(['status' => 'completed', 'end_time' => $closedAt->format('H:i')]);
+
+                if ($claimed === 0) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => __('app.booking.duration_type.already_closed'),
+                    ], 409);
+                }
+
+                $booking = Booking::where('id', $id)
+                    ->where('owner_id', $ownerId)
+                    ->with(['room', 'hotspotUser', 'sale'])
+                    ->firstOrFail();
+
+                $quote = $pricing->quoteOpenBooking($booking, $closedAt);
+
+                $booking->update([
+                    'total_hours' => $quote->billedHours(),
+                    'total_price' => $quote->totalPrice,
+                    'pricing_note' => $quote->note,
+                    'amount_paid' => $quote->totalPrice,
+                    'payment_status' => Booking::PAYMENT_PAID,
+                ]);
+
+                // Hour package chosen at open: draw the actual elapsed minutes.
+                // Not enough left (or no longer valid) → normal billing as above.
+                $coveredByPackage = false;
+                $pkg = $booking->member_package_id
+                    ? MemberPackage::where('owner_id', $ownerId)->find($booking->member_package_id)
+                    : null;
+                if ($pkg) {
+                    $minutes = Duration::packageMinutes($quote->totalMinutes);
+                    $covered = null;
+                    if ($packages->eligibility($pkg, $booking->room, $booking->booking_date->format('Y-m-d'), $minutes, 1) === null) {
+                        try {
+                            $covered = $packages->consume($pkg, $minutes, PackageUsage::BOOKING_USAGE, $booking);
+                        } catch (InsufficientPackageBalanceException) {
+                            $covered = null; // the guarded UPDATE wrote nothing — safe to fall back
+                        }
+                    }
+
+                    if ($covered) {
+                        $coveredByPackage = true;
+                        $value = (float) $covered->value;
+                        $booking->update([
+                            'payment_method' => Booking::METHOD_PACKAGE,
+                            'member_package_id' => $pkg->id,
+                            'total_price' => $value,
+                            'amount_paid' => $value,
+                            'payment_status' => Booking::PAYMENT_PAID,
+                            'pricing_note' => __('app.packages.covered_note', ['name' => $pkg->name, 'hours' => Duration::label($minutes)]),
+                        ]);
+                    } else {
+                        $booking->update(['notes' => trim($booking->notes.' '.__('app.packages.session_fallback', ['remaining' => $pkg->fresh()->remainingLabel()]))]);
+                    }
+                }
+
+                // A coupon rejection here throws and rolls back the whole
+                // transaction — the booking re-opens (the atomic claim above
+                // is undone too), and no usage row is left behind.
+                if ($couponCode && ! $coveredByPackage) {
+                    $coupon = $coupons->find($ownerId, $couponCode);
+                    $booking->update(['coupon_id' => $coupon->id]);
+                    $coupons->redeemForBooking($booking->fresh(['sale.items']));
+                    $booking->refresh();
+                    $booking->update([
+                        'amount_paid' => $booking->netRoomCharge(),
+                        'payment_status' => Booking::PAYMENT_PAID,
+                    ]);
+                }
+
+                $grandTotal = $booking->fresh('sale')->grandTotal();
+
+                $this->activityLogger->log('booking.open_session_closed', $booking, "Closed open session #{$booking->id}, total ج.م ".number_format($grandTotal, 2));
+
+                return response()->json([
+                    'success' => true,
+                    'message' => __('app.booking.duration_type.checked_out', ['amount' => number_format($grandTotal, 2)]),
+                    'booking_id' => $booking->id,
+                ]);
+            });
+        } catch (CouponRejectedException|CouponUsageLimitExceededException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+    }
+
+    /** 'Xh Ym' for a fractional-minutes value — mirrors SharedSessionController's identical helper. */
+    private function formatMinutes(float $minutes): string
+    {
+        $h = intdiv((int) $minutes, 60);
+        $m = (int) $minutes % 60;
+
+        return ($h > 0 ? $h.'h ' : '').$m.'m';
+    }
+
+    /** Serialise an open booking's line items for the close preview modal. */
+    private function itemsPayloadFor(Booking $booking): array
+    {
+        if (! $booking->sale) {
+            return [];
+        }
+
+        return $booking->sale->items->map(fn (SaleItem $item) => [
+            'id' => $item->id,
+            'name' => $item->name,
+            'quantity' => $item->quantity,
+            'unit_price' => number_format($item->unit_price, 2),
+            'line_total' => number_format($item->line_total, 2),
+        ])->all();
+    }
+
+    /**
      * Delete a mistaken booking and fully reverse everything it caused:
      * restore any Sale's inventory then delete the Sale (its booking_id FK is
      * nullOnDelete, not cascade — leaving it orphaned would keep counting in
@@ -830,10 +1177,11 @@ class BookingController extends Controller
      * itself needs no separate reversal — it's a live sum over bookings/sales,
      * so it's correct again the instant both rows are actually gone.
      *
-     * Blocked outright for a 'checked_in' booking — that status is this
-     * codebase's sole, sufficient marker for "this booking has a currently
-     * open SharedSession" (only checkIn() can set it, nothing transitions a
-     * booking out of it), so deleting one here would corrupt a live session.
+     * Blocked outright for a 'checked_in' or 'open' booking — both are this
+     * codebase's markers for "this booking has a currently active session"
+     * (checked_in via checkIn()'s SharedSession, open via an Open Session —
+     * nothing transitions a booking out of either except closing the
+     * session), so deleting one here would corrupt a live session.
      *
      * The inner atomic re-check (lockForUpdate + a status whitelist) is the
      * same two-phase pattern updateStatus() already uses for its cancel/
@@ -847,6 +1195,10 @@ class BookingController extends Controller
 
         if ($booking->status === 'checked_in') {
             return back()->with('error', __('app.booking.delete_disabled_checked_in'));
+        }
+
+        if ($booking->isOpenSession()) {
+            return back()->with('error', __('app.booking.duration_type.delete_disabled_open'));
         }
 
         try {
@@ -1399,19 +1751,12 @@ class BookingController extends Controller
 
         $booking = Booking::where('owner_id', $ownerId)->with('room')->findOrFail($id);
 
-        // A shared-room reservation only gets a running tab once it's live
-        // (checked_in) or settled (completed) — never while still
-        // pending/confirmed. saleForBooking() creates its Sale as
-        // 'completed' immediately, which would be wrong for a reservation
-        // nobody has arrived for yet, and would risk a second, orphaned
-        // Sale being created later when the session's own tab is
-        // transferred at close (Sale has no unique constraint on booking_id).
-        if ($booking->room->isShared() && ! in_array($booking->status, ['checked_in', 'completed'])) {
+        if (! $booking->invoiceIsEditable()) {
             if ($request->wantsJson()) {
-                return response()->json(['success' => false, 'message' => 'Products can only be added once this reservation is checked in.'], 422);
+                return response()->json(['success' => false, 'message' => __('app.sales.invoice_not_editable')], 422);
             }
 
-            return back()->with('error', 'Products can only be added once this reservation is checked in.');
+            return back()->with('error', __('app.sales.invoice_not_editable'));
         }
 
         $validated = $request->validate([
@@ -1461,29 +1806,45 @@ class BookingController extends Controller
         return $warning ? $redirect->with('warning', $warning) : $redirect;
     }
 
-    /** Remove a line item from this booking's sale. See addItem() for the JSON-response rationale. */
+    /**
+     * Remove a line item from this booking's sale. See addItem() for the
+     * JSON-response rationale. The editability check is re-run against a
+     * freshly locked row inside the transaction (not the pre-transaction
+     * $booking) so this can't race a concurrent checkIn()/updateStatus()
+     * that finalizes the booking between the outer lookup and this write.
+     */
     public function removeItem(Request $request, $id, $itemId, SalesService $sales, CouponService $coupons): RedirectResponse|JsonResponse
     {
         $ownerId = TenantContext::id();
 
-        $booking = Booking::where('owner_id', $ownerId)->with(['sale', 'room'])->findOrFail($id);
+        $booking = Booking::where('owner_id', $ownerId)->with('room')->findOrFail($id);
 
-        if ($booking->room->isShared() && ! in_array($booking->status, ['checked_in', 'completed'])) {
-            if ($request->wantsJson()) {
-                return response()->json(['success' => false, 'message' => 'Products can only be managed once this reservation is checked in.'], 422);
+        $errorMessage = null;
+
+        DB::transaction(function () use ($booking, $ownerId, $itemId, $sales, &$errorMessage) {
+            $locked = Booking::where('id', $booking->id)->where('owner_id', $ownerId)
+                ->with(['sale', 'room'])->lockForUpdate()->firstOrFail();
+
+            if (! $locked->invoiceIsEditable()) {
+                $errorMessage = __('app.sales.invoice_not_editable');
+
+                return;
             }
 
-            return back()->with('error', 'Products can only be managed once this reservation is checked in.');
-        }
+            if (! $locked->sale) {
+                return;
+            }
 
-        if ($booking->sale) {
-            $item = SaleItem::where('id', $itemId)
-                ->where('sale_id', $booking->sale->id)
-                ->firstOrFail();
-
+            $item = SaleItem::where('id', $itemId)->where('sale_id', $locked->sale->id)->firstOrFail();
             $sales->removeItem($item);
 
-            $this->activityLogger->log('booking.item_removed', $booking, "Removed a line item from booking #{$booking->id}");
+            $this->activityLogger->log('booking.item_removed', $locked, "Removed a line item from booking #{$locked->id}");
+        });
+
+        if ($errorMessage) {
+            return $request->wantsJson()
+                ? response()->json(['success' => false, 'message' => $errorMessage], 422)
+                : back()->with('error', $errorMessage);
         }
 
         $warning = $coupons->syncBooking($booking->fresh(['sale.items']));
@@ -1493,6 +1854,66 @@ class BookingController extends Controller
         }
 
         $redirect = back()->with('success', __('app.sales.item_removed'));
+
+        return $warning ? $redirect->with('warning', $warning) : $redirect;
+    }
+
+    /**
+     * Change an existing line item's quantity (0 converges on removeItem()).
+     * Same inside-transaction editability re-check as the hardened
+     * removeItem() above, for the same race-safety reason.
+     */
+    public function updateItemQuantity(Request $request, $id, $itemId, SalesService $sales, CouponService $coupons): RedirectResponse|JsonResponse
+    {
+        $ownerId = TenantContext::id();
+
+        $booking = Booking::where('owner_id', $ownerId)->with('room')->findOrFail($id);
+
+        $validated = $request->validate([
+            'quantity' => 'required|integer|min:0|max:1000',
+        ]);
+
+        $errorMessage = null;
+
+        try {
+            DB::transaction(function () use ($booking, $ownerId, $itemId, $validated, $sales, &$errorMessage) {
+                $locked = Booking::where('id', $booking->id)->where('owner_id', $ownerId)
+                    ->with(['sale', 'room'])->lockForUpdate()->firstOrFail();
+
+                if (! $locked->invoiceIsEditable()) {
+                    $errorMessage = __('app.sales.invoice_not_editable');
+
+                    return;
+                }
+
+                if (! $locked->sale) {
+                    $errorMessage = __('app.sales.item_not_found');
+
+                    return;
+                }
+
+                $item = SaleItem::where('id', $itemId)->where('sale_id', $locked->sale->id)->firstOrFail();
+                $sales->updateItemQuantity($item, (int) $validated['quantity']);
+            });
+        } catch (InsufficientStockException $e) {
+            $errorMessage = $e->getMessage();
+        }
+
+        if ($errorMessage) {
+            return $request->wantsJson()
+                ? response()->json(['success' => false, 'message' => $errorMessage], 422)
+                : back()->with('error', $errorMessage);
+        }
+
+        $this->activityLogger->log('booking.item_quantity_changed', $booking, "Set quantity to {$validated['quantity']} for a line item on booking #{$booking->id}");
+
+        $warning = $coupons->syncBooking($booking->fresh(['sale.items']));
+
+        if ($request->wantsJson()) {
+            return response()->json(array_filter(['success' => true, 'coupon_warning' => $warning]));
+        }
+
+        $redirect = back()->with('success', __('app.sales.item_quantity_updated'));
 
         return $warning ? $redirect->with('warning', $warning) : $redirect;
     }

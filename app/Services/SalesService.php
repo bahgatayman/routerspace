@@ -99,6 +99,35 @@ class SalesService
         });
     }
 
+    /**
+     * Change an existing line's quantity. 0 or below converges on the exact
+     * same removeItem() path — "decrement to zero" and "Remove" must never
+     * be two slightly different deletions. line_total is always recomputed
+     * from the item's own frozen unit_price, never a client value.
+     */
+    public function updateItemQuantity(SaleItem $item, int $newQuantity): void
+    {
+        if ($newQuantity <= 0) {
+            $this->removeItem($item);
+
+            return;
+        }
+
+        DB::transaction(function () use ($item, $newQuantity) {
+            $sale = $item->sale;
+            $delta = $newQuantity - $item->quantity;
+
+            $this->inventory->adjustSaleItemQuantity($item, $delta);
+
+            $item->update([
+                'quantity' => $newQuantity,
+                'line_total' => round((float) $item->unit_price * $newQuantity, 2),
+            ]);
+
+            $this->recalculate($sale);
+        });
+    }
+
     /** Recompute subtotal/total from the line items and persist. */
     public function recalculate(Sale $sale): void
     {

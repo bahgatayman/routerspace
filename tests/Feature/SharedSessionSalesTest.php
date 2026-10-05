@@ -5,16 +5,22 @@ namespace Tests\Feature;
 use App\Models\Booking;
 use App\Models\HotspotUser;
 use App\Models\Owner;
+use App\Models\Permission;
 use App\Models\Plan;
 use App\Models\Product;
+use App\Models\Role;
 use App\Models\Room;
 use App\Models\Sale;
+use App\Models\SaleItem;
 use App\Models\SharedSession;
+use App\Models\Staff;
 use App\Models\Workspace;
 use App\Services\AnalyticsPeriod;
 use App\Services\RevenueAnalyticsService;
 use Carbon\Carbon;
 use Database\Seeders\FeatureSeeder;
+use Database\Seeders\PermissionSeeder;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -173,5 +179,71 @@ class SharedSessionSalesTest extends TestCase
             ->assertNotFound();
 
         $this->assertDatabaseCount('sales', 0);
+    }
+
+    // --- Remove / update on an open tab (and the closed-tab guard) ---
+
+    public function test_an_item_can_be_removed_from_an_open_session_tab(): void
+    {
+        $owner = $this->owner();
+        $session = $this->openSession($owner);
+        $product = $this->product($owner, ['price' => 25]);
+        $this->actingAs($owner, 'owner')->postJson("/shared-sessions/{$session->id}/items", ['product_id' => $product->id, 'quantity' => 2]);
+        $sale = Sale::where('shared_session_id', $session->id)->firstOrFail();
+        $item = $sale->items->first();
+
+        $this->actingAs($owner, 'owner')
+            ->deleteJson("/shared-sessions/{$session->id}/items/{$item->id}")
+            ->assertOk()->assertJson(['success' => true]);
+
+        $this->assertSame(0, $sale->items()->count());
+        $this->assertEquals(0, (float) $sale->fresh()->total);
+    }
+
+    public function test_an_item_cannot_be_removed_or_updated_on_a_closed_session_tab(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-01 12:00:00'));
+        $owner = $this->owner();
+        $session = $this->openSession($owner);
+        $product = $this->product($owner, ['price' => 25]);
+        $this->actingAs($owner, 'owner')->postJson("/shared-sessions/{$session->id}/items", ['product_id' => $product->id, 'quantity' => 2]);
+        $sale = Sale::where('shared_session_id', $session->id)->firstOrFail();
+        $item = $sale->items->first();
+
+        $this->actingAs($owner, 'owner')->postJson("/shared-sessions/{$session->id}/close")->assertOk();
+
+        $this->actingAs($owner, 'owner')
+            ->deleteJson("/shared-sessions/{$session->id}/items/{$item->id}")
+            ->assertStatus(422);
+        $this->actingAs($owner, 'owner')
+            ->patchJson("/shared-sessions/{$session->id}/items/{$item->id}", ['quantity' => 5])
+            ->assertStatus(422);
+
+        $this->assertSame(2, $item->fresh()->quantity, 'the closed tab must be untouched by either attempt');
+    }
+
+    public function test_staff_without_shared_sessions_manage_permission_cannot_update_item_quantity(): void
+    {
+        $this->seed(PermissionSeeder::class);
+        $this->seed(RoleSeeder::class);
+        $owner = $this->owner();
+        $session = $this->openSession($owner);
+        $product = $this->product($owner, ['price' => 25]);
+        $this->actingAs($owner, 'owner')->postJson("/shared-sessions/{$session->id}/items", ['product_id' => $product->id, 'quantity' => 2]);
+        $item = SaleItem::firstOrFail();
+
+        $role = Role::whereNull('owner_id')->where('key', 'receptionist')->firstOrFail();
+        $staff = Staff::create([
+            'owner_id' => $owner->id, 'role_id' => $role->id,
+            'name' => 'Staffer', 'email' => 's'.uniqid().'@t.local', 'password' => 'secret123', 'is_active' => true,
+        ]);
+        $staff->syncPermissionsFromRole();
+        $staff->permissions()->detach(Permission::where('key', 'shared_sessions.manage')->value('id'));
+
+        auth('owner')->logout();
+        $this->actingAs($staff, 'staff')
+            ->patchJson("/shared-sessions/{$session->id}/items/{$item->id}", ['quantity' => 5]);
+
+        $this->assertSame(2, $item->fresh()->quantity);
     }
 }

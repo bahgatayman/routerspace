@@ -94,6 +94,11 @@ class InventoryTest extends TestCase
         return $this->actingAs($owner, 'owner')->postJson("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => $qty]);
     }
 
+    private function updateQty(Owner $owner, Booking $booking, SaleItem $item, int $qty)
+    {
+        return $this->actingAs($owner, 'owner')->patchJson("/bookings/{$booking->id}/items/{$item->id}", ['quantity' => $qty]);
+    }
+
     // ----------------------------------------------------------------- pricing
 
     public function test_prices_profit_and_margin(): void
@@ -149,6 +154,84 @@ class InventoryTest extends TestCase
         $this->actingAs($owner, 'owner')->deleteJson("/bookings/{$booking->id}/items/{$item->id}")->assertOk();
         $this->assertSame(20, $p->fresh()->stock_quantity);
         $this->assertTrue($p->movements()->where('type', InventoryMovement::SALE_REMOVED)->where('quantity_change', 3)->exists());
+    }
+
+    public function test_increasing_a_line_items_quantity_takes_additional_stock(): void
+    {
+        $owner = $this->owner();
+        $p = $this->cola($owner, 20);
+        $booking = $this->booking($owner);
+        $this->sell($owner, $booking, $p, 2)->assertOk();
+        $item = SaleItem::firstOrFail();
+
+        $this->updateQty($owner, $booking, $item, 5)->assertOk()->assertJson(['success' => true]);
+
+        $this->assertSame(15, $p->fresh()->stock_quantity); // 20 - 2 (initial) - 3 (delta)
+        $movement = $p->movements()->where('type', InventoryMovement::SALE)->where('sale_item_id', $item->id)->where('quantity_change', -3)->firstOrFail();
+        $this->assertSame([18, 15], [$movement->previous_quantity, $movement->new_quantity]);
+        $this->assertSame(5, $item->fresh()->quantity);
+    }
+
+    public function test_decreasing_a_line_items_quantity_returns_stock(): void
+    {
+        $owner = $this->owner();
+        $p = $this->cola($owner, 20);
+        $booking = $this->booking($owner);
+        $this->sell($owner, $booking, $p, 5)->assertOk();
+        $item = SaleItem::firstOrFail();
+
+        $this->updateQty($owner, $booking, $item, 2)->assertOk();
+
+        $this->assertSame(18, $p->fresh()->stock_quantity); // 20 - 5 + 3
+        $movement = $p->movements()->where('type', InventoryMovement::SALE_REMOVED)->where('sale_item_id', $item->id)->where('quantity_change', 3)->firstOrFail();
+        $this->assertSame([15, 18], [$movement->previous_quantity, $movement->new_quantity]);
+        $this->assertSame(2, $item->fresh()->quantity);
+    }
+
+    public function test_increasing_quantity_beyond_available_stock_throws_and_writes_nothing(): void
+    {
+        $owner = $this->owner();
+        $p = $this->cola($owner, 5);
+        $booking = $this->booking($owner);
+        $this->sell($owner, $booking, $p, 3)->assertOk();
+        $item = SaleItem::firstOrFail();
+
+        $this->updateQty($owner, $booking, $item, 10)->assertStatus(422);
+
+        $this->assertSame(2, $p->fresh()->stock_quantity, 'unchanged since the initial sale of 3');
+        $this->assertSame(3, $item->fresh()->quantity, 'unchanged — the failed update wrote nothing');
+        $this->assertFalse($p->movements()->where('sale_item_id', $item->id)->where('quantity_change', -7)->exists());
+    }
+
+    public function test_reducing_quantity_to_zero_behaves_identically_to_remove_item(): void
+    {
+        $owner = $this->owner();
+        $p = $this->cola($owner, 20);
+        $booking = $this->booking($owner);
+        $this->sell($owner, $booking, $p, 4)->assertOk();
+        $item = SaleItem::firstOrFail();
+
+        $this->updateQty($owner, $booking, $item, 0)->assertOk();
+
+        $this->assertSame(20, $p->fresh()->stock_quantity);
+        $this->assertSame(0, SaleItem::count());
+        $this->assertTrue($p->movements()->where('type', InventoryMovement::SALE_REMOVED)->where('quantity_change', 4)->exists());
+    }
+
+    public function test_service_type_items_never_touch_inventory_on_quantity_change(): void
+    {
+        $owner = $this->owner();
+        $this->actingAs($owner, 'owner')->post('/products', ['name' => 'Printing', 'type' => 'service', 'price' => 5, 'is_active' => 1]);
+        $service = Product::where('name', 'Printing')->firstOrFail();
+        $booking = $this->booking($owner);
+        $this->sell($owner, $booking, $service, 2)->assertOk();
+        $item = SaleItem::firstOrFail();
+
+        $this->updateQty($owner, $booking, $item, 10)->assertOk();
+        $this->updateQty($owner, $booking, $item, 1)->assertOk();
+
+        $this->assertSame(0, InventoryMovement::count());
+        $this->assertSame(1, $item->fresh()->quantity);
     }
 
     public function test_session_tab_takes_stock_when_added_not_again_at_close(): void

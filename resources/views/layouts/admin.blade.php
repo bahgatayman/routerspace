@@ -5,7 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Link Space Panel Admin - @yield('page-title', __('app.nav.dashboard'))</title>
-    <link rel="icon" type="image/webp" href="/logo.webp">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/logo-icon.png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     @include('partials.theme')
     @if($isRtl)
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">

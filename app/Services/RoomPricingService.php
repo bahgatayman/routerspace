@@ -126,6 +126,41 @@ class RoomPricingService
         return $this->billing->nextChargeAt($from, $now, $session->billing_unit ?? 'minute', (int) ($session->billing_buffer_minutes ?? 0));
     }
 
+    /**
+     * Running or final bill for an open-status exclusive Booking (Open
+     * Session), from its start_time to $closedAt. Mirrors
+     * standardSessionQuote()'s hourly branch exactly, reading the booking's
+     * own snapshotted billing_unit/billing_buffer_minutes/price_per_hour
+     * instead of a SharedSession's — Open Session is hourly/profile pricing
+     * only (never rule-based, never a Custom Plan), so there is no
+     * pricing_snapshot/plan branch to mirror here.
+     */
+    public function quoteOpenBooking(Booking $booking, Carbon $closedAt): PriceQuote
+    {
+        $from = $booking->startsAt();
+        $unit = $booking->billing_unit ?? 'minute';
+        $rate = (float) $booking->price_per_hour;
+        $billed = $this->billing->calculate($from, $closedAt, $unit, $rate, (int) ($booking->billing_buffer_minutes ?? 0));
+
+        // Priced with a profile: say so ("Cinema · EGP 500.00/hr").
+        $note = $booking->pricing_profile_name
+            ? $booking->pricing_profile_name.' · '.Money::format($rate).__('app.common.slash_hr')
+            : null;
+
+        return new PriceQuote(PricingRules::HOURLY, $billed['total_price'], $billed['total_minutes'],
+            $billed['billed_minutes'], $rate, $note, $unit === 'minute' ? $rate : null);
+    }
+
+    /**
+     * When an open booking's running bill next goes up (block billing with
+     * its snapshotted grace buffer) — mirrors nextSessionChargeAt() minus the
+     * plan-snapshot branch (Open Session never has a Custom Plan).
+     */
+    public function nextOpenBookingChargeAt(Booking $booking, Carbon $now): ?Carbon
+    {
+        return $this->billing->nextChargeAt($booking->startsAt(), $now, $booking->billing_unit ?? 'minute', (int) ($booking->billing_buffer_minutes ?? 0));
+    }
+
     /** The session's standard (non-plan) bill for the time between $from and $to. */
     private function standardSessionQuote(SharedSession $session, Carbon $from, Carbon $closedAt): PriceQuote
     {

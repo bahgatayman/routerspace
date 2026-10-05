@@ -28,4 +28,10 @@ final class Duration
     {
         return self::label(abs($minutes));
     }
+
+    /** Minutes a package draw should claim for $totalMinutes elapsed: rounded up, never zero. */
+    public static function packageMinutes(float $totalMinutes): int
+    {
+        return max(1, (int) ceil($totalMinutes - 0.0001));
+    }
 }

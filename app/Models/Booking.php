@@ -53,6 +53,9 @@ class Booking extends Model
         'member_package_id',
         'status',
         'notes',
+        'billing_unit',
+        'billing_buffer_minutes',
+        'pricing_snapshot',
     ];
 
     protected function casts(): array
@@ -67,6 +70,8 @@ class Booking extends Model
             'party_size' => 'integer',
             'guest_count' => 'integer',
             'checked_in_party_size' => 'integer',
+            'billing_buffer_minutes' => 'integer',
+            'pricing_snapshot' => 'array',
         ];
     }
 
@@ -214,12 +219,50 @@ class Booking extends Model
         return $this->netRoomCharge() + (float) ($this->sale?->total ?? 0);
     }
 
+    /**
+     * Whether this booking's Sale (room extras / running tab) can still be
+     * changed via BookingController::addItem()/removeItem()/updateItemQuantity().
+     * Requires $this->room to already be loaded (every call site does).
+     *
+     * Exclusive rooms: open for the whole active lifecycle (pending ->
+     * confirmed -> checked_in); locked once the booking reaches a terminal
+     * state (completed/cancelled/no_show) — those are finalized, paid-or-
+     * closed invoices and must not be edited after the fact.
+     *
+     * Shared rooms: a reservation only gets a running tab once it's live
+     * (checked_in) — never while still pending/confirmed, because
+     * SalesService::saleForBooking() creates its Sale as 'completed'
+     * immediately, which would be wrong for a reservation nobody has
+     * arrived for yet and would risk a second, orphaned Sale when the
+     * session's own tab is transferred at close (Sale has no unique
+     * constraint on booking_id). And not once 'completed' either: a
+     * completed shared-room booking is one whose session has already
+     * closed via SharedSessionController::close() and been fully paid —
+     * exactly the finalized invoice this guard exists to protect, so
+     * unlike an exclusive room, 'completed' is excluded here, not included.
+     */
+    public function invoiceIsEditable(): bool
+    {
+        if ($this->room->isShared()) {
+            return $this->status === 'checked_in';
+        }
+
+        return in_array($this->status, ['pending', 'confirmed', 'checked_in', 'open'], true);
+    }
+
+    /** An exclusive-room booking that started now with no end time yet — see Booking's open-session docs. */
+    public function isOpenSession(): bool
+    {
+        return $this->status === 'open';
+    }
+
     public function statusColor(): string
     {
         return match ($this->status) {
             'pending' => 'yellow',
             'confirmed' => 'blue',
             'checked_in' => 'teal',
+            'open' => 'cyan',
             'completed' => 'green',
             'cancelled' => 'red',
             'no_show' => 'orange',
@@ -242,6 +285,7 @@ class Booking extends Model
             'yellow' => 'bg-yellow-100 text-yellow-800',
             'blue' => 'bg-blue-100 text-blue-800',
             'teal' => 'bg-teal-100 text-teal-800',
+            'cyan' => 'bg-cyan-100 text-cyan-800',
             'green' => 'bg-green-100 text-green-800',
             'red' => 'bg-red-100 text-red-800',
             'orange' => 'bg-orange-100 text-orange-800',
@@ -254,12 +298,19 @@ class Booking extends Model
         return match ($this->status) {
             'checked_in' => 'Checked In',
             'no_show' => 'No Show',
+            'open' => __('app.booking.duration_type.badge'),
             default => ucfirst($this->status),
         };
     }
 
     public function timeRange(): string
     {
+        if ($this->end_time === null) {
+            // Open Session: no end yet — isolated the same way as the normal
+            // range below, for the same RTL-digit-reordering reason.
+            return "\u{2066}".Carbon::parse($this->start_time)->format('h:i A')."\u{2069}";
+        }
+
         $range = Carbon::parse($this->start_time)->format('h:i A')
             .' - '
             .Carbon::parse($this->end_time)->format('h:i A');

@@ -107,6 +107,28 @@
             </div>
         </div>
 
+        @unless ($isEdit)
+            {{-- Booking Type — Open Session skips the whole Reservation/Room/
+                 Payment section below in favor of a minimal room + pricing
+                 profile pick; the server generates start time and computes
+                 the price at checkout. Create-only: an open booking is never
+                 reachable through edit() (edit() only accepts pending/confirmed). --}}
+            <section class="ls-plain-section" id="duration-type-choice">
+                <h2 class="ls-section-label">{{ __('app.booking.duration_type.label') }}</h2>
+                <div class="ls-plan-pick" role="radiogroup" aria-label="{{ __('app.booking.duration_type.label') }}">
+                    <label class="ls-plan-opt is-selected" data-duration-opt="fixed">
+                        <input type="radio" name="duration_type" value="fixed" checked>
+                        <span class="ls-plan-opt-main"><b>{{ __('app.booking.duration_type.fixed') }}</b><small>{{ __('app.booking.duration_type.fixed_hint') }}</small></span>
+                    </label>
+                    <label class="ls-plan-opt" data-duration-opt="open">
+                        <input type="radio" name="duration_type" value="open">
+                        <span class="ls-plan-opt-main"><b>{{ __('app.booking.duration_type.open') }}</b><small>{{ __('app.booking.duration_type.open_hint') }}</small></span>
+                    </label>
+                </div>
+            </section>
+        @endunless
+
+        <div id="fixed-time-sections">
         {{-- 2. Reservation — light section, no card border. --}}
         <section class="ls-plain-section">
             <h2 class="ls-section-label">{{ __('app.booking.summary.title') }}</h2>
@@ -185,6 +207,41 @@
 
         {{-- 4. Payment --}}
         @include('bookings._payment', ['amountPaid' => $initialAmountPaid, 'memberPackageId' => $isEdit ? $booking->member_package_id : ''])
+        </div>{{-- /#fixed-time-sections --}}
+
+        @unless ($isEdit)
+            @php $exclusiveRooms = $rooms->reject(fn ($r) => $r->isShared())->values(); @endphp
+            <div id="open-session-section" hidden>
+                <div class="ls-card">
+                    <div class="ls-card-body">
+                        <h2 class="ls-section-label">{{ __('app.booking.room') }}</h2>
+                        <div class="ls-field">
+                            <select name="room_id" id="open-room-select" class="ls-select" aria-label="{{ __('app.booking.room') }}">
+                                <option value="">{{ __('app.common.select') }}</option>
+                                @foreach ($exclusiveRooms as $r)
+                                    <option value="{{ $r->id }}">{{ $r->workspace?->name }} / {{ $r->name }} — {{ $r->pricingSummary() }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <div class="ls-field" id="open-profile-field" style="margin-top: var(--space-3)" hidden>
+                            <label class="ls-label" for="open-profile-select">{{ __('app.pricing_profiles.section') }}</label>
+                            <select name="room_pricing_profile_id" id="open-profile-select" class="ls-select"></select>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="ls-plain-section">
+                    <div class="ls-reservation-result" style="font-weight: var(--fw-medium)">{{ __('app.booking.duration_type.starts_now') }}</div>
+                    <p class="ls-hint">{{ __('app.booking.duration_type.starts_now_note') }}</p>
+                </section>
+
+                <button type="submit" class="ls-btn ls-btn--primary ls-btn--block">{{ __('app.booking.duration_type.open') }}</button>
+            </div>
+
+            {{-- Profiles per exclusive room, for the plain select above — no new endpoint needed. --}}
+            <script id="open-room-profiles-data" type="application/json">{!! $exclusiveRooms->mapWithKeys(fn ($r) => [$r->id => $r->activePricingProfiles->map(fn ($p) => ['id' => $p->id, 'label' => $p->name.' — '.$p->rateLabel()])->values()])->toJson() !!}</script>
+        @endunless
 
         <details class="ls-plain-section ls-notes-details">
             <summary class="ls-section-label">{{ __('app.placeholder.notes_optional') }}</summary>
@@ -866,3 +923,50 @@
     }
 })();
 </script>
+
+@unless ($isEdit)
+    <script>
+    (function () {
+        const choice = document.getElementById('duration-type-choice');
+        if (!choice) return;
+
+        const fixedSection = document.getElementById('fixed-time-sections');
+        const openSection = document.getElementById('open-session-section');
+        const confirmSummary = document.getElementById('confirm-summary');
+        const bookingDate = document.getElementById('booking_date');
+        const roomRadios = document.querySelectorAll('#room-grid input[name="room_id"]');
+        const roomSelect = document.getElementById('open-room-select');
+        const profileField = document.getElementById('open-profile-field');
+        const profileSelect = document.getElementById('open-profile-select');
+        const profilesByRoom = JSON.parse(document.getElementById('open-room-profiles-data').textContent || '{}');
+
+        function setMode(open) {
+            fixedSection.style.display = open ? 'none' : '';
+            openSection.hidden = !open;
+            if (confirmSummary) confirmSummary.style.display = open ? 'none' : '';
+
+            // display:none exempts a subtree from constraint validation, but
+            // explicitly toggling required/disabled too avoids relying on
+            // that alone across browsers.
+            if (bookingDate) bookingDate.required = ! open;
+            roomRadios.forEach(r => { r.disabled = open; if (open) r.required = false; });
+            roomSelect.required = open;
+
+            choice.querySelectorAll('[data-duration-opt]').forEach(label => {
+                label.classList.toggle('is-selected', label.dataset.durationOpt === (open ? 'open' : 'fixed'));
+            });
+        }
+
+        choice.querySelectorAll('input[name="duration_type"]').forEach(input => {
+            input.addEventListener('change', () => setMode(input.value === 'open'));
+        });
+
+        roomSelect.addEventListener('change', () => {
+            const options = profilesByRoom[roomSelect.value] || [];
+            profileSelect.innerHTML = '<option value="">'+@json(__('app.pricing_profiles.default_option'))+'</option>'
+                + options.map(p => `<option value="${p.id}">${p.label.replace(/</g, '&lt;')}</option>`).join('');
+            profileField.hidden = options.length === 0;
+        });
+    })();
+    </script>
+@endunless

@@ -30,7 +30,12 @@
         .($elapsedH ? str_pad((string) $elapsedM, 2, '0', STR_PAD_LEFT) : $elapsedM).__('app.ui.unit_m')
         .' '.str_pad((string) $elapsedS, 2, '0', STR_PAD_LEFT).__('app.ui.unit_s');
 
-    if ($isShared) {
+    // An Open Session exclusive-room booking bills live, exactly like a
+    // shared session (no known end yet) — it shares that whole branch below,
+    // never the fixed-progress-bar one.
+    $isOpenBooking = ! $isShared && $model->isOpenSession();
+
+    if ($isShared || $isOpenBooking) {
         // $estimate: the RoomPricingService quote for "now" (the same service
         // closePreview()/close() charge with). Only a price that's linear in
         // time gets a live per-second ticker; package prices change in steps,
@@ -39,13 +44,15 @@
         $rate = (float) ($estimate?->liveRatePerHour ?? 0);
         $roomCharge = (float) ($estimate?->totalPrice ?? 0);
         $billingLabel = $estimate?->note ?? __('app.session.billed_per.'.$unit);
-        if ($model->pricing_profile_name && ! $model->pricing_snapshot && ! $model->plan_snapshot) {
+        if ($model->pricing_profile_name && ! $model->pricing_snapshot && ! ($model->plan_snapshot ?? null)) {
             // Pricing profile: "Photography · EGP 15.00/hr · Billed per hour".
             $billingLabel .= ' · '.__('app.session.billed_per.'.$unit);
         }
         // Block billing: when the bill next goes up (grace buffer included) —
         // from the same service that prices preview/close.
-        $nextChargeAt = app(\App\Services\RoomPricingService::class)->nextSessionChargeAt($model, now());
+        $nextChargeAt = $isShared
+            ? app(\App\Services\RoomPricingService::class)->nextSessionChargeAt($model, now())
+            : app(\App\Services\RoomPricingService::class)->nextOpenBookingChargeAt($model, now());
         $grace = $nextChargeAt ? (int) ($model->billing_buffer_minutes ?? 0) : 0;
         $endsAt = null;
         $endingSoon = false;
@@ -84,7 +91,7 @@
             <span class="ls-session-room {{ $isShared ? 'is-shared' : 'is-private' }}">
                 <x-ui.icon name="door" />
                 <span class="ls-trunc">{{ $row->room->name }}</span>
-                <span class="ls-kind">· {{ $isShared ? __('app.ui.sessions.shared') : __('app.ui.sessions.private') }}</span>
+                <span class="ls-kind">· {{ $isShared ? __('app.ui.sessions.shared') : __('app.ui.sessions.private') }}@if ($isOpenBooking) · {{ __('app.booking.duration_type.badge') }}@endif</span>
             </span>
         </div>
         @if ($endingSoon)
@@ -110,7 +117,7 @@
         </div>
     </div>
 
-    @if ($isShared)
+    @if ($isShared || $isOpenBooking)
         <div class="ls-session-meta">
             <span class="ls-trunc">
                 {{ __('app.ui.sessions.since', ['time' => $startedAt->translatedFormat('g:i A')]) }} ·
@@ -181,6 +188,10 @@
         @endif
         @if ($isShared)
             <x-ui.button variant="tonal" onclick="openSessionModal({{ $model->id }}, 'checkout')">{!! $checkoutLabel !!}</x-ui.button>
+        @elseif ($isOpenBooking)
+            {{-- Price isn't known until checkout (same as a shared session) — reuse the
+                 AJAX preview/confirm modal, not the plain-total booking checkout form. --}}
+            <x-ui.button variant="tonal" onclick="openSessionModal({{ $model->id }}, 'checkout', 'open-booking')">{!! $checkoutLabel !!}</x-ui.button>
         @else
             <x-ui.button variant="tonal"
                 onclick="openBookingCheckoutModal({{ $model->id }}, '{{ number_format($roomCharge, 2) }}', '{{ number_format($itemsTotal, 2) }}', '{{ number_format($bill, 2) }}', {{ Illuminate\Support\Js::from($customer->name) }}, {{ Illuminate\Support\Js::from($row->room->name) }})">{!! $checkoutLabel !!}</x-ui.button>

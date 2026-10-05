@@ -310,6 +310,28 @@ class CouponBookingCheckoutTest extends TestCase
         $this->assertSame(20.0, (float) $booking->discount_total);
     }
 
+    public function test_changing_a_products_quantity_resyncs_the_coupons_product_discount(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $member = $this->member($owner);
+        $booking = $this->booking($owner, $room, $member);
+        $product = Product::create(['owner_id' => $owner->id, 'name' => 'Coffee', 'type' => 'product', 'price' => 50, 'is_active' => true, 'track_stock' => false]);
+        $this->coupon($owner, ['applies_to' => Coupon::SCOPE_BOTH]);
+        $this->asGuard($owner, 'owner')->post("/bookings/{$booking->id}/coupon", ['code' => 'SAVE20']);
+        $this->asGuard($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 1]);
+
+        $item = $booking->fresh('sale')->sale->items()->first();
+        $this->asGuard($owner, 'owner')->patch("/bookings/{$booking->id}/items/{$item->id}", ['quantity' => 3]);
+
+        $booking->refresh();
+        // Subtotal now 250 (100 room + 150 product), 20% both => 50 total
+        // discount, split proportionally: room 20, product 30.
+        $this->assertSame(20.0, (float) $booking->discount_total);
+        $this->assertSame(30.0, (float) $booking->sale->discount_total);
+        $this->assertSame(120.0, (float) $booking->sale->total); // 150 - 30
+    }
+
     // --- Tenancy ---
 
     public function test_owner_cannot_apply_another_owners_coupon(): void

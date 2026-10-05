@@ -8,8 +8,10 @@
 
     // Summary strip — computed from every active session, regardless of the room filter.
     $sumItems = $allSessions->sum(fn ($r) => (float) ($r->sale?->total ?? 0));
-    $sumRooms = $allSessions->sum(fn ($r) => $r->isShared() ? (float) ($estimates[$r->model->id]?->totalPrice ?? 0) : (float) $r->model->total_price);
-    $endingSoon = $allSessions->filter(fn ($r) => ! $r->isShared() && now()->diffInMinutes($r->model->endsAt(), false) <= 15)->count();
+    $sumRooms = $allSessions->sum(fn ($r) => ($r->isShared() || $r->model->isOpenSession())
+        ? (float) ($estimates[$r->type.'-'.$r->model->id]?->totalPrice ?? 0)
+        : (float) $r->model->total_price);
+    $endingSoon = $allSessions->filter(fn ($r) => ! $r->isShared() && ! $r->model->isOpenSession() && now()->diffInMinutes($r->model->endsAt(), false) <= 15)->count();
     $seatsUsed = (int) $sharedRooms->sum(fn ($room) => $room->occupied_seats ?? 0);
     $seatsTotal = (int) $sharedRooms->sum('capacity');
 @endphp
@@ -83,7 +85,7 @@
             @foreach ($sessions as $row)
                 @include('active-sessions._card', [
                     'row' => $row,
-                    'estimate' => $row->isShared() ? ($estimates[$row->model->id] ?? 0) : null,
+                    'estimate' => ($row->isShared() || $row->model->isOpenSession()) ? ($estimates[$row->type.'-'.$row->model->id] ?? null) : null,
                 ])
             @endforeach
         </div>
@@ -463,6 +465,9 @@
         usedVsBilled: @json(__('app.session.used_vs_billed')),
         noItems: @json(__('app.sales.no_items_yet')),
         remove: @json(__('app.common.delete')),
+        decrease: @json(__('app.sales.decrease_quantity')),
+        increase: @json(__('app.sales.increase_quantity')),
+        qtyUpdated: @json(__('app.sales.item_quantity_updated')),
         closeFailed: @json(__('app.session.failed_to_close_session')),
         titles: { products: @json(__('app.session.add_products')), checkout: @json(__('app.session.close_session')) },
     };
@@ -474,25 +479,42 @@
 
     window.stepQty = (id, d) => { const i = $(id); i.value = Math.max(1, Math.min(1000, (parseInt(i.value, 10) || 1) + d)); };
 
-    function renderLines(boxId, items, removeFn) {
+    function renderLines(boxId, items, removeFn, updateFn) {
         const box = $(boxId);
         if (!items || !items.length) { box.innerHTML = `<p class="ls-hint" style="margin:6px 0 0">${esc(L.noItems)}</p>`; return; }
         box.innerHTML = items.map(it => `
-            <div class="ls-line">
-                <span class="ls-line-main ls-trunc">${esc(it.name)} <span class="ls-faint">×${esc(it.quantity)}</span></span>
+            <div class="ls-line" data-id="${esc(it.id)}" data-qty="${esc(it.quantity)}">
+                <span class="ls-line-main ls-trunc">${esc(it.name)}</span>
+                <div class="ls-stepper ls-stepper--sm">
+                    <button type="button" class="ls-qty-dec" aria-label="${esc(L.decrease)} ${esc(it.name)}">−</button>
+                    <span class="ls-qty-val">${esc(it.quantity)}</span>
+                    <button type="button" class="ls-qty-inc" aria-label="${esc(L.increase)} ${esc(it.name)}">+</button>
+                </div>
                 <span class="ls-num" style="font-weight:500">${esc(money(it.line_total))}</span>
                 <button type="button" class="ls-remove" data-remove="${esc(it.id)}" data-name="${esc(it.name)}" aria-label="${esc(L.remove)} ${esc(it.name)}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
                 </button>
             </div>`).join('');
         box.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => removeFn(b.dataset.remove, b.dataset.name, b)));
+        if (updateFn) {
+            box.querySelectorAll('.ls-line').forEach(line => {
+                const id = line.dataset.id, name = line.querySelector('.ls-line-main').textContent;
+                line.querySelector('.ls-qty-dec').addEventListener('click', (e) => updateFn(id, parseInt(line.dataset.qty, 10) - 1, name, e.currentTarget));
+                line.querySelector('.ls-qty-inc').addEventListener('click', (e) => updateFn(id, parseInt(line.dataset.qty, 10) + 1, name, e.currentTarget));
+            });
+        }
     }
 
-    /* ---------------- Shared session modal ---------------- */
-    let currentSessionId = null, currentMode = 'checkout', lastPreview = null, itemsChanged = false;
+    /* ---------------- Shared session modal (also serves Open Session bookings) ---------------- */
+    let currentSessionId = null, currentMode = 'checkout', currentKind = 'shared', lastPreview = null, itemsChanged = false;
 
-    window.openSessionModal = (sessionId, mode = 'checkout') => {
-        currentSessionId = sessionId; currentMode = mode; itemsChanged = false; lastPreview = null;
+    // 'shared' -> /shared-sessions/{id}/..., 'open-booking' -> /bookings/{id}/...
+    // (an Open Session exclusive booking, which has the identical
+    // close-preview/close response shape, so no other branching is needed).
+    const sessionBaseUrl = () => currentKind === 'open-booking' ? `/bookings/${currentSessionId}` : `/shared-sessions/${currentSessionId}`;
+
+    window.openSessionModal = (sessionId, mode = 'checkout', kind = 'shared') => {
+        currentSessionId = sessionId; currentMode = mode; currentKind = kind; itemsChanged = false; lastPreview = null;
         $('session-modal-title').textContent = L.titles[mode] || L.titles.checkout;
         $('session-modal-sub').textContent = '';
         const confirmBtn = $('confirm-close-btn');
@@ -507,7 +529,7 @@
     window.retryPreview = () => { show('modal-error', false); show('modal-loading', true); loadPreview(); };
 
     function loadPreview() {
-        return fetch(`/shared-sessions/${currentSessionId}/close-preview`, { headers: { 'Accept': 'application/json' } })
+        return fetch(`${sessionBaseUrl()}/close-preview`, { headers: { 'Accept': 'application/json' } })
             .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
             .then(data => { populatePreview(data); show('modal-loading', false); show('modal-error', false); show('modal-content', true); })
             .catch(() => { show('modal-loading', false); show('modal-content', false); show('modal-error', true); });
@@ -543,7 +565,7 @@
         if (SALES_ENABLED) {
             $('modal-items-total').textContent = money(data.items_total);
             $('modal-grand-total').textContent = money(data.grand_total);
-            renderLines('modal-items', data.items, sessionRemoveItem);
+            renderLines('modal-items', data.items, sessionRemoveItem, sessionUpdateItemQty);
         }
         $('session-modal-note').textContent = fill(S.closes_note, { room: data.room_name });
         const confirmBtn = $('confirm-close-btn');
@@ -576,15 +598,27 @@
           .catch(() => { btn.disabled = false; LS.toast(S.action_failed, { tone: 'danger' }); });
     }
 
+    function sessionUpdateItemQty(itemId, newQty, name, btn) {
+        if (newQty <= 0) return sessionRemoveItem(itemId, name, btn);
+        btn.disabled = true;
+        fetch(`/shared-sessions/${currentSessionId}/items/${itemId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+            body: JSON.stringify({ quantity: newQty }),
+        }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(() => { itemsChanged = true; return loadPreview(); })
+          .catch(() => { btn.disabled = false; LS.toast(S.action_failed, { tone: 'danger' }); });
+    }
+
     window.closeSessionModal = () => LS.close('session-modal');
     // Card totals are rendered server-side, so refresh them if the tab changed.
-    $('session-modal').addEventListener('ls:close', () => { currentSessionId = null; if (itemsChanged) location.reload(); });
+    $('session-modal').addEventListener('ls:close', () => { currentSessionId = null; currentKind = 'shared'; if (itemsChanged) location.reload(); });
 
     $('confirm-close-btn').addEventListener('click', function () {
         if (!currentSessionId) return;
         const btn = this, preview = lastPreview;
         LS.busy(btn, true);
-        fetch(`/shared-sessions/${currentSessionId}/close`, {
+        fetch(`${sessionBaseUrl()}/close`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
         })
@@ -602,7 +636,7 @@
     window.openBookingItemsModal = (bookingId, items, customer) => {
         currentBookingId = bookingId; bookingCustomer = customer || '';
         $('booking-items-modal-title').textContent = customer ? fill(S.products_title, { name: customer }) : L.titles.products;
-        renderLines('booking-modal-items', items, bookingRemoveItem);
+        renderLines('booking-modal-items', items, bookingRemoveItem, bookingUpdateItemQty);
         LS.open('booking-items-modal');
     };
     window.closeBookingItemsModal = () => LS.close('booking-items-modal');
@@ -628,6 +662,18 @@
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
         }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(() => LS.reloadWithToast(fill(S.removed_from_bill, { product: name })))
+          .catch(() => { btn.disabled = false; LS.toast(S.action_failed, { tone: 'danger' }); });
+    }
+
+    function bookingUpdateItemQty(itemId, newQty, name, btn) {
+        if (newQty <= 0) return bookingRemoveItem(itemId, name, btn);
+        btn.disabled = true;
+        fetch(`/bookings/${currentBookingId}/items/${itemId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+            body: JSON.stringify({ quantity: newQty }),
+        }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(() => LS.reloadWithToast(L.qtyUpdated))
           .catch(() => { btn.disabled = false; LS.toast(S.action_failed, { tone: 'danger' }); });
     }
 

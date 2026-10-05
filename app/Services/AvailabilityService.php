@@ -60,7 +60,16 @@ class AvailabilityService
             ->whereDate('booking_date', $date)
             ->whereNotIn('status', ['cancelled', 'no_show'])
             ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))
-            ->where(fn ($q) => $q->where('start_time', '<', $end)->where('end_time', '>', $start))
+            ->where(function ($q) use ($start, $end) {
+                // An Open Session booking has no predictable end (end_time
+                // IS NULL) — 'end_time > $start' would evaluate to SQL NULL
+                // for that row and silently exclude it, so a new booking
+                // could wrongly be allowed to overlap a room that's actually
+                // occupied right now. It has no future end to range-check
+                // against, so it always counts instead.
+                $q->where(fn ($q2) => $q2->where('start_time', '<', $end)->where('end_time', '>', $start))
+                    ->orWhere('status', 'open');
+            })
             ->sum('party_size');
     }
 
@@ -398,7 +407,12 @@ class AvailabilityService
 
         $sessionUsage = (int) $room->openSharedSessions()->sum('party_size');
 
-        return (int) $bookingUsage + $sessionUsage;
+        // Open Session (exclusive rooms only — shared rooms use the open
+        // SharedSession above for exactly this). Existence, not a sum: an
+        // exclusive room's effectiveCapacity() is always 1.
+        $openBookingUsage = (! $room->isShared() && $room->bookings()->where('status', 'open')->exists()) ? 1 : 0;
+
+        return (int) $bookingUsage + $sessionUsage + $openBookingUsage;
     }
 
     /**
@@ -424,7 +438,7 @@ class AvailabilityService
 
         $now = Carbon::now();
 
-        return Booking::where('owner_id', $ownerId)
+        $usage = Booking::where('owner_id', $ownerId)
             ->whereIn('room_id', $exclusiveRoomIds)
             ->whereDate('booking_date', $now->format('Y-m-d'))
             ->whereIn('status', ['pending', 'confirmed'])
@@ -435,6 +449,20 @@ class AvailabilityService
             ->pluck('used_seats', 'room_id')
             ->map(fn ($v) => (int) $v)
             ->all();
+
+        // Open Session bookings have no end_time to compare against "now" —
+        // they always occupy from the moment they're created, so existence
+        // (not a time-window match) is what counts them here.
+        $openRoomIds = Booking::where('owner_id', $ownerId)
+            ->whereIn('room_id', $exclusiveRoomIds)
+            ->where('status', 'open')
+            ->pluck('room_id');
+
+        foreach ($openRoomIds as $roomId) {
+            $usage[$roomId] = ($usage[$roomId] ?? 0) + 1;
+        }
+
+        return $usage;
     }
 
     /** Seats free right now (see usedCapacityNow()). */

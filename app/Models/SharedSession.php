@@ -64,4 +64,10 @@ class SharedSession extends Model
     {
         return $this->hasOne(Sale::class);
     }
+
+    /** Whether this session's running tab can still be changed. */
+    public function invoiceIsEditable(): bool
+    {
+        return $this->status === 'open';
+    }
 }

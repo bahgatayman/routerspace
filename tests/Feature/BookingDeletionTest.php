@@ -202,13 +202,18 @@ class BookingDeletionTest extends TestCase
         $owner = $this->owner();
         $room = $this->room($owner);
         $member = $this->member($owner);
-        $booking = $this->booking($owner, $room, $member, ['status' => 'completed', 'amount_paid' => 100, 'payment_status' => 'paid']);
+        // Items are added while still confirmed (the invoice-editability
+        // guard blocks adding to an already-completed booking) and the
+        // booking is finalized afterward, same as the real check-out flow.
+        $booking = $this->booking($owner, $room, $member, ['status' => 'confirmed']);
 
         $coffee = Product::create(['owner_id' => $owner->id, 'name' => 'Coffee', 'type' => 'product', 'price' => 20, 'purchase_price' => 5, 'track_stock' => true, 'stock_quantity' => 20, 'is_active' => true]);
         $massage = Product::create(['owner_id' => $owner->id, 'name' => 'Massage', 'type' => 'service', 'price' => 50, 'is_active' => true, 'track_stock' => false]);
 
         $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $coffee->id, 'quantity' => 2])->assertRedirect();
         $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $massage->id, 'quantity' => 1])->assertRedirect();
+
+        $booking->update(['status' => 'completed', 'amount_paid' => 100, 'payment_status' => 'paid']);
 
         $this->assertSame(18, $coffee->fresh()->stock_quantity);
         $sale = Sale::where('booking_id', $booking->id)->firstOrFail();
@@ -235,13 +240,14 @@ class BookingDeletionTest extends TestCase
         $member = $this->member($owner);
         $pkg = $this->package($owner, $member);
         $booking = $this->booking($owner, $room, $member, [
-            'status' => 'completed', 'payment_method' => Booking::METHOD_PACKAGE, 'member_package_id' => $pkg->id,
+            'status' => 'confirmed', 'payment_method' => Booking::METHOD_PACKAGE, 'member_package_id' => $pkg->id,
         ]);
         app(HourPackageService::class)->reconcileBooking($booking, $pkg, 60);
 
         $coffee = Product::create(['owner_id' => $owner->id, 'name' => 'Coffee', 'type' => 'product', 'price' => 20, 'purchase_price' => 5, 'track_stock' => true, 'stock_quantity' => 20, 'is_active' => true]);
         $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $coffee->id, 'quantity' => 1])->assertRedirect();
         $sale = Sale::where('booking_id', $booking->id)->firstOrFail();
+        $booking->update(['status' => 'completed']);
 
         $this->mock(SalesService::class, function ($mock) {
             $mock->shouldReceive('removeItem')->once()->andThrow(new \RuntimeException('simulated failure'));
@@ -319,6 +325,19 @@ class BookingDeletionTest extends TestCase
         $response->assertSessionHas('error', __('app.booking.delete_disabled_checked_in'));
         $this->assertNotNull(Booking::find($booking->id));
         $this->assertSame(1, SharedSession::where('booking_id', $booking->id)->where('status', 'open')->count());
+    }
+
+    public function test_an_open_session_booking_cannot_be_deleted(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, 'meeting');
+        $member = $this->member($owner);
+        $booking = $this->booking($owner, $room, $member, ['status' => 'open', 'end_time' => null]);
+
+        $response = $this->actingAs($owner, 'owner')->delete("/bookings/{$booking->id}");
+
+        $response->assertSessionHas('error', __('app.booking.duration_type.delete_disabled_open'));
+        $this->assertNotNull(Booking::find($booking->id));
     }
 
     // --- Idempotency ---

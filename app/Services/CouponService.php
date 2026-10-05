@@ -67,6 +67,19 @@ class CouponService
         return new CouponCart($session->room_id, $quote->totalPrice, $this->productLines($session->sale));
     }
 
+    /**
+     * Like cartForBooking(), but for a still-open Booking (Open Session):
+     * total_price is still 0 until checkout, so the quote just computed by
+     * RoomPricingService::quoteOpenBooking() is the real cart total, not the
+     * booking's own (not-yet-final) column.
+     */
+    public function cartForOpenBooking(Booking $booking, PriceQuote $quote): CouponCart
+    {
+        $booking->loadMissing('sale.items');
+
+        return new CouponCart($booking->room_id, $quote->totalPrice, $this->productLines($booking->sale));
+    }
+
     /** @return array<int, array{product_id: ?int, amount: float}> */
     private function productLines($sale): array
     {

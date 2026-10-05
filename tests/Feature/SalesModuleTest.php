@@ -5,12 +5,19 @@ namespace Tests\Feature;
 use App\Models\Booking;
 use App\Models\HotspotUser;
 use App\Models\Owner;
+use App\Models\Permission;
 use App\Models\Plan;
 use App\Models\Product;
+use App\Models\Role;
 use App\Models\Room;
 use App\Models\Sale;
+use App\Models\Staff;
 use App\Models\Workspace;
+use App\Services\AnalyticsPeriod;
+use App\Services\RevenueAnalyticsService;
 use Database\Seeders\FeatureSeeder;
+use Database\Seeders\PermissionSeeder;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -57,23 +64,37 @@ class SalesModuleTest extends TestCase
         ], $overrides));
     }
 
-    private function bookingFor(Owner $owner): Booking
+    private function bookingFor(Owner $owner, array $overrides = []): Booking
     {
         $ws = Workspace::create(['owner_id' => $owner->id, 'name' => 'Main']);
         $room = Room::create([
             'owner_id' => $owner->id, 'workspace_id' => $ws->id, 'name' => 'R1',
-            'type' => 'meeting', 'capacity' => 4, 'price_per_hour' => 50,
+            'type' => $overrides['room_type'] ?? 'meeting', 'capacity' => 4, 'price_per_hour' => 50,
         ]);
         $user = HotspotUser::create([
             'owner_id' => $owner->id, 'name' => 'Cust', 'phone' => '010'.rand(10000000, 99999999),
             'password' => 'pass1234',
         ]);
 
-        return Booking::create([
+        return Booking::create(array_merge([
             'owner_id' => $owner->id, 'room_id' => $room->id, 'hotspot_user_id' => $user->id,
             'booking_date' => today()->toDateString(), 'start_time' => '10:00', 'end_time' => '12:00',
             'price_per_hour' => 50, 'total_hours' => 2, 'total_price' => 100, 'status' => 'confirmed',
+        ], collect($overrides)->except('room_type')->all()));
+    }
+
+    private function staffWithRole(Owner $owner, string $roleKey): Staff
+    {
+        $this->seed(PermissionSeeder::class);
+        $this->seed(RoleSeeder::class);
+        $role = Role::whereNull('owner_id')->where('key', $roleKey)->firstOrFail();
+        $staff = Staff::create([
+            'owner_id' => $owner->id, 'role_id' => $role->id,
+            'name' => 'Staffer', 'email' => 's'.uniqid().'@t.local', 'password' => 'secret123', 'is_active' => true,
         ]);
+        $staff->syncPermissionsFromRole();
+
+        return $staff;
     }
 
     public function test_owner_can_create_a_product(): void
@@ -192,5 +213,156 @@ class SalesModuleTest extends TestCase
         $owner = $this->owner($this->plan(['features' => ['workspace', 'booking']]));
 
         $this->actingAs($owner, 'owner')->get('/products')->assertRedirect('/dashboard');
+    }
+
+    // --- Quantity update ---
+
+    public function test_updating_quantity_recalculates_line_total_and_sale_total(): void
+    {
+        $owner = $this->owner($this->plan());
+        $booking = $this->bookingFor($owner);
+        $product = $this->product($owner, ['price' => 25]);
+
+        $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 2]);
+        $item = Sale::where('booking_id', $booking->id)->firstOrFail()->items->first();
+
+        $this->actingAs($owner, 'owner')
+            ->patch("/bookings/{$booking->id}/items/{$item->id}", ['quantity' => 5])
+            ->assertRedirect();
+
+        $item->refresh();
+        $this->assertSame(5, $item->quantity);
+        $this->assertEquals(125, (float) $item->line_total); // 25 * 5, never a client value
+        $this->assertEquals(125, (float) $item->sale->fresh()->total);
+    }
+
+    public function test_updating_quantity_to_zero_behaves_like_remove(): void
+    {
+        $owner = $this->owner($this->plan());
+        $booking = $this->bookingFor($owner);
+        $product = $this->product($owner, ['price' => 25]);
+        $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 2]);
+        $sale = Sale::where('booking_id', $booking->id)->firstOrFail();
+        $item = $sale->items->first();
+
+        $this->actingAs($owner, 'owner')->patch("/bookings/{$booking->id}/items/{$item->id}", ['quantity' => 0])->assertRedirect();
+
+        $this->assertSame(0, $sale->items()->count());
+        $this->assertEquals(0, (float) $sale->fresh()->total);
+    }
+
+    // --- Finalized-invoice guard regressions ---
+
+    public function test_invoice_is_not_editable_for_a_completed_cancelled_or_no_show_exclusive_booking(): void
+    {
+        $owner = $this->owner($this->plan());
+
+        foreach (['completed', 'cancelled', 'no_show'] as $status) {
+            $booking = $this->bookingFor($owner, ['status' => $status]);
+            $product = $this->product($owner);
+
+            $this->actingAs($owner, 'owner')
+                ->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 1])
+                ->assertSessionHas('error');
+
+            $this->assertNull($booking->fresh()->sale, "status={$status} should not allow adding an item");
+        }
+    }
+
+    public function test_invoice_is_editable_for_pending_confirmed_or_checked_in_exclusive_bookings(): void
+    {
+        $owner = $this->owner($this->plan());
+
+        foreach (['pending', 'confirmed', 'checked_in'] as $status) {
+            $booking = $this->bookingFor($owner, ['status' => $status]);
+            $product = $this->product($owner);
+
+            $this->actingAs($owner, 'owner')
+                ->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 1])
+                ->assertSessionHasNoErrors();
+
+            $this->assertNotNull($booking->fresh()->sale, "status={$status} should allow adding an item");
+        }
+    }
+
+    public function test_invoice_is_not_editable_for_a_completed_shared_room_booking(): void
+    {
+        $owner = $this->owner($this->plan());
+        $booking = $this->bookingFor($owner, ['room_type' => 'shared', 'status' => 'completed']);
+        $product = $this->product($owner);
+
+        $this->actingAs($owner, 'owner')
+            ->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 1])
+            ->assertSessionHas('error');
+
+        $this->assertNull($booking->fresh()->sale);
+    }
+
+    public function test_invoice_is_editable_for_a_checked_in_shared_room_booking(): void
+    {
+        $owner = $this->owner($this->plan());
+        $booking = $this->bookingFor($owner, ['room_type' => 'shared', 'status' => 'checked_in']);
+        $product = $this->product($owner);
+
+        $this->actingAs($owner, 'owner')
+            ->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 1])
+            ->assertSessionHasNoErrors();
+
+        $this->assertNotNull($booking->fresh()->sale);
+    }
+
+    public function test_staff_without_bookings_edit_permission_cannot_update_item_quantity(): void
+    {
+        $owner = $this->owner($this->plan());
+        $booking = $this->bookingFor($owner);
+        $product = $this->product($owner);
+        $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 2]);
+        $item = Sale::where('booking_id', $booking->id)->firstOrFail()->items->first();
+
+        $staff = $this->staffWithRole($owner, 'receptionist');
+        $staff->permissions()->detach(Permission::where('key', 'bookings.edit')->value('id'));
+
+        auth('owner')->logout();
+        $this->actingAs($staff, 'staff')
+            ->patch("/bookings/{$booking->id}/items/{$item->id}", ['quantity' => 5])
+            ->assertSessionHas('permission_denied');
+
+        $this->assertSame(2, $item->fresh()->quantity);
+    }
+
+    public function test_reducing_an_items_quantity_is_reflected_live_in_sale_revenue(): void
+    {
+        $owner = $this->owner($this->plan());
+        // The booking itself can be any editable status — saleForBooking()
+        // sets the Sale's own status to 'completed' immediately regardless,
+        // which is what saleRevenue() actually sums.
+        $booking = $this->bookingFor($owner, ['status' => 'confirmed']);
+        $product = $this->product($owner, ['price' => 25]);
+        $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 4]);
+        $item = Sale::where('booking_id', $booking->id)->firstOrFail()->items->first();
+
+        $revenue = app(RevenueAnalyticsService::class);
+        $period = AnalyticsPeriod::today();
+        $this->assertSame(100.0, $revenue->saleRevenue($owner, $period));
+
+        $this->actingAs($owner, 'owner')->patch("/bookings/{$booking->id}/items/{$item->id}", ['quantity' => 1]);
+
+        $this->assertSame(25.0, $revenue->saleRevenue($owner->fresh(), $period));
+    }
+
+    public function test_cross_tenant_sale_item_cannot_have_its_quantity_updated(): void
+    {
+        $owner = $this->owner($this->plan());
+        $intruder = $this->owner($this->plan());
+        $booking = $this->bookingFor($owner);
+        $product = $this->product($owner);
+        $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 2]);
+        $item = Sale::where('booking_id', $booking->id)->firstOrFail()->items->first();
+
+        $this->actingAs($intruder, 'owner')
+            ->patch("/bookings/{$booking->id}/items/{$item->id}", ['quantity' => 5])
+            ->assertNotFound();
+
+        $this->assertSame(2, $item->fresh()->quantity);
     }
 }

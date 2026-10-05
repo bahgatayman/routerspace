@@ -104,10 +104,15 @@ class Room extends Model
             ->where('status', '!=', 'cancelled')
             ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))
             ->where(function ($q) use ($startTime, $endTime) {
+                // An Open Session booking (end_time IS NULL) has no future
+                // end to range-check — 'end_time > $startTime' would
+                // silently evaluate to SQL NULL for that row and exclude it,
+                // so it always counts as a conflict instead. See the
+                // identical fix/comment on AvailabilityService::usedCapacity().
                 $q->where(function ($q2) use ($startTime, $endTime) {
                     $q2->where('start_time', '<', $endTime)
                         ->where('end_time', '>', $startTime);
-                });
+                })->orWhere('status', 'open');
             })
             ->exists();
     }

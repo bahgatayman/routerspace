@@ -67,6 +67,42 @@ class InventoryService
         $this->checkAlerts($product);
     }
 
+    /**
+     * A sale line's quantity changed in place (not a full add/remove):
+     * $delta is signed, +N takes N more units, -N gives N back. Mirrors
+     * take()'s guarded decrement for a positive delta and giveBack()'s
+     * "only restore stock this line actually took" safety check for a
+     * negative one, so a line added while tracking was off never wrongly
+     * inflates stock on a later decrease.
+     */
+    public function adjustSaleItemQuantity(SaleItem $item, int $delta): void
+    {
+        $product = $item->product;
+        if (! $product || ! $product->tracksStock() || $delta === 0) {
+            return;
+        }
+
+        if ($delta > 0) {
+            $new = $this->guardedDecrement($product, $delta);
+            $this->record($product, InventoryMovement::SALE, -$delta, $new + $delta, $new, [
+                'sale_id' => $item->sale_id, 'sale_item_id' => $item->id,
+            ]);
+        } else {
+            $tookStock = InventoryMovement::where('sale_item_id', $item->id)->where('type', InventoryMovement::SALE)->exists();
+            if (! $tookStock) {
+                return;
+            }
+
+            $qty = -$delta;
+            $new = $this->increment($product, $qty);
+            $this->record($product, InventoryMovement::SALE_REMOVED, $qty, $new - $qty, $new, [
+                'sale_id' => $item->sale_id, 'sale_item_id' => $item->id,
+            ]);
+        }
+
+        $this->checkAlerts($product);
+    }
+
     /** Owner restock: +$qty. */
     public function restock(Product $product, int $qty, ?string $note = null): InventoryMovement
     {

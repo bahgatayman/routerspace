@@ -222,7 +222,7 @@ class SharedSessionController extends Controller
         // otherwise the session falls back to normal billing (same rule as close()).
         $packagePayload = null;
         if ($pkg = $session->memberPackage) {
-            $minutes = $this->packageMinutes($quote->totalMinutes);
+            $minutes = Duration::packageMinutes($quote->totalMinutes);
             $covers = $packages->eligibility($pkg, $session->room, $session->session_date, $minutes, $session->party_size) === null;
             $packagePayload = [
                 'name' => $pkg->name,
@@ -277,12 +277,6 @@ class SharedSessionController extends Controller
         ]);
     }
 
-    /** Minutes a session draws from a package: its actual elapsed time, rounded up (min 1). */
-    private function packageMinutes(float $totalMinutes): int
-    {
-        return max(1, (int) ceil($totalMinutes - 0.0001));
-    }
-
     /** Add a product to the session's running tab. Routed under feature:booking + feature:sales. */
     public function addItem(Request $request, int $sessionId, SalesService $sales): JsonResponse
     {
@@ -323,25 +317,89 @@ class SharedSessionController extends Controller
         return response()->json(['success' => true]);
     }
 
-    /** Remove a line item from the session's running tab. */
+    /**
+     * Remove a line item from the session's running tab. The status='open'
+     * check is re-run inside the transaction against a fresh row (not just
+     * before it), so this can't race a concurrent close() — close()'s own
+     * atomic status-flip is the serializing side of that race (see its
+     * docblock on why a plain re-SELECT here is enough on SQLite too).
+     */
     public function removeItem(int $sessionId, int $itemId, SalesService $sales): JsonResponse
     {
         $ownerId = TenantContext::id();
 
-        $session = SharedSession::where('id', $sessionId)
-            ->where('owner_id', $ownerId)
-            ->where('status', 'open')
-            ->with('sale')
-            ->firstOrFail();
+        $errorMessage = null;
 
-        if ($session->sale) {
-            $item = SaleItem::where('id', $itemId)
-                ->where('sale_id', $session->sale->id)
-                ->firstOrFail();
+        DB::transaction(function () use ($sessionId, $ownerId, $itemId, $sales, &$errorMessage) {
+            $session = SharedSession::where('id', $sessionId)->where('owner_id', $ownerId)
+                ->where('status', 'open')->with('sale')->first();
 
+            if (! $session) {
+                $errorMessage = __('app.sales.invoice_not_editable');
+
+                return;
+            }
+
+            if (! $session->sale) {
+                return;
+            }
+
+            $item = SaleItem::where('id', $itemId)->where('sale_id', $session->sale->id)->firstOrFail();
             $sales->removeItem($item);
 
             $this->activityLogger->log('shared_session.item_removed', $session, "Removed a line item from session #{$session->id}");
+        });
+
+        if ($errorMessage) {
+            return response()->json(['success' => false, 'message' => $errorMessage], 422);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Change an existing line item's quantity on the session's running tab
+     * (0 converges on removeItem()). Same inside-transaction status='open'
+     * re-check as the hardened removeItem() above.
+     */
+    public function updateItemQuantity(Request $request, int $sessionId, int $itemId, SalesService $sales): JsonResponse
+    {
+        $ownerId = TenantContext::id();
+
+        $validated = $request->validate([
+            'quantity' => 'required|integer|min:0|max:1000',
+        ]);
+
+        $errorMessage = null;
+
+        try {
+            DB::transaction(function () use ($sessionId, $ownerId, $itemId, $validated, $sales, &$errorMessage) {
+                $session = SharedSession::where('id', $sessionId)->where('owner_id', $ownerId)
+                    ->where('status', 'open')->with('sale')->first();
+
+                if (! $session) {
+                    $errorMessage = __('app.sales.invoice_not_editable');
+
+                    return;
+                }
+
+                if (! $session->sale) {
+                    $errorMessage = __('app.sales.item_not_found');
+
+                    return;
+                }
+
+                $item = SaleItem::where('id', $itemId)->where('sale_id', $session->sale->id)->firstOrFail();
+                $sales->updateItemQuantity($item, (int) $validated['quantity']);
+
+                $this->activityLogger->log('shared_session.item_quantity_changed', $session, "Set quantity to {$validated['quantity']} for a line item on session #{$session->id}");
+            });
+        } catch (InsufficientStockException $e) {
+            $errorMessage = $e->getMessage();
+        }
+
+        if ($errorMessage) {
+            return response()->json(['success' => false, 'message' => $errorMessage], 422);
         }
 
         return response()->json(['success' => true]);
@@ -467,7 +525,7 @@ class SharedSessionController extends Controller
                     ? MemberPackage::where('owner_id', $ownerId)->find($session->member_package_id)
                     : null;
                 if ($pkg) {
-                    $minutes = $this->packageMinutes($quote->totalMinutes);
+                    $minutes = Duration::packageMinutes($quote->totalMinutes);
                     $covered = null;
                     if ($packages->eligibility($pkg, $session->room, $session->session_date, $minutes, $session->party_size) === null) {
                         try {

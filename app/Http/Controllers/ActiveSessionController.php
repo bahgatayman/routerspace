@@ -67,12 +67,20 @@ class ActiveSessionController extends Controller
                 ->values();
         }
 
-        // Running-bill estimate for each open shared session, computed with the
-        // same pricing service the close/preview endpoints use — display only,
-        // the authoritative charge is still computed at close time.
+        // Running-bill estimate for each open shared session AND each open
+        // exclusive-room booking (Open Session), computed with the same
+        // pricing service the close/preview endpoints use — display only,
+        // the authoritative charge is still computed at close time. Keyed by
+        // "{type}-{id}", not just id: shared_sessions.id and bookings.id are
+        // independent sequences, so a SharedSession #5 and a Booking #5
+        // would otherwise silently overwrite each other's estimate.
         $now = now();
-        $estimates = $allSessions->filter(fn ($row) => $row->isShared())
-            ->mapWithKeys(fn ($row) => [$row->model->id => $pricing->quoteSession($row->model, $now)]);
+        $estimates = $allSessions->filter(fn ($row) => $row->isShared() || $row->model->isOpenSession())
+            ->mapWithKeys(fn ($row) => [
+                $row->type.'-'.$row->model->id => $row->isShared()
+                    ? $pricing->quoteSession($row->model, $now)
+                    : $pricing->quoteOpenBooking($row->model, $now),
+            ]);
 
         return view('active-sessions.index', [
             'sessions' => $sessions,

@@ -227,6 +227,36 @@ class ActiveSessionsTest extends TestCase
         $this->assertCount(0, ActiveSessionsQuery::build($owner->id));
     }
 
+    public function test_an_open_session_booking_appears_unconditionally_and_renders(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, 'meeting', 100);
+        $user = $this->member($owner);
+
+        $booking = Booking::create([
+            'owner_id' => $owner->id, 'room_id' => $room->id, 'hotspot_user_id' => $user->id,
+            'party_size' => 1, 'booking_date' => today()->toDateString(),
+            'start_time' => now()->subMinutes(20)->format('H:i'), 'end_time' => null,
+            'price_per_hour' => 100, 'billing_unit' => 'minute', 'billing_buffer_minutes' => 0,
+            'total_hours' => 0, 'total_price' => 0, 'amount_paid' => 0, 'payment_status' => 'unpaid',
+            'status' => 'open',
+        ]);
+
+        // No time-window filter at all — unlike a 'confirmed' booking, this
+        // must appear regardless of start/now math, and startedAt()/the card
+        // must never call endsAt() on its null end_time.
+        $rows = ActiveSessionsQuery::build($owner->id);
+        $this->assertCount(1, $rows);
+        $this->assertFalse($rows->first()->isShared());
+        $this->assertSame($booking->id, $rows->first()->model->id);
+        $this->assertTrue($rows->first()->model->isOpenSession());
+
+        $this->actingAs($owner, 'owner')->get('/active-sessions')
+            ->assertOk()
+            ->assertSee($user->name)
+            ->assertSee(__('app.booking.duration_type.badge'));
+    }
+
     public function test_room_filter_only_lists_rooms_with_an_active_session(): void
     {
         $owner = $this->owner();

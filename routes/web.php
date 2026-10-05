@@ -172,6 +172,7 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
         // Running-tab items on an open session need BOTH booking and sales features.
         Route::middleware(['feature:sales', 'permission:shared_sessions.manage'])->group(function () {
             Route::post('/shared-sessions/{session}/items', [SharedSessionController::class, 'addItem'])->name('shared-sessions.items.add');
+            Route::patch('/shared-sessions/{session}/items/{item}', [SharedSessionController::class, 'updateItemQuantity'])->name('shared-sessions.items.update');
             Route::delete('/shared-sessions/{session}/items/{item}', [SharedSessionController::class, 'removeItem'])->name('shared-sessions.items.remove');
         });
 
@@ -214,6 +215,8 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
             Route::put('/bookings/{booking}', [BookingController::class, 'update']);
             Route::post('/bookings/{booking}/check-in', [BookingController::class, 'checkIn']);
             Route::post('/bookings/{booking}/payment', [BookingController::class, 'recordPayment']);
+            Route::get('/bookings/{booking}/close-preview', [BookingController::class, 'closePreview'])->name('bookings.close-preview');
+            Route::post('/bookings/{booking}/close', [BookingController::class, 'close'])->name('bookings.close');
         });
         // Both routes carry the full booking status-machine; the controller
         // enforces the finer edit-vs-cancel distinction per the target status.
@@ -225,6 +228,7 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
         // Attaching products to a booking needs BOTH booking and sales features.
         Route::middleware(['feature:sales', 'permission:bookings.edit'])->group(function () {
             Route::post('/bookings/{booking}/items', [BookingController::class, 'addItem'])->name('bookings.items.add');
+            Route::patch('/bookings/{booking}/items/{item}', [BookingController::class, 'updateItemQuantity'])->name('bookings.items.update');
             Route::delete('/bookings/{booking}/items/{item}', [BookingController::class, 'removeItem'])->name('bookings.items.remove');
         });
 
