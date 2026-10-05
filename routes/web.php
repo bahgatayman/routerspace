@@ -3,6 +3,7 @@
 use App\Http\Controllers\ActiveSessionController;
 use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\BookingController as AdminBookingController;
+use App\Http\Controllers\Admin\BusinessController as AdminBusinessController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\FeatureController;
 use App\Http\Controllers\Admin\FinancialController;
@@ -180,6 +181,7 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
             Route::get('/bookings/calendar', [BookingController::class, 'calendar']);
             Route::get('/bookings/availability', [BookingController::class, 'availabilityLookup']);
             Route::get('/bookings/check-availability', [BookingController::class, 'checkAvailability']);
+            Route::get('/bookings/availability-range', [BookingController::class, 'availabilityRange']);
             Route::get('/bookings/room-options', [BookingController::class, 'roomOptions']);
             Route::get('/bookings', [BookingController::class, 'index']);
         });
@@ -365,7 +367,11 @@ Route::middleware('auth:admin')->prefix('admin')->group(function () {
     Route::get('/owners', [OwnerController::class, 'index']);
     Route::get('/owners/create', [OwnerController::class, 'create']);
     Route::post('/owners', [OwnerController::class, 'store']);
-    Route::get('/owners/{owner}', [OwnerController::class, 'show']);
+    // Business 360°: Overview (default), then tabs. The former owner page is
+    // the Subscription tab.
+    Route::get('/owners/{owner}', [AdminBusinessController::class, 'show'])->whereNumber('owner')->name('admin.business.show');
+    Route::get('/owners/{owner}/subscription', [OwnerController::class, 'show'])->whereNumber('owner')->name('admin.business.subscription');
+    Route::get('/owners/{owner}/audit', [AdminBusinessController::class, 'audit'])->whereNumber('owner')->name('admin.business.audit');
     Route::put('/owners/{owner}/toggle-active', [OwnerController::class, 'toggleActive']);
     Route::get('/owners/{owner}/users', [OwnerController::class, 'users']);
 

@@ -22,12 +22,14 @@ use App\Models\SaleItem;
  */
 class RevenueAnalyticsService
 {
-    public function bookingRevenue(Owner $owner, AnalyticsPeriod $period): float
+    /** $workspaceId (optional) narrows to one location's rooms — same money rule. */
+    public function bookingRevenue(Owner $owner, AnalyticsPeriod $period, ?int $workspaceId = null): float
     {
         return (float) Booking::where('owner_id', $owner->id)
             ->where('status', 'completed')
             ->whereDate('booking_date', '>=', $period->startDate())
             ->whereDate('booking_date', '<=', $period->endDate())
+            ->when($workspaceId, fn ($q, $id) => $q->whereHas('room', fn ($r) => $r->where('workspace_id', $id)))
             ->sum('amount_paid');
     }
 

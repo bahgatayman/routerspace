@@ -3,16 +3,7 @@
 @section('page-title', $owner->business_name . ' - ' . __('app.user.hotspot_users'))
 
 @section('content')
-    <div class="mb-6">
-        <a href="/admin/owners/{{ $owner->id }}" class="text-gray-500 hover:text-gray-700 text-sm flex items-center gap-1 mb-4">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-            </svg>
-            {{ __('app.common.back') }} to {{ $owner->business_name }}
-        </a>
-        <h1 class="text-2xl font-bold text-gray-900">{{ $owner->business_name }} — {{ __('app.user.hotspot_users') }}</h1>
-        <p class="text-sm text-gray-500 mt-1">Read-only view of all hotspot users for this owner.</p>
-    </div>
+    @include('admin.business._header', ['active' => 'members', 'workspace' => null])
 
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div class="overflow-x-auto">

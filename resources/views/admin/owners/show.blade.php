@@ -3,20 +3,13 @@
 @section('page-title', $owner->business_name)
 
 @section('content')
+    @include('admin.business._header', ['active' => 'subscription', 'workspace' => null])
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Owner Info -->
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-lg font-semibold text-gray-800">{{ __('app.admin.owner_info') }}</h2>
-                <form method="POST" action="/admin/owners/{{ $owner->id }}/toggle-active">
-                    @csrf
-                    @method('PUT')
-                    <button type="submit" class="text-sm font-medium px-3 py-1.5 rounded-lg border transition
-                        {{ $owner->is_active ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-green-600 border-green-200 hover:bg-green-50' }}"
-                            onclick="return confirm('{{ $owner->is_active ? __('app.btn.deactivate') : __('app.btn.activate') }} {{ __('app.admin.owner') }}?')">
-                        {{ $owner->is_active ? __('app.btn.deactivate') : __('app.btn.activate') }}
-                    </button>
-                </form>
             </div>
             <dl class="space-y-3 text-sm">
                 <div class="flex justify-between">
@@ -231,7 +224,7 @@
                                 <td class="px-4 py-3 text-gray-600">{{ $sub->starts_at->format('Y-m-d') }}</td>
                                 <td class="px-4 py-3 text-gray-600">{{ $sub->expires_at->format('Y-m-d') }}</td>
                                 <td class="px-4 py-3 text-gray-500 max-w-[200px] truncate">{{ $sub->notes ?? '—' }}</td>
-                                <td class="px-4 py-3">{{ $sub->admin->name }}</td>
+                                <td class="px-4 py-3">{{ $sub->admin?->name ?? '—' }}</td>
                                 <td class="px-4 py-3 text-gray-500">{{ $sub->created_at->format('Y-m-d') }}</td>
                             </tr>
                         @endforeach

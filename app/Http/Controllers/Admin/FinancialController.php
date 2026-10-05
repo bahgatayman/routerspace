@@ -5,13 +5,14 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Owner;
 use App\Models\Subscription;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 
 class FinancialController extends Controller
 {
     public function index(Request $request)
     {
-        $year  = $request->get('year', now()->year);
+        $year = $request->get('year', now()->year);
         $month = $request->get('month');
 
         $totalRevenue = Subscription::where('amount_paid', '>', 0)->sum('amount_paid');
@@ -33,14 +34,16 @@ class FinancialController extends Controller
             ->groupBy('month')
             ->orderBy('month')
             ->get()
-            ->keyBy('month');
+            // strftime returns '01'..'12' — key by int so ->get(1..12) finds Jan–Sep too.
+            ->keyBy(fn ($row) => (int) $row->month);
 
-        $monthlyData = collect(range(1, 12))->map(function($m) use ($monthlyBreakdown) {
+        $monthlyData = collect(range(1, 12))->map(function ($m) use ($monthlyBreakdown) {
             $data = $monthlyBreakdown->get($m);
+
             return [
-                'month'    => $m,
-                'label'    => \Carbon\Carbon::create()->month($m)->format('M'),
-                'revenue'  => $data?->revenue ?? 0,
+                'month' => $m,
+                'label' => Carbon::create()->month($m)->format('M'),
+                'revenue' => $data?->revenue ?? 0,
                 'renewals' => $data?->renewals ?? 0,
             ];
         });

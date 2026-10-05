@@ -14,7 +14,7 @@
             <div>
                 <span class="text-xs text-gray-500 uppercase tracking-wider">{{ __('app.admin.owner') }}</span>
                 <p class="mt-1">
-                    <a href="/admin/owners/{{ $workspace->owner_id }}" class="text-blue-600 hover:underline text-sm">
+                    <a href="/admin/owners/{{ $workspace->owner_id }}?workspace={{ $workspace->id }}" class="text-blue-600 hover:underline text-sm">
                         {{ $workspace->owner->business_name }}
                     </a>
                 </p>

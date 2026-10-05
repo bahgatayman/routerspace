@@ -9,9 +9,6 @@
         <p class="text-sm text-gray-500 mt-1">{{ __('app.admin_notif.subtitle') }}</p>
     </div>
 
-    @if (session('error'))
-        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">{{ session('error') }}</div>
-    @endif
     @if ($errors->any())
         <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
             @foreach ($errors->all() as $error)<p class="text-sm">{{ $error }}</p>@endforeach

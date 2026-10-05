@@ -9,9 +9,7 @@
     <script>(function(){var r=document.documentElement;try{var p=localStorage.getItem('ls-theme')||'system';var d=p==='dark'||(p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);r.dataset.theme=d?'dark':'light';r.dataset.themePref=p;if(localStorage.getItem('ls-nav')==='collapsed')r.dataset.nav='collapsed';}catch(e){}})();</script>
     <meta name="color-scheme" content="light dark">
     <title>Link Space Panel - {{ $owner->business_name ?? __('app.auth.linkspace') }}</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/logo-icon.png">
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    @include('partials.favicon')
     @include('partials.theme')
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Notification;
 use App\Models\Owner;
+use App\Services\AdminAuditLogger;
 use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -12,9 +13,7 @@ use Illuminate\Support\Str;
 
 class NotificationController extends Controller
 {
-    public function __construct(private NotificationService $notifications)
-    {
-    }
+    public function __construct(private NotificationService $notifications) {}
 
     /** Compose form + recent broadcast history. */
     public function index()
@@ -31,10 +30,10 @@ class NotificationController extends Controller
                 $first = $group->first();
 
                 return (object) [
-                    'title'      => $first->title,
-                    'body'       => $first->body,
-                    'level'      => $first->level,
-                    'sent_at'    => $first->created_at,
+                    'title' => $first->title,
+                    'body' => $first->body,
+                    'level' => $first->level,
+                    'sent_at' => $first->created_at,
                     'recipients' => $group->count(),
                     'read_count' => $group->whereNotNull('read_at')->count(),
                 ];
@@ -50,12 +49,12 @@ class NotificationController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'title'       => ['required', 'string', 'max:120'],
-            'body'        => ['nullable', 'string', 'max:1000'],
-            'level'       => ['required', 'in:info,success,warning,danger'],
-            'action_url'  => ['nullable', 'string', 'max:255'],
-            'target'      => ['required', 'in:all,active,selected'],
-            'owner_ids'   => ['required_if:target,selected', 'array'],
+            'title' => ['required', 'string', 'max:120'],
+            'body' => ['nullable', 'string', 'max:1000'],
+            'level' => ['required', 'in:info,success,warning,danger'],
+            'action_url' => ['nullable', 'string', 'max:255'],
+            'target' => ['required', 'in:all,active,selected'],
+            'owner_ids' => ['required_if:target,selected', 'array'],
             'owner_ids.*' => ['integer', 'exists:owners,id'],
         ]);
 
@@ -69,18 +68,22 @@ class NotificationController extends Controller
         }
 
         // One shared reference per broadcast so history can group recipients together.
-        $batch = 'admin:' . now()->format('YmdHis') . ':' . Str::random(6);
+        $batch = 'admin:'.now()->format('YmdHis').':'.Str::random(6);
 
         foreach ($owners as $owner) {
             $this->notifications->notify($owner, [
-                'type'       => 'admin_message',
-                'level'      => $validated['level'],
-                'title'      => $validated['title'],
-                'body'       => $validated['body'] ?? null,
+                'type' => 'admin_message',
+                'level' => $validated['level'],
+                'title' => $validated['title'],
+                'body' => $validated['body'] ?? null,
                 'action_url' => ($validated['action_url'] ?? null) ?: null,
-                'reference'  => $batch,
+                'reference' => $batch,
             ]);
         }
+
+        app(AdminAuditLogger::class)->log('notification.broadcast', $owners->count() === 1 ? $owners->first() : null,
+            "Sent notification '{$validated['title']}' to {$owners->count()} business(es)",
+            ['target' => $validated['target'], 'recipients' => $owners->count(), 'reference' => $batch]);
 
         return back()->with('success', __('app.admin_notif.sent', ['count' => $owners->count()]));
     }

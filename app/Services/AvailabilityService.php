@@ -31,6 +31,12 @@ class AvailabilityService
 
     public const OPERATING_END = '23:30';
 
+    /** Booking statuses that never hold capacity (everything else does). */
+    public const NON_BLOCKING_STATUSES = ['cancelled', 'no_show'];
+
+    /** Longest date range rangeReport() answers in one call. */
+    public const MAX_RANGE_DAYS = 31;
+
     public function __construct(private BusinessHoursService $businessHours) {}
 
     /**
@@ -59,7 +65,7 @@ class AvailabilityService
         // silently fails to match on engines without native DATE coercion.
         return (int) $room->bookings()
             ->whereDate('booking_date', $date)
-            ->whereNotIn('status', ['cancelled', 'no_show'])
+            ->whereNotIn('status', self::NON_BLOCKING_STATUSES)
             ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))
             ->where(function ($q) use ($start, $end) {
                 // An Open Session booking has no predictable end (end_time
@@ -237,6 +243,160 @@ class AvailabilityService
         }
 
         return $merged;
+    }
+
+    /**
+     * Multi-day availability for the same daily window ($start → $end) on
+     * every date from $from to $to, for each room — one query for all of it.
+     *
+     * Uses exactly usedCapacity()/availabilityForRange()'s rules (same
+     * non-blocking statuses, same "start < end AND end > start" overlap with
+     * touching bounds allowed, Open Session bookings always counting on
+     * their date, Room::effectiveCapacity() for exclusive vs shared) plus
+     * BusinessHoursService for working hours — `remaining` per day is the
+     * very number store() would check, so this page can never disagree with
+     * an actual booking attempt. On top it explains *why*: the conflicting
+     * bookings and a free/booked split of the requested window.
+     *
+     * @param  Collection<int, Room>  $rooms  owner-scoped by the caller
+     * @return array<int, array<string, mixed>> one entry per room
+     */
+    public function rangeReport(Collection $rooms, string $from, string $to, string $start, string $end, int $partySize = 1): array
+    {
+        $dates = [];
+        for ($d = Carbon::parse($from)->startOfDay(), $last = Carbon::parse($to)->startOfDay(); $d->lte($last); $d->addDay()) {
+            $dates[] = $d->toDateString();
+        }
+        if (! $rooms->count() || ! $dates) {
+            return [];
+        }
+
+        $winStart = $this->toMinutes($start);
+        $winEnd = $this->toMinutes($end);
+        $today = now()->toDateString();
+        $owner = $rooms->first()->owner;
+
+        // Every booking that could matter, for every room and day, in one query.
+        $bookings = Booking::whereIn('room_id', $rooms->pluck('id'))
+            ->whereDate('booking_date', '>=', $dates[0])
+            ->whereDate('booking_date', '<=', end($dates))
+            ->whereNotIn('status', self::NON_BLOCKING_STATUSES)
+            ->with('hotspotUser:id,name')
+            ->orderBy('start_time')
+            ->get(['id', 'room_id', 'hotspot_user_id', 'booking_date', 'start_time', 'end_time', 'party_size', 'status'])
+            ->groupBy(fn (Booking $b) => $b->room_id.'|'.$b->booking_date->toDateString());
+
+        // Working hours: same answer for every room on a given date.
+        $open = [];
+        foreach ($dates as $date) {
+            $open[$date] = $this->businessHours->isWithinWorkingHours($owner, $date, $start, $end);
+        }
+
+        $report = [];
+        foreach ($rooms as $room) {
+            $capacity = $room->effectiveCapacity();
+            $needed = $room->isShared() ? max(1, $partySize) : 1;
+            $days = [];
+
+            foreach ($dates as $date) {
+                // Exactly usedCapacity()'s overlap rule, applied in memory.
+                $overlapping = ($bookings[$room->id.'|'.$date] ?? collect())->filter(function (Booking $b) use ($winStart, $winEnd) {
+                    if ($b->status === 'open' || $b->end_time === null) {
+                        return true;
+                    }
+
+                    return $this->toMinutes((string) $b->start_time) < $winEnd && $this->toMinutes((string) $b->end_time) > $winStart;
+                })->values();
+
+                $used = (int) $overlapping->sum('party_size');
+                $remaining = max(0, $capacity - $used);
+
+                $status = match (true) {
+                    $date < $today => 'past',
+                    ! $open[$date] => 'closed',
+                    $remaining >= $needed => $overlapping->isEmpty() ? 'available' : 'limited',
+                    default => 'unavailable',
+                };
+
+                $days[] = [
+                    'date' => $date,
+                    'status' => $status,
+                    'bookable' => in_array($status, ['available', 'limited'], true),
+                    'capacity' => $capacity,
+                    'used' => $used,
+                    'remaining' => $remaining,
+                    'conflicts' => $overlapping->map(fn (Booking $b) => [
+                        'booking_id' => $b->id,
+                        'start' => substr((string) $b->start_time, 0, 5),
+                        'end' => $b->end_time === null ? null : substr((string) $b->end_time, 0, 5),
+                        'status' => $b->status,
+                        'customer' => $b->hotspotUser?->name,
+                        'party_size' => (int) $b->party_size,
+                        // Minutes of the requested window this booking takes.
+                        'overlap_minutes' => max(0, min($winEnd, $b->end_time === null ? $winEnd : $this->toMinutes((string) $b->end_time))
+                            - max($winStart, $this->toMinutes((string) $b->start_time))),
+                    ])->all(),
+                    'segments' => $this->windowSegments($overlapping, $winStart, $winEnd, $capacity),
+                ];
+            }
+
+            $bookable = collect($days)->where('bookable', true)->count();
+            $report[] = [
+                'room_id' => $room->id,
+                'room_name' => $room->name,
+                'workspace' => $room->workspace?->name,
+                'type' => $room->type,
+                'type_label' => $room->typeLabel(),
+                'is_shared' => $room->isShared(),
+                'capacity' => $capacity,
+                'days_total' => count($days),
+                'days_available' => $bookable,
+                'conflict_days' => collect($days)->where('status', 'unavailable')->count(),
+                'all_available' => $bookable === count($days),
+                'days' => $days,
+            ];
+        }
+
+        return $report;
+    }
+
+    /**
+     * The requested window split at every booking edge: each piece with the
+     * capacity used in it (a sweep like freeBusyForDay(), clipped to the
+     * window), adjacent pieces with the same usage merged.
+     *
+     * @return array<int, array{start: string, end: string, used: int, available: int}>
+     */
+    private function windowSegments(Collection $overlapping, int $winStart, int $winEnd, int $capacity): array
+    {
+        $points = collect([$winStart, $winEnd]);
+        foreach ($overlapping as $b) {
+            $points->push(max($winStart, min($winEnd, $this->toMinutes((string) $b->start_time))));
+            if ($b->end_time !== null) {
+                $points->push(max($winStart, min($winEnd, $this->toMinutes((string) $b->end_time))));
+            }
+        }
+        $points = $points->unique()->sort()->values();
+
+        $segments = [];
+        for ($i = 0; $i < $points->count() - 1; $i++) {
+            [$a, $z] = [$points[$i], $points[$i + 1]];
+            $used = (int) $overlapping->filter(function ($b) use ($a, $z) {
+                $bs = $this->toMinutes((string) $b->start_time);
+                $be = $b->end_time === null ? 24 * 60 : $this->toMinutes((string) $b->end_time);
+
+                return $bs < $z && $be > $a;
+            })->sum('party_size');
+
+            $last = end($segments);
+            if ($last !== false && $last['used'] === $used) {
+                $segments[array_key_last($segments)]['end'] = $this->fromMinutes($z);
+            } else {
+                $segments[] = ['start' => $this->fromMinutes($a), 'end' => $this->fromMinutes($z), 'used' => $used, 'available' => max(0, $capacity - $used)];
+            }
+        }
+
+        return $segments;
     }
 
     /** Minutes since midnight for an 'H:i' or 'H:i:s' time string, or the '24:00'/'24:00:00' sentinel. */

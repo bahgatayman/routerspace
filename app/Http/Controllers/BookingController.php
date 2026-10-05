@@ -1368,6 +1368,66 @@ class BookingController extends Controller
         return view('bookings.availability', compact('rooms', 'timeSlots'));
     }
 
+    /**
+     * Check Availability for one day or a date range, for one room or all of
+     * them: one request, one AvailabilityService::rangeReport() — per room,
+     * per day, what's free and exactly which bookings block what.
+     */
+    public function availabilityRange(Request $request, AvailabilityService $availability): JsonResponse
+    {
+        $ownerId = TenantContext::id();
+
+        $validator = Validator::make($request->all(), [
+            'from' => 'required|date_format:Y-m-d',
+            'to' => 'nullable|date_format:Y-m-d|after_or_equal:from',
+            'start_time' => 'required|date_format:H:i',
+            'end_time' => 'required|date_format:H:i|after:start_time',
+            'party_size' => 'nullable|integer|min:1|max:999',
+            'room_id' => 'nullable|integer',
+        ], [
+            'to.after_or_equal' => __('app.availability.errors.range_order'),
+            'end_time.after' => __('app.availability.errors.time_order'),
+        ]);
+        $validator->after(function ($v) use ($request) {
+            if ($v->errors()->isNotEmpty()) {
+                return; // a malformed date is already reported — don't parse it
+            }
+            $from = $request->input('from');
+            $to = $request->input('to') ?: $from;
+            if ($from && $to && strtotime($to) >= strtotime($from)
+                && Carbon::parse($from)->diffInDays(Carbon::parse($to)) + 1 > AvailabilityService::MAX_RANGE_DAYS) {
+                $v->errors()->add('to', __('app.availability.errors.range_too_long', ['max' => AvailabilityService::MAX_RANGE_DAYS]));
+            }
+        });
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => $validator->errors()->first(), 'errors' => $validator->errors()->toArray()], 422);
+        }
+        $v = $validator->validated();
+
+        $rooms = Room::where('owner_id', $ownerId)
+            ->where('is_available', true)
+            ->when($v['room_id'] ?? null, fn ($q, $id) => $q->whereKey($id))
+            ->with(['workspace', 'owner'])
+            ->orderBy('name')
+            ->get();
+        if (! empty($v['room_id']) && $rooms->isEmpty()) {
+            abort(404); // another owner's room, or not bookable
+        }
+
+        $to = $v['to'] ?? $v['from'];
+
+        return response()->json([
+            'success' => true,
+            'from' => $v['from'],
+            'to' => $to,
+            'days' => Carbon::parse($v['from'])->diffInDays(Carbon::parse($to)) + 1,
+            'start_time' => $v['start_time'],
+            'end_time' => $v['end_time'],
+            'party_size' => (int) ($v['party_size'] ?? 1),
+            'rooms' => $availability->rangeReport($rooms, $v['from'], $to, $v['start_time'], $v['end_time'], (int) ($v['party_size'] ?? 1)),
+        ]);
+    }
+
     public function checkAvailability(Request $request, AvailabilityService $availability, BusinessHoursService $businessHours, RoomPricingService $pricing): JsonResponse
     {
         $owner = TenantContext::user();

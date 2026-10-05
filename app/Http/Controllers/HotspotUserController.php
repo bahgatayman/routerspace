@@ -12,6 +12,7 @@ use App\Models\SharedSession;
 use App\Models\SpeedProfile;
 use App\Services\ActivityLogger;
 use App\Services\HotspotSyncService;
+use App\Services\MemberSearchService;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -23,34 +24,49 @@ use Illuminate\View\View;
 
 class HotspotUserController extends Controller
 {
-    public function __construct(private HotspotSyncService $sync, private ActivityLogger $activityLogger) {}
+    public function __construct(
+        private HotspotSyncService $sync,
+        private ActivityLogger $activityLogger,
+        private MemberSearchService $memberSearch,
+    ) {}
 
+    /**
+     * Live search: the search box debounces on the client and fetches this
+     * same route with X-Requested-With set, getting back just the table
+     * partial to swap in — a normal (non-AJAX) request still renders the
+     * full page. Ranking/pagination is MemberSearchService's job (case-
+     * insensitive, partial, fuzzy-tolerant — see its docblock); this method
+     * only re-hydrates the full rows for whichever page it decided on.
+     */
     public function index(Request $request): View
     {
-        $search = $request->query('search');
+        $search = trim((string) $request->query('search', ''));
+        $page = max(1, (int) $request->query('page', 1));
 
-        $users = HotspotUser::where('owner_id', TenantContext::id())
-            ->when($search, function ($query, $search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                        ->orWhere('phone', 'like', "%{$search}%");
-                });
-            })
-            ->latest()
-            ->paginate(15);
+        $paginator = $this->memberSearch->paginate(TenantContext::id(), $search, 15, $page);
+
+        // The search pass above only loads a lean id/name/phone/email
+        // projection (kept cheap regardless of member count); re-fetch full
+        // rows for just the (at most 15) ids actually being displayed, in
+        // the order the search already decided.
+        $ids = $paginator->getCollection()->pluck('id');
+        $owner = TenantContext::user();
+        $fullUsers = HotspotUser::whereIn('id', $ids)->get();
 
         // Hour package pill: each member's usable packages, eager-loaded in one query.
-        $owner = TenantContext::user();
         if ($owner->hasFeature('booking')) {
-            $users->load(['packages' => fn ($q) => $q->whereNull('cancelled_at')
+            $fullUsers->load(['packages' => fn ($q) => $q->whereNull('cancelled_at')
                 ->whereDate('starts_on', '<=', today())
                 ->whereDate('expires_on', '>=', today())
                 ->whereColumn('used_minutes', '<', 'total_minutes')
                 ->orderBy('expires_on')]);
         }
 
-        return view('users.index', [
-            'users' => $users,
+        $byId = $fullUsers->keyBy('id');
+        $paginator->setCollection($ids->map(fn ($id) => $byId[$id])->values());
+
+        return view($request->ajax() ? 'users._table' : 'users.index', [
+            'users' => $paginator,
             'search' => $search,
         ]);
     }

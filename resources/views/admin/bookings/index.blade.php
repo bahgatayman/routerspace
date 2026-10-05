@@ -32,7 +32,7 @@
                         @foreach ($bookings as $booking)
                             <tr class="border-b border-gray-50">
                                 <td class="px-4 py-3 font-medium whitespace-nowrap">{{ $booking->booking_date->format('M d, Y') }}</td>
-                                <td class="px-4 py-3">{{ $booking->hotspotUser->name }}</td>
+                                <td class="px-4 py-3">{{ $booking->hotspotUser?->name ?? __('app.admin_biz.deleted_member') }}</td>
                                 <td class="px-4 py-3">{{ $booking->room->name }}</td>
                                 <td class="px-4 py-3 text-gray-600">{{ $booking->room->workspace?->name ?? '—' }}</td>
                                 <td class="px-4 py-3">

@@ -5,14 +5,14 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Feature;
 use App\Models\Owner;
-use Illuminate\Http\Request;
+use App\Services\AdminAuditLogger;
 
 class FeatureController extends Controller
 {
     public function index()
     {
         $features = Feature::withCount('owners')->get();
-        $owners   = Owner::with('features')->get();
+        $owners = Owner::with('features')->get();
 
         return view('admin.features.index', compact('features', 'owners'));
     }
@@ -20,17 +20,24 @@ class FeatureController extends Controller
     public function toggleGlobal($featureId)
     {
         $feature = Feature::findOrFail($featureId);
-        $feature->update(['is_active' => !$feature->is_active]);
+        $feature->update(['is_active' => ! $feature->is_active]);
+
+        app(AdminAuditLogger::class)->log(
+            $feature->is_active ? 'feature.enabled_globally' : 'feature.disabled_globally',
+            null,
+            "Feature '{$feature->name}' ".($feature->is_active ? 'enabled' : 'disabled').' for all businesses',
+            ['feature' => $feature->key],
+        );
 
         return back()->with(
             'success',
-            "Feature '{$feature->name}' " . ($feature->is_active ? 'enabled' : 'disabled') . ' globally.'
+            "Feature '{$feature->name}' ".($feature->is_active ? 'enabled' : 'disabled').' globally.'
         );
     }
 
     public function toggleForOwner($ownerId, $featureId)
     {
-        $owner   = Owner::findOrFail($ownerId);
+        $owner = Owner::findOrFail($ownerId);
         $feature = Feature::findOrFail($featureId);
 
         if ($owner->features()->where('feature_id', $featureId)->exists()) {
@@ -40,6 +47,8 @@ class FeatureController extends Controller
             $owner->enableFeature($feature->key);
             $message = "'{$feature->name}' enabled for {$owner->business_name}";
         }
+
+        app(AdminAuditLogger::class)->log('feature.toggled_for_owner', $owner, $message, ['feature' => $feature->key]);
 
         return back()->with('success', $message);
     }

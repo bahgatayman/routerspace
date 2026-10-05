@@ -3,9 +3,6 @@
 @section('page-title', __('app.section.financial'))
 
 @section('content')
-    @if (session('success'))
-        <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6">{{ session('success') }}</div>
-    @endif
 
     <!-- Stat Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

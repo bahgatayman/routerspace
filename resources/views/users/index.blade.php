@@ -18,84 +18,102 @@
         <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">{{ session('error') }}</div>
     @endif
 
-    <form method="GET" action="/users" class="mb-6">
-        <div class="flex gap-2 max-w-md">
-            <input type="text" name="search" value="{{ $search }}" placeholder="{{ __('app.placeholder.search_name_phone') }}"
-                   class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-            <button type="submit" class="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition text-sm">
-                {{ __('app.common.search') }}
-            </button>
-            @if ($search)
-                <a href="/users" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition text-sm">
-                    {{ __('app.common.clear') }}
-                </a>
-            @endif
-        </div>
-    </form>
+    <div class="mb-6 max-w-md relative" id="user-search-wrap">
+        <input type="text" id="user-search-input" value="{{ $search }}" placeholder="{{ __('app.user.search_placeholder') }}"
+               autocomplete="off"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 pe-9 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        <button type="button" id="user-search-clear" aria-label="{{ __('app.user.clear_search') }}"
+                class="absolute inset-y-0 end-0 flex items-center px-3 text-gray-400 hover:text-gray-600" {{ $search === '' ? 'hidden' : '' }}>
+            <x-ui.icon name="x" class="w-4 h-4" />
+        </button>
+    </div>
 
-    @if ($users->count() > 0)
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
-            <table class="w-full text-sm text-left">
-                <thead class="bg-gray-50 text-gray-500 uppercase text-xs tracking-wider">
-                    <tr>
-                        <th class="px-4 py-3">{{ __('app.table.th.name') }}</th>
-                        <th class="px-4 py-3">{{ __('app.table.th.phone') }}</th>
-                        @if($owner->hasFeature('hotspot'))
-                        <th class="px-4 py-3">{{ __('app.table.th.download') }}</th>
-                        <th class="px-4 py-3">{{ __('app.table.th.upload') }}</th>
-                        @endif
-                        <th class="px-4 py-3">{{ __('app.table.th.status') }}</th>
-                        <th class="px-4 py-3">{{ __('app.table.th.created') }}</th>
-                        <th class="px-4 py-3">{{ __('app.table.th.actions') }}</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y">
-                    @foreach ($users as $user)
-                        <tr class="row-link hover:bg-gray-50 transition cursor-pointer" data-href="/users/{{ $user->id }}">
-                            <td class="px-4 py-3 font-medium text-gray-900">
-                                {{-- Real link: keeps the row reachable by keyboard and ctrl/middle-clickable. --}}
-                                <a href="/users/{{ $user->id }}" class="hover:text-blue-600">{{ $user->name }}</a>
-                                @if ($user->relationLoaded('packages') && ($pkg = $user->packages->first()))
-                                    @php $left = \App\Support\Duration::label($user->packages->sum(fn ($p) => $p->remainingMinutes())); @endphp
-                                    <div><span class="ls-pkg-pill {{ $pkg->isExpiringSoon() ? 'is-soon' : '' }}" title="{{ $user->packages->pluck('name')->implode(', ') }}">
-                                        <x-ui.icon name="clock" />{{ $pkg->isExpiringSoon() ? __('app.packages.expiring_left', ['time' => $left]) : __('app.packages.left', ['time' => $left]) }}
-                                    </span></div>
-                                @endif
-                            </td>
-                            <td class="px-4 py-3">{{ $user->phone }}</td>
-                            @if($owner->hasFeature('hotspot'))
-                            <td class="px-4 py-3">{{ $user->speed_download }}</td>
-                            <td class="px-4 py-3">{{ $user->speed_upload }}</td>
-                            @endif
-                            <td class="px-4 py-3">
-                                @if ($user->status === 'active')
-                                    <span class="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-medium">{{ __('app.status.active') }}</span>
-                                @else
-                                    <span class="bg-red-100 text-red-700 px-2 py-1 rounded-full text-xs font-medium">{{ __('app.status.inactive') }}</span>
-                                @endif
-                            </td>
-                            <td class="px-4 py-3 text-gray-500">{{ $user->created_at->format('M d, Y') }}</td>
-                            <td class="px-4 py-3 flex gap-2">
-                                <a href="/users/{{ $user->id }}/edit" class="text-blue-600 hover:underline text-sm font-medium">{{ __('app.common.edit') }}</a>
-                                <form method="POST" action="/users/{{ $user->id }}" onsubmit="return confirm('Delete this user?')">
-                                    @csrf
-                                    @method('DELETE')
-                                    <button type="submit" class="text-red-600 hover:underline text-sm font-medium">{{ __('app.common.delete') }}</button>
-                                </form>
-                            </td>
-                        </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        </div>
+    <div id="user-table-wrap" aria-live="polite">
+        @include('users._table', ['users' => $users, 'search' => $search])
+    </div>
 
-        <div class="mt-4">
-            {{ $users->withQueryString()->links() }}
-        </div>
-    @else
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
-            <p class="text-gray-500 text-lg">{{ __('app.empty.no_users') }}</p>
-        </div>
-    @endif
+    <script>
+    (function () {
+        const input = document.getElementById('user-search-input');
+        const clearBtn = document.getElementById('user-search-clear');
+        const wrap = document.getElementById('user-table-wrap');
+        let timer = null;
+        let controller = null;
 
+        function toggleClear() {
+            clearBtn.hidden = input.value.length === 0;
+        }
+
+        // The shared row-link handler (layouts/app.blade.php) only wires rows
+        // present at page load via a one-time querySelectorAll — it can't see
+        // rows swapped in afterward, so a row injected by live search needs
+        // the same click-to-navigate behavior re-applied here, scoped to just
+        // this page's table rather than changing the shared handler itself.
+        function wireRowLinks() {
+            wrap.querySelectorAll('.row-link').forEach((row) => {
+                const ignore = (event) => event.target.closest('a, button, form, input, select, label');
+                row.addEventListener('click', (event) => {
+                    if (ignore(event) || window.getSelection().toString()) return;
+                    if (event.metaKey || event.ctrlKey) window.open(row.dataset.href, '_blank', 'noopener');
+                    else window.location.href = row.dataset.href;
+                });
+                row.addEventListener('auxclick', (event) => {
+                    if (event.button !== 1 || ignore(event)) return;
+                    event.preventDefault();
+                    window.open(row.dataset.href, '_blank', 'noopener');
+                });
+            });
+        }
+
+        function load(url, pushUrl) {
+            if (controller) controller.abort();
+            controller = new AbortController();
+            wrap.setAttribute('aria-busy', 'true');
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal })
+                .then((r) => r.text())
+                .then((html) => {
+                    wrap.innerHTML = html;
+                    wrap.removeAttribute('aria-busy');
+                    wireRowLinks();
+                    if (pushUrl) history.replaceState(null, '', url);
+                })
+                .catch((e) => { if (e.name !== 'AbortError') wrap.removeAttribute('aria-busy'); });
+        }
+
+        function searchUrl(term) {
+            const params = new URLSearchParams();
+            if (term) params.set('search', term);
+            const qs = params.toString();
+            return '/users' + (qs ? '?' + qs : '');
+        }
+
+        input.addEventListener('input', () => {
+            toggleClear();
+            clearTimeout(timer);
+            // A new search always starts back at page 1 — the point being
+            // searched from could be any page of the previous result set.
+            timer = setTimeout(() => load(searchUrl(input.value.trim()), true), 250);
+        });
+
+        clearBtn.addEventListener('click', () => {
+            input.value = '';
+            toggleClear();
+            clearTimeout(timer);
+            load(searchUrl(''), true);
+            input.focus();
+        });
+
+        // Pagination links rendered inside the swapped partial still point at
+        // plain /users?... URLs — intercept them so paging also stays live
+        // (no full reload) instead of only the initial search being AJAX.
+        wrap.addEventListener('click', (e) => {
+            const a = e.target.closest('a[href]');
+            if (!a) return;
+            const url = new URL(a.href, location.origin);
+            if (url.origin !== location.origin || url.pathname !== '/users') return;
+            e.preventDefault();
+            load(url.pathname + url.search, true);
+        });
+    })();
+    </script>
 @endsection

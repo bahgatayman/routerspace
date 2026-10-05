@@ -3,9 +3,6 @@
 @section('page-title', __('app.section.plans'))
 
 @section('content')
-    @if (session('success'))
-        <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6">{{ session('success') }}</div>
-    @endif
 
     <div class="flex justify-between items-center mb-6">
         <h2 class="text-xl font-bold text-gray-900">{{ __('app.section.plans') }}</h2>

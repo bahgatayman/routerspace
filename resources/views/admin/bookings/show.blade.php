@@ -30,7 +30,7 @@
             </div>
             <div>
                 <dt class="text-gray-500">{{ __('app.booking.user') }}</dt>
-                <dd class="text-gray-900 font-medium mt-1">{{ $booking->hotspotUser->name }}</dd>
+                <dd class="text-gray-900 font-medium mt-1">{{ $booking->hotspotUser?->name ?? __('app.admin_biz.deleted_member') }}</dd>
             </div>
             <div>
                 <dt class="text-gray-500">{{ __('app.booking.room') }}</dt>

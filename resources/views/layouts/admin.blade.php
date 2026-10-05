@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 @php $locale = app()->getLocale(); $isRtl = $locale === 'ar'; @endphp
-<html lang="{{ $locale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}">
+<html lang="{{ $locale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Link Space Panel Admin - @yield('page-title', __('app.nav.dashboard'))</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/logo-icon.png">
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    @include('partials.favicon')
     @include('partials.theme')
+    {{-- Owner design system (ls-* classes) for the Business 360° pages; scoped by class, so legacy admin pages are unaffected. --}}
+    <link rel="stylesheet" href="/css/panel.css?v={{ @filemtime(public_path('css/panel.css')) }}">
     @if($isRtl)
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>body { font-family: 'Cairo', sans-serif; }</style>
@@ -136,8 +136,13 @@
 
             <main class="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
                 @if (session('success'))
-                    <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6">
+                    <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6" role="status">
                         {{ session('success') }}
+                    </div>
+                @endif
+                @if (session('error'))
+                    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6" role="alert">
+                        {{ session('error') }}
                     </div>
                 @endif
 
