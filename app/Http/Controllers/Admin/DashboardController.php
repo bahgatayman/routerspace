@@ -2,62 +2,121 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Admin\Concerns\ResolvesPeriod;
 use App\Http\Controllers\Controller;
+use App\Models\AdminAuditLog;
 use App\Models\Booking;
-use App\Models\HotspotUser;
 use App\Models\Owner;
-use App\Models\Room;
-use App\Models\Sale;
+use App\Models\Plan;
 use App\Models\Subscription;
-use App\Models\Workspace;
+use App\Models\SubscriptionRequest;
+use App\Services\Admin\PlatformAnalyticsService;
+use App\Services\Admin\PlatformInsightsService;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
 
+/**
+ * Super Admin → platform analytics center. Every number comes from
+ * PlatformAnalyticsService (one money rule for the whole admin); the period
+ * and plan filters are plain GET params so every view is linkable.
+ */
 class DashboardController extends Controller
 {
-    public function index()
+    use ResolvesPeriod;
+
+    public function index(Request $request, PlatformAnalyticsService $analytics, PlatformInsightsService $insights): View
     {
-        $now = now();
+        [$period, $range] = $this->resolvePeriod($request);
+        $planId = Plan::whereKey($request->integer('plan'))->value('id');
+        $filters = array_filter(['plan_id' => $planId]);
 
-        $totalOwners = Owner::count();
-        $activeOwners = Owner::where('is_active', true)
-            ->where('subscription_expires_at', '>', $now)->count();
-        $expiredOwners = Owner::where('subscription_expires_at', '<', $now)->count();
-        // copy(): addDays() mutates — without it both bounds became now+7 and this was always 0.
-        $expiringSoon = Owner::where('is_active', true)
-            ->where('subscription_expires_at', '>', $now)
-            ->where('subscription_expires_at', '<', $now->copy()->addDays(7))->count();
+        $series = $analytics->series($period, $filters);
+        $bucketLinks = fn (string $base) => array_map(function ($key) use ($base) {
+            [$from, $to] = explode('|', $key);
 
-        $totalUsers = HotspotUser::count();
-        $recentRenewals = Subscription::with(['owner', 'admin'])
-            ->latest()->take(5)->get();
+            return $base.(str_contains($base, '?') ? '&' : '?').'preset=custom&from='.$from.'&to='.$to;
+        }, $series['keys']);
+        $rangeQuery = 'preset='.$range['preset'].'&from='.$range['from'].'&to='.$range['to'];
+        $t = fn (string $k) => __('app.admin_platform.'.$k);
 
-        $totalWorkspaces = Workspace::count();
-        $totalRooms = Room::count();
+        $status = $analytics->statusDistribution($period, $filters);
+        $statusColor = ['completed' => 'success', 'confirmed' => 'info', 'pending' => 'warning', 'checked_in' => 'c3', 'open' => 'c3', 'cancelled' => 'danger', 'no_show' => 'neutral'];
+        $top = $analytics->topWorkspaces($period, $filters, 8);
+        $byPlan = $analytics->revenueByPlan($period, $filters);
 
-        $totalBookings = Booking::count();
-        $todayBookings = Booking::whereDate('booking_date', today())->count();
-        // Same "money earned" rule as the owners' own Financials
-        // (RevenueAnalyticsService): what was actually paid on completed
-        // bookings, plus completed product sales — across all businesses.
-        $monthStart = now()->startOfMonth();
-        $monthEnd = now()->endOfMonth();
-        $monthRevenue = (float) Booking::where('status', 'completed')
-            ->whereDate('booking_date', '>=', $monthStart->toDateString())
-            ->whereDate('booking_date', '<=', $monthEnd->toDateString())
-            ->sum('amount_paid')
-            + (float) Sale::where('status', 'completed')->whereBetween('sold_at', [$monthStart, $monthEnd])->sum('total');
+        $charts = [
+            'earnings' => [
+                'type' => 'line', 'money' => true, 'axis' => $t('chart.period'),
+                'labels' => $series['labels'],
+                'datasets' => [['label' => $t('kpi.earnings'), 'data' => $series['series']['earnings'], 'color' => 'c1']],
+                'links' => $bucketLinks('/admin/financial'),
+            ],
+            'platform' => [
+                'type' => 'bar', 'money' => true, 'axis' => $t('chart.period'),
+                'labels' => $series['labels'],
+                'datasets' => [['label' => $t('kpi.platform_revenue'), 'data' => $series['series']['platform_revenue'], 'color' => 'c2']],
+                'links' => $bucketLinks('/admin/financial?type=subscription'),
+            ],
+            'bookings' => [
+                'type' => 'bar', 'stacked' => true, 'axis' => $t('chart.period'),
+                'labels' => $series['labels'],
+                'datasets' => [
+                    ['label' => __('app.admin_platform.status.completed'), 'data' => $series['series']['completed'], 'color' => 'success'],
+                    ['label' => $t('chart.other_active'), 'data' => array_map(fn ($a, $c, $x) => max(0, $a - $c - $x), $series['series']['bookings'], $series['series']['completed'], $series['series']['cancelled']), 'color' => 'info'],
+                    ['label' => $t('chart.cancelled_noshow'), 'data' => $series['series']['cancelled'], 'color' => 'danger'],
+                ],
+                'links' => $bucketLinks('/admin/bookings'),
+            ],
+            'growth' => [
+                'type' => 'bar', 'axis' => $t('chart.period'),
+                'labels' => $series['labels'],
+                'datasets' => [
+                    ['label' => $t('chart.new_workspaces'), 'data' => $series['series']['new_workspaces'], 'color' => 'c1'],
+                    ['label' => $t('chart.renewals'), 'data' => $series['series']['renewals'], 'color' => 'c3'],
+                    ['label' => $t('chart.expired'), 'data' => $series['series']['expired'], 'color' => 'c2'],
+                ],
+            ],
+            'status' => [
+                'type' => 'doughnut', 'axis' => __('app.common.status'),
+                'labels' => array_map(fn ($s) => __('app.admin_platform.status.'.$s), array_keys($status)),
+                'datasets' => [['label' => __('app.nav.bookings'), 'data' => array_values($status), 'color' => array_map(fn ($s) => $statusColor[$s] ?? 'neutral', array_keys($status))]],
+                'links' => array_map(fn ($s) => '/admin/bookings?status='.$s.'&'.$rangeQuery, array_keys($status)),
+            ],
+            'top' => [
+                'type' => 'bar', 'horizontal' => true, 'money' => true, 'axis' => $t('nav.workspaces'),
+                'labels' => $top->pluck('name')->all(),
+                'datasets' => [['label' => $t('kpi.earnings'), 'data' => $top->pluck('earnings')->all(), 'color' => 'c1']],
+                'links' => $top->map(fn ($r) => '/admin/owners/'.$r['owner_id'])->all(),
+            ],
+            'plans' => [
+                'type' => 'bar', 'axis' => __('app.nav.plans'),
+                'labels' => $byPlan->pluck('name')->all(),
+                'datasets' => [['label' => $t('chart.active_workspaces'), 'data' => $byPlan->pluck('active')->all(), 'color' => 'c1']],
+                'links' => $byPlan->map(fn ($r) => '/admin/plans/'.$r['plan_id'])->all(),
+            ],
+        ];
 
-        return view('admin.dashboard.index', compact(
-            'totalOwners',
-            'activeOwners',
-            'expiredOwners',
-            'expiringSoon',
-            'totalUsers',
-            'recentRenewals',
-            'totalWorkspaces',
-            'totalRooms',
-            'totalBookings',
-            'todayBookings',
-            'monthRevenue',
-        ));
+        return view('admin.dashboard.index', [
+            'range' => $range,
+            'period' => $period,
+            'planId' => $planId,
+            'plans' => Plan::orderBy('sort_order')->get(['id', 'name']),
+            'kpis' => $analytics->kpis($period, $filters),
+            'charts' => $charts,
+            'byPlan' => $byPlan,
+            'insights' => $insights->forPeriod($period, $filters),
+            'recentOwners' => $analytics->owners($filters)->with('plan:id,name')->latest()->take(6)->get(),
+            'recentBookings' => Booking::with(['owner:id,business_name,name', 'room:id,name', 'hotspotUser:id,name'])
+                ->when($planId, fn ($q) => $q->whereIn('owner_id', Owner::where('plan_id', $planId)->select('id')))
+                ->latest()->take(6)->get(),
+            'recentPayments' => Subscription::with(['owner:id,business_name,name', 'plan:id,name', 'admin:id,name'])
+                ->when($planId, fn ($q) => $q->where('plan_id', $planId))
+                ->latest()->take(6)->get(),
+            'adminActions' => AdminAuditLog::latest('created_at')->take(6)->get(),
+            'expiring' => $analytics->owners($filters)->with('plan:id,name')->where('is_active', true)
+                ->whereBetween('subscription_expires_at', [now(), now()->addDays(14)])
+                ->orderBy('subscription_expires_at')->take(6)->get(),
+            'pendingRenewals' => SubscriptionRequest::pending()->count(),
+        ]);
     }
 }

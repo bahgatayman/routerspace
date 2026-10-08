@@ -126,7 +126,7 @@
                     <span class="ls-crumb-now ls-trunc" aria-current="page">@yield('page-title', __('app.nav.dashboard'))</span>
                 </nav>
                 <div class="ls-topbar-spacer"></div>
-                <span class="ls-live-pill" aria-hidden="true"><i></i><span id="ls-clock">{{ now()->format('g:i A') }}</span></span>
+                <span class="ls-live-pill" aria-hidden="true"><x-ui.icon name="clock" /><span id="ls-clock">{{ now()->format('g:i A') }}</span></span>
 
                 {{-- Notifications --}}
                 <div class="ls-menu-wrap" id="notif-wrap">

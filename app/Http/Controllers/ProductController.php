@@ -222,10 +222,7 @@ class ProductController extends Controller
 
     private function scopeLow(Builder $q): Builder
     {
-        return $q->where('track_stock', true)->where('type', 'product')
-            ->where('stock_quantity', '>', 0)
-            ->whereNotNull('low_stock_threshold')
-            ->whereColumn('stock_quantity', '<=', 'low_stock_threshold');
+        return $q->lowStock();
     }
 
     private function scopeOut(Builder $q): Builder

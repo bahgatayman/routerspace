@@ -11,10 +11,14 @@ use App\Services\BusinessHoursService;
 use App\Services\CustomerAnalyticsService;
 use App\Services\HotspotSyncService;
 use App\Services\OccupancyAnalyticsService;
+use App\Services\ProductAnalyticsService;
 use App\Services\RevenueAnalyticsService;
 use App\Support\TenantContext;
+use Carbon\Carbon;
 use Exception;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
+use Throwable;
 
 class DashboardController extends Controller
 {
@@ -25,9 +29,10 @@ class DashboardController extends Controller
         private OccupancyAnalyticsService $occupancyAnalytics,
         private BookingAnalyticsService $bookingAnalytics,
         private CustomerAnalyticsService $customerAnalytics,
+        private ProductAnalyticsService $productAnalytics,
     ) {}
 
-    public function index(): View
+    public function index(Request $request): View
     {
         $owner = TenantContext::user();
         $ownerId = $owner->id;
@@ -52,12 +57,7 @@ class DashboardController extends Controller
         $canViewRevenue = ! $staff || $staff->hasPermission('reports.view');
         $canViewWorkspaces = ! $staff || $staff->hasPermission('workspaces.view');
 
-        $periodKey = in_array(request('period'), ['today', 'week', 'month'], true) ? request('period') : 'today';
-        $period = match ($periodKey) {
-            'week' => AnalyticsPeriod::thisWeek(),
-            'month' => AnalyticsPeriod::thisMonth(),
-            default => AnalyticsPeriod::today(),
-        };
+        [$period, $periodKey, $customStart, $customEnd] = $this->resolvePeriod($request);
 
         $viewData = [
             'owner' => $owner,
@@ -72,6 +72,8 @@ class DashboardController extends Controller
             // operational concern for staff — Owner-only, no permission to grant.
             'isStaff' => (bool) $staff,
             'periodKey' => $periodKey,
+            'customStart' => $customStart,
+            'customEnd' => $customEnd,
         ];
 
         // Working-hours "open now" badge — only meaningful once an owner has
@@ -92,6 +94,19 @@ class DashboardController extends Controller
             $viewData['revenueThisMonth'] = $this->revenueAnalytics->totalRevenue($owner, AnalyticsPeriod::thisMonth());
             $viewData['revenueComparison'] = $this->revenueAnalytics->revenueWithComparison($owner, $period);
             $viewData['revenueTrend'] = $this->revenueAnalytics->dailyRevenueTrend($owner, $period);
+        }
+
+        // ---- Product Analytics (Products dashboard section) ----
+        // Gated on the 'sales' feature exactly like every /products* route
+        // ('feature:sales' middleware) — skipped entirely, not zero-rendered,
+        // for an owner without it, matching the showRevenue/showWorkspace pattern.
+        $viewData['showProducts'] = $owner->hasFeature('sales');
+        if ($viewData['showProducts']) {
+            $viewData['productSummary'] = $this->productAnalytics->summary($owner, $period);
+            $viewData['productSeries'] = $this->productAnalytics->dailySeries($owner, $period);
+            $viewData['topProducts'] = $this->productAnalytics->topProducts($owner, $period);
+            $viewData['lowStockProducts'] = $this->productAnalytics->lowStockProducts($owner);
+            $viewData['productInsights'] = $this->productAnalytics->insights($owner, $period);
         }
 
         if ($owner->hasFeature('booking')) {
@@ -131,5 +146,57 @@ class DashboardController extends Controller
         $viewData['needsAttentionItems'] = Notification::forOwner($ownerId)->unread()->latest()->take(10)->get();
 
         return view('dashboard.index', $viewData);
+    }
+
+    /**
+     * Today/7d/30d/3mo/12mo/Custom — the one shared filter driving Overview,
+     * Products, and Bookings together. Mirrors FinancialController's own
+     * resolvePeriod(), but with this dashboard's own key vocabulary (not
+     * AnalyticsPeriod::fromPreset()'s last_7/last_30/etc. keys, and not
+     * Financials' today/this_week/this_month/custom keys) mapped directly
+     * onto AnalyticsPeriod's existing public factories.
+     *
+     * @return array{0: AnalyticsPeriod, 1: string, 2: ?string, 3: ?string}
+     */
+    private function resolvePeriod(Request $request): array
+    {
+        $key = in_array($request->get('period'), ['today', '7d', '30d', '3mo', '12mo', 'custom'], true)
+            ? $request->get('period')
+            : 'today';
+
+        $customStart = $request->get('start');
+        $customEnd = $request->get('end');
+
+        if ($key === 'custom') {
+            $start = $this->parseDate($customStart) ?? now()->subDays(29);
+            $end = $this->parseDate($customEnd) ?? now();
+            if ($end->lt($start)) {
+                [$start, $end] = [$end, $start];
+            }
+
+            return [AnalyticsPeriod::custom($start, $end), $key, $start->toDateString(), $end->toDateString()];
+        }
+
+        $period = match ($key) {
+            '7d' => AnalyticsPeriod::lastDays(7),
+            '30d' => AnalyticsPeriod::lastDays(30),
+            '3mo' => AnalyticsPeriod::lastMonths(3),
+            '12mo' => AnalyticsPeriod::lastMonths(12),
+            default => AnalyticsPeriod::today(),
+        };
+
+        return [$period, $key, $customStart, $customEnd];
+    }
+
+    private function parseDate(?string $value): ?Carbon
+    {
+        if (! $value) {
+            return null;
+        }
+        try {
+            return Carbon::parse($value);
+        } catch (Throwable) {
+            return null;
+        }
     }
 }

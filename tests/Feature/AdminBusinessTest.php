@@ -270,9 +270,10 @@ class AdminBusinessTest extends TestCase
         $this->booking($room, '2026-10-05', 'completed', 500, 200); // revenue = what was paid
         Sale::create(['owner_id' => $soon->id, 'status' => 'completed', 'sold_at' => now(), 'subtotal' => 30, 'total' => 30]);
 
-        $res = $this->actingAs($this->admin, 'admin')->get('/admin/dashboard')->assertOk();
-        $this->assertSame(1, $res->viewData('expiringSoon'));
-        $this->assertEquals(230, $res->viewData('monthRevenue'));
+        // Rebuilt dashboard: the expiring list (≤ 14 days) has only "Soon"; this month's earnings = what was paid + sales.
+        $res = $this->actingAs($this->admin, 'admin')->get('/admin/dashboard?preset=this_month')->assertOk();
+        $this->assertSame(['Soon'], $res->viewData('expiring')->pluck('business_name')->all());
+        $this->assertEquals(230, $res->viewData('kpis')['earnings']['value']);
     }
 
     public function test_financial_monthly_breakdown_includes_january_to_september(): void
@@ -284,10 +285,13 @@ class AdminBusinessTest extends TestCase
         }
         Subscription::query()->each(fn ($s) => $s->forceFill(['created_at' => $s->starts_at])->save());
 
-        $months = collect($this->actingAs($this->admin, 'admin')->get('/admin/financial?year=2026')->assertOk()->viewData('monthlyData'))->keyBy('month');
-        $this->assertEquals(100, $months[1]['revenue']);
-        $this->assertEquals(200, $months[5]['revenue']);
-        $this->assertEquals(300, $months[11]['revenue']);
+        // Rebuilt financials: platform revenue for any month (January included) comes from the recorded payments.
+        $revenue = fn (string $from, string $to) => $this->actingAs($this->admin, 'admin')
+            ->get("/admin/financial?preset=custom&from={$from}&to={$to}")->assertOk()->viewData('cards')['platform_revenue']['value'];
+        $this->assertEquals(100, $revenue('2026-01-01', '2026-01-31'));
+        $this->assertEquals(200, $revenue('2026-05-01', '2026-05-31'));
+        $this->assertEquals(300, $revenue('2026-11-01', '2026-11-30'));
+        $this->assertEquals(600, $revenue('2026-01-01', '2026-12-31'));
     }
 
     public function test_admin_bookings_survive_a_deleted_member_and_errors_are_shown(): void
@@ -309,7 +313,9 @@ class AdminBusinessTest extends TestCase
     {
         $a = $this->business('Alpha');
         $ws = $this->location($a, 'Main');
-        $this->actingAs($this->admin, 'admin')->get('/admin/workspaces/'.$ws->id)->assertOk()
+        // Location pages moved to /admin/locations; the old /admin/workspaces/{id} URL redirects there.
+        $this->actingAs($this->admin, 'admin')->get('/admin/workspaces/'.$ws->id)->assertRedirect('/admin/locations/'.$ws->id);
+        $this->actingAs($this->admin, 'admin')->get('/admin/locations/'.$ws->id)->assertOk()
             ->assertSee('/admin/owners/'.$a->id.'?workspace='.$ws->id, false);
     }
 }

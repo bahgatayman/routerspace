@@ -12,24 +12,7 @@ use Illuminate\Http\Request;
 
 class OwnerController extends Controller
 {
-    public function index(Request $request)
-    {
-        $search = $request->get('search');
-
-        $owners = Owner::withCount('hotspotUsers')
-            ->when($search, function ($query, $search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('business_name', 'like', "%{$search}%");
-                });
-            })
-            ->latest()
-            ->paginate(15)
-            ->withQueryString();
-
-        return view('admin.owners.index', compact('owners', 'search'));
-    }
+    // The owners list moved to WorkspaceDirectoryController (/admin/workspaces).
 
     public function create()
     {

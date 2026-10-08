@@ -36,6 +36,12 @@ class Sale extends Model
         ];
     }
 
+    /** Realized product sales (open session tabs are not yet sold). Money rule shared by every report. */
+    public function scopeCompleted($query)
+    {
+        return $query->where('status', 'completed');
+    }
+
     public function owner(): BelongsTo
     {
         return $this->belongsTo(Owner::class);

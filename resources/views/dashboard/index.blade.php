@@ -110,15 +110,29 @@
         </a>
     </div></div>
 
-    {{-- ================= Period selector — drives trend/utilization/peak-hours/status/new-customers ================= --}}
-    @if ($showRevenue || $owner->hasFeature('booking'))
-        <div class="inline-flex items-center gap-1 bg-white border border-gray-100 rounded-lg p-1 shadow-sm mb-6">
-            @foreach (['today' => 'app.dashboard.period_today', 'week' => 'app.dashboard.period_week', 'month' => 'app.dashboard.period_month'] as $key => $labelKey)
-                <a href="{{ request()->fullUrlWithQuery(['period' => $key]) }}"
-                   class="px-3 py-1.5 rounded-md text-sm font-medium transition {{ $periodKey === $key ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-50' }}">
-                    {{ __($labelKey) }}
-                </a>
-            @endforeach
+    {{-- ================= Period selector — drives trend/utilization/peak-hours/status/new-customers/products ================= --}}
+    @if ($showRevenue || $owner->hasFeature('booking') || $showProducts)
+        <div class="flex flex-wrap items-center gap-3 mb-6">
+            <div class="inline-flex items-center gap-1 bg-white border border-gray-100 rounded-lg p-1 shadow-sm">
+                @foreach (['today' => 'app.dashboard.period_today', '7d' => 'app.dashboard.period_7d', '30d' => 'app.dashboard.period_30d', '3mo' => 'app.dashboard.period_3mo', '12mo' => 'app.dashboard.period_12mo'] as $key => $labelKey)
+                    <a href="{{ request()->fullUrlWithQuery(['period' => $key]) }}"
+                       class="px-3 py-1.5 rounded-md text-sm font-medium transition {{ $periodKey === $key ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-50' }}">
+                        {{ __($labelKey) }}
+                    </a>
+                @endforeach
+            </div>
+            <form method="GET" class="flex items-center gap-2">
+                <input type="hidden" name="period" value="custom">
+                @foreach(request()->except(['period', 'start', 'end']) as $key => $value)
+                    <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                @endforeach
+                <input type="date" name="start" value="{{ $customStart }}" class="border border-gray-200 rounded-md text-sm px-2 py-1.5 text-gray-700">
+                <span class="text-gray-400 text-sm">&ndash;</span>
+                <input type="date" name="end" value="{{ $customEnd }}" class="border border-gray-200 rounded-md text-sm px-2 py-1.5 text-gray-700">
+                <button type="submit" class="px-3 py-1.5 rounded-md text-sm font-medium transition {{ $periodKey === 'custom' ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+                    {{ __('app.dashboard.period_apply') }}
+                </button>
+            </form>
         </div>
     @endif
 
@@ -137,6 +151,10 @@
                 @endforeach
             </div>
         </div>
+    @endif
+
+    @if ($showProducts)
+        @include('dashboard._products-section')
     @endif
 
     @if ($showWorkspace || $owner->hasFeature('booking'))

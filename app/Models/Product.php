@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -81,6 +82,22 @@ class Product extends Model
     }
 
     // ---- Inventory & cost (derived; only InventoryService changes stock) ----
+
+    /**
+     * Tracked, stocked products at or below their own threshold — the one
+     * definition of "low stock" every caller shares (ProductController's
+     * stock-filter chip, the admin low-stock alert count, and
+     * ProductAnalyticsService's dashboard card). Out-of-stock (quantity<=0)
+     * is deliberately a different bucket (see ProductController::scopeOut())
+     * — "low" means still sellable but running down, not already empty.
+     */
+    public function scopeLowStock(Builder $query): Builder
+    {
+        return $query->where('track_stock', true)->where('type', 'product')
+            ->where('stock_quantity', '>', 0)
+            ->whereNotNull('low_stock_threshold')
+            ->whereColumn('stock_quantity', '<=', 'low_stock_threshold');
+    }
 
     /** Stock is counted only when the owner turned it on, and never for services. */
     public function tracksStock(): bool

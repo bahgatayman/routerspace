@@ -18,6 +18,7 @@ use App\Services\RevenueAnalyticsService;
 use App\Support\ActiveSessionsQuery;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Super Admin → one business at a glance. Every figure is scoped to this
@@ -75,11 +76,9 @@ class BusinessOverviewService
     public function outstanding(Owner $owner, ?int $workspaceId = null): float
     {
         return (float) Booking::where('owner_id', $owner->id)
-            ->whereIn('status', ['pending', 'confirmed', 'checked_in', 'completed'])
-            ->where(fn ($q) => $q->whereNull('payment_method')->orWhere('payment_method', '!=', 'package'))
-            ->whereRaw('(total_price - COALESCE(discount_total, 0) - COALESCE(amount_paid, 0)) > 0.004')
+            ->outstanding()
             ->when($workspaceId, fn ($q, $id) => $q->whereHas('room', fn ($r) => $r->where('workspace_id', $id)))
-            ->sum(\DB::raw('total_price - COALESCE(discount_total, 0) - COALESCE(amount_paid, 0)'));
+            ->sum(DB::raw(Booking::OUTSTANDING_SQL));
     }
 
     /**
@@ -135,8 +134,7 @@ class BusinessOverviewService
 
         $tracked = Product::where('owner_id', $owner->id)->where('is_active', true)->where('track_stock', true)->where('type', '!=', 'service');
         $out = (clone $tracked)->where('stock_quantity', '<=', 0)->count();
-        $low = (clone $tracked)->where('stock_quantity', '>', 0)->whereNotNull('low_stock_threshold')
-            ->whereColumn('stock_quantity', '<=', 'low_stock_threshold')->count();
+        $low = Product::where('owner_id', $owner->id)->where('is_active', true)->lowStock()->count();
         if ($out) {
             $add('danger', 'out_of_stock', ['count' => $out]);
         }

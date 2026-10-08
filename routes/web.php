@@ -10,9 +10,11 @@ use App\Http\Controllers\Admin\FinancialController;
 use App\Http\Controllers\Admin\NotificationController as AdminNotificationController;
 use App\Http\Controllers\Admin\OwnerController;
 use App\Http\Controllers\Admin\PlanController;
+use App\Http\Controllers\Admin\RoomController as AdminRoomController;
 use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\SubscriptionRequestController;
 use App\Http\Controllers\Admin\WorkspaceController as AdminWorkspaceController;
+use App\Http\Controllers\Admin\WorkspaceDirectoryController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RegisterController;
@@ -364,7 +366,9 @@ Route::post('/admin/logout', [AuthController::class, 'logout']);
 Route::middleware('auth:admin')->prefix('admin')->group(function () {
     Route::get('/dashboard', [AdminDashboardController::class, 'index']);
 
-    Route::get('/owners', [OwnerController::class, 'index']);
+    // Workspaces = the business directory (Owner = tenant). The old owners list redirects here.
+    Route::get('/workspaces', [WorkspaceDirectoryController::class, 'index'])->name('admin.workspaces.index');
+    Route::get('/owners', fn () => redirect('/admin/workspaces', 301));
     Route::get('/owners/create', [OwnerController::class, 'create']);
     Route::post('/owners', [OwnerController::class, 'store']);
     // Business 360°: Overview (default), then tabs. The former owner page is
@@ -372,6 +376,12 @@ Route::middleware('auth:admin')->prefix('admin')->group(function () {
     Route::get('/owners/{owner}', [AdminBusinessController::class, 'show'])->whereNumber('owner')->name('admin.business.show');
     Route::get('/owners/{owner}/subscription', [OwnerController::class, 'show'])->whereNumber('owner')->name('admin.business.subscription');
     Route::get('/owners/{owner}/audit', [AdminBusinessController::class, 'audit'])->whereNumber('owner')->name('admin.business.audit');
+    Route::get('/owners/{owner}/products', [AdminBusinessController::class, 'products'])->whereNumber('owner')->name('admin.business.products');
+    Route::get('/owners/{owner}/products/{product}', [AdminBusinessController::class, 'product'])->whereNumber(['owner', 'product'])->name('admin.business.product');
+    Route::get('/owners/{owner}/rooms', [AdminBusinessController::class, 'rooms'])->whereNumber('owner')->name('admin.business.rooms');
+    Route::get('/owners/{owner}/bookings', [AdminBusinessController::class, 'bookings'])->whereNumber('owner')->name('admin.business.bookings');
+    Route::get('/owners/{owner}/financials', [AdminBusinessController::class, 'financials'])->whereNumber('owner')->name('admin.business.financials');
+    Route::get('/owners/{owner}/activity', [AdminBusinessController::class, 'activity'])->whereNumber('owner')->name('admin.business.activity');
     Route::put('/owners/{owner}/toggle-active', [OwnerController::class, 'toggleActive']);
     Route::get('/owners/{owner}/users', [OwnerController::class, 'users']);
 
@@ -391,21 +401,30 @@ Route::middleware('auth:admin')->prefix('admin')->group(function () {
     Route::post('/features/{feature}/toggle-global', [FeatureController::class, 'toggleGlobal']);
     Route::post('/owners/{owner}/features/{feature}/toggle', [FeatureController::class, 'toggleForOwner']);
 
-    // Admin Workspace (read-only)
-    Route::get('/workspaces', [AdminWorkspaceController::class, 'index'])->name('admin.workspaces.index');
-    Route::get('/workspaces/{workspace}', [AdminWorkspaceController::class, 'show'])->name('admin.workspaces.show');
+    // Locations (the `workspaces` table — a business's branches), read-only.
+    // Old /admin/workspaces/{id} links pointed at a location: keep them working.
+    Route::get('/locations', [AdminWorkspaceController::class, 'index'])->name('admin.locations.index');
+    Route::get('/locations/{location}', [AdminWorkspaceController::class, 'show'])->whereNumber('location')->name('admin.locations.show');
+    Route::get('/workspaces/{location}', fn (int $location) => redirect('/admin/locations/'.$location, 301))->whereNumber('location');
+
+    // Rooms across every business (read-only)
+    Route::get('/rooms', [AdminRoomController::class, 'index'])->name('admin.rooms.index');
+    Route::get('/rooms/{room}', [AdminRoomController::class, 'show'])->whereNumber('room')->name('admin.rooms.show');
 
     // Admin Bookings (read-only)
     Route::get('/bookings', [AdminBookingController::class, 'index'])->name('admin.bookings.index');
-    Route::get('/bookings/{booking}', [AdminBookingController::class, 'show'])->name('admin.bookings.show');
+    Route::get('/bookings/{booking}', [AdminBookingController::class, 'show'])->whereNumber('booking')->name('admin.bookings.show');
 
     // Admin Plans Management
     Route::get('/plans', [PlanController::class, 'index'])->name('admin.plans.index');
     Route::get('/plans/create', [PlanController::class, 'create'])->name('admin.plans.create');
     Route::post('/plans', [PlanController::class, 'store'])->name('admin.plans.store');
-    Route::get('/plans/{plan}/edit', [PlanController::class, 'edit'])->name('admin.plans.edit');
-    Route::put('/plans/{plan}', [PlanController::class, 'update'])->name('admin.plans.update');
-    Route::post('/plans/{plan}/toggle', [PlanController::class, 'toggle'])->name('admin.plans.toggle');
+    Route::get('/plans/{plan}', [PlanController::class, 'show'])->whereNumber('plan')->name('admin.plans.show');
+    Route::get('/plans/{plan}/edit', [PlanController::class, 'edit'])->whereNumber('plan')->name('admin.plans.edit');
+    Route::put('/plans/{plan}', [PlanController::class, 'update'])->whereNumber('plan')->name('admin.plans.update');
+    Route::delete('/plans/{plan}', [PlanController::class, 'destroy'])->whereNumber('plan')->name('admin.plans.destroy');
+    Route::post('/plans/{plan}/toggle', [PlanController::class, 'toggle'])->whereNumber('plan')->name('admin.plans.toggle');
+    Route::post('/plans/{plan}/migrate', [PlanController::class, 'migrate'])->whereNumber('plan')->name('admin.plans.migrate');
 
     // Admin Financial Dashboard
     Route::get('/financial', [FinancialController::class, 'index'])->name('admin.financial.index');

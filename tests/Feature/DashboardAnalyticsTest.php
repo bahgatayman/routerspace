@@ -7,8 +7,10 @@ use App\Models\HotspotUser;
 use App\Models\Notification;
 use App\Models\Owner;
 use App\Models\Plan;
+use App\Models\Product;
 use App\Models\Room;
 use App\Models\Sale;
+use App\Models\SaleItem;
 use App\Models\Workspace;
 use Carbon\Carbon;
 use Database\Seeders\FeatureSeeder;
@@ -112,6 +114,23 @@ class DashboardAnalyticsTest extends TestCase
         ]);
     }
 
+    /** A completed sale with one product line — what the Products section actually reads. */
+    private function productSale(Owner $owner, Product $product, string $soldAt, int $quantity, float $unitPrice): Sale
+    {
+        $sale = $this->sale($owner, $soldAt, $quantity * $unitPrice);
+        SaleItem::create([
+            'sale_id' => $sale->id, 'product_id' => $product->id, 'name' => $product->name,
+            'unit_price' => $unitPrice, 'quantity' => $quantity, 'line_total' => $quantity * $unitPrice,
+        ]);
+
+        return $sale;
+    }
+
+    private function product(Owner $owner, string $name = 'Coffee'): Product
+    {
+        return Product::create(['owner_id' => $owner->id, 'name' => $name, 'type' => 'product', 'price' => 10, 'is_active' => true]);
+    }
+
     // --- Basic rendering ---
 
     public function test_dashboard_renders_the_new_kpis_for_a_fully_featured_owner(): void
@@ -131,6 +150,43 @@ class DashboardAnalyticsTest extends TestCase
         $response->assertSee(__('app.dashboard.needs_attention'));
         $response->assertSee(__('app.dashboard.todays_schedule'));
         $response->assertSee(__('app.dashboard.room_utilization_details'));
+    }
+
+    public function test_dashboard_renders_the_products_section_for_a_sales_feature_owner(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner(['sales']);
+        $product = $this->product($owner);
+        $this->productSale($owner, $product, '2026-08-27 09:00:00', 3, 10.0);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.product_analytics'));
+        $response->assertSee('Coffee');
+        $response->assertSee(__('app.dashboard.top_selling_product'));
+        $response->assertSee(__('app.dashboard.product_sales_trend'));
+    }
+
+    public function test_dashboard_skips_the_products_section_without_the_sales_feature(): void
+    {
+        $owner = $this->owner(['workspace', 'booking']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertDontSee(__('app.dashboard.product_analytics'));
+    }
+
+    public function test_products_section_renders_empty_state_with_no_sales_in_period(): void
+    {
+        $owner = $this->owner(['sales']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.product_analytics'));
+        $response->assertSee(__('app.dashboard.no_product_sales_for_period'));
     }
 
     public function test_needs_attention_reflects_unread_notification_count(): void
@@ -177,8 +233,8 @@ class DashboardAnalyticsTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
         $owner = $this->owner();
         $room = $this->room($owner);
-        // 2026-08-27 is a Thursday; "this week" (Mon-Sun) is 2026-08-24..30,
-        // so 2026-08-25 falls inside the week window but is not "today".
+        // lastDays(7) from "now" (08-27) covers 08-21..08-27 inclusive, so
+        // 08-25 falls inside the 7d window but is not "today".
         $this->booking($owner, $room, '2026-08-25', totalPrice: 60.0);
         $this->member($owner, '2026-08-25 10:00:00');
 
@@ -186,23 +242,23 @@ class DashboardAnalyticsTest extends TestCase
         $today->assertOk();
         $today->assertDontSee('25 Aug'); // that day isn't in a 1-day trend window
 
-        $week = $this->actingAs($owner, 'owner')->get('/dashboard?period=week');
+        $week = $this->actingAs($owner, 'owner')->get('/dashboard?period=7d');
         $week->assertOk();
         $week->assertSee('25 Aug');
     }
 
     public function test_new_customers_count_reflects_the_selected_period(): void
     {
-        // 2026-08-27 is a Thursday; "this week" (Mon-Sun) starts 2026-08-24,
-        // so 2026-08-01 falls inside "this month" but outside "this week".
+        // lastDays(7) from "now" (08-27) covers 08-21..08-27 — 08-01 falls
+        // outside it; lastDays(30) covers 07-29..08-27 — 08-01 falls inside.
         Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
         $owner = $this->owner();
         $this->member($owner, '2026-08-01 10:00:00');
 
-        $week = $this->actingAs($owner, 'owner')->get('/dashboard?period=week');
+        $week = $this->actingAs($owner, 'owner')->get('/dashboard?period=7d');
         $week->assertOk();
 
-        $month = $this->actingAs($owner, 'owner')->get('/dashboard?period=month');
+        $month = $this->actingAs($owner, 'owner')->get('/dashboard?period=30d');
         $month->assertOk();
 
         $this->assertSame(0, $this->extractNewCustomers($week->getContent()));
@@ -304,11 +360,11 @@ class DashboardAnalyticsTest extends TestCase
         }
 
         DB::enableQueryLog();
-        $this->actingAs($small, 'owner')->get('/dashboard?period=month')->assertOk();
+        $this->actingAs($small, 'owner')->get('/dashboard?period=30d')->assertOk();
         $smallCount = count(DB::getQueryLog());
 
         DB::flushQueryLog();
-        $this->actingAs($large, 'owner')->get('/dashboard?period=month')->assertOk();
+        $this->actingAs($large, 'owner')->get('/dashboard?period=30d')->assertOk();
         $largeCount = count(DB::getQueryLog());
         DB::disableQueryLog();
 

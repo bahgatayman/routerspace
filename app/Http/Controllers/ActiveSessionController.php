@@ -91,7 +91,6 @@ class ActiveSessionController extends Controller
             'products' => $products,
             'quickProducts' => $quickProducts,
             'estimates' => $estimates,
-            'allSessions' => $allSessions,
         ]);
     }
 }

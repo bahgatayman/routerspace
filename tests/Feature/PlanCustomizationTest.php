@@ -29,7 +29,7 @@ class PlanCustomizationTest extends TestCase
     private function plan(array $overrides = []): Plan
     {
         return Plan::create(array_merge([
-            'name' => 'Test', 'slug' => 'test-' . uniqid(), 'max_members' => 100,
+            'name' => 'Test', 'slug' => 'test-'.uniqid(), 'max_members' => 100,
             'price_per_month' => 0, 'is_active' => true, 'sort_order' => 1,
             'features' => ['workspace', 'booking'], 'max_workspaces' => 0, 'max_rooms' => 0,
         ], $overrides));
@@ -38,7 +38,7 @@ class PlanCustomizationTest extends TestCase
     private function owner(Plan $plan): Owner
     {
         return Owner::create([
-            'name' => 'Owner', 'email' => 'o' . uniqid() . '@t.local', 'password' => 'secret123',
+            'name' => 'Owner', 'email' => 'o'.uniqid().'@t.local', 'password' => 'secret123',
             'business_name' => 'Space', 'plan_id' => $plan->id, 'is_active' => true,
             'subscription_starts_at' => now(), 'subscription_expires_at' => now()->addMonth(),
         ]);
@@ -46,14 +46,16 @@ class PlanCustomizationTest extends TestCase
 
     public function test_admin_can_set_features_and_limits_on_a_plan(): void
     {
-        $this->actingAs($this->admin(), 'admin')
+        $response = $this->actingAs($this->admin(), 'admin')
             ->post('/admin/plans', [
                 'name' => 'Pro', 'slug' => 'pro', 'max_members' => 100,
                 'max_workspaces' => 5, 'max_rooms' => 25, 'max_products' => 30, 'price_per_month' => 200,
                 'sort_order' => 1, 'features' => ['workspace', 'booking'],
-            ])->assertRedirect(route('admin.plans.index'));
+            ]);
 
         $plan = Plan::where('slug', 'pro')->firstOrFail();
+        // Creating a plan now opens its detail page.
+        $response->assertRedirect(route('admin.plans.show', $plan->id));
         $this->assertEqualsCanonicalizing(['workspace', 'booking'], $plan->features);
         $this->assertSame(5, $plan->max_workspaces);
         $this->assertSame(25, $plan->max_rooms);

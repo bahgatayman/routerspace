@@ -86,7 +86,7 @@
                 <ul class="ls-biz-locs">
                     @foreach ($owner->workspaces as $ws)
                         <li>
-                            <a href="/admin/workspaces/{{ $ws->id }}" class="ls-link">{{ $ws->name }}</a>
+                            <a href="/admin/locations/{{ $ws->id }}" class="ls-link">{{ $ws->name }}</a>
                             <span class="ls-faint">{{ collect([$ws->city, $ws->address, $ws->phone])->filter()->implode(' · ') ?: '—' }}</span>
                             @unless ($ws->is_active)<x-ui.badge tone="neutral" :dot="false">{{ __('app.status.inactive') }}</x-ui.badge>@endunless
                         </li>

@@ -11,14 +11,19 @@
     $q = fn (?int $wsId) => $wsId ? '?workspace='.$wsId : '';
     $tabs = [
         'overview' => ['href' => $base, 'label' => __('app.admin_biz.tabs.overview')],
+        'products' => ['href' => $base.'/products', 'label' => __('app.admin_biz.tabs.products')],
+        'rooms' => ['href' => $base.'/rooms', 'label' => __('app.admin_biz.tabs.rooms')],
+        'bookings' => ['href' => $base.'/bookings', 'label' => __('app.admin_biz.tabs.bookings')],
+        'financials' => ['href' => $base.'/financials', 'label' => __('app.admin_biz.tabs.financials')],
         'members' => ['href' => $base.'/users', 'label' => __('app.admin_biz.tabs.members')],
         'subscription' => ['href' => $base.'/subscription', 'label' => __('app.admin_biz.tabs.subscription')],
+        'activity' => ['href' => $base.'/activity', 'label' => __('app.admin_biz.tabs.activity')],
         'audit' => ['href' => $base.'/audit', 'label' => __('app.admin_biz.tabs.audit')],
     ];
     $locationAware = $locationAware ?? false;
 @endphp
 <div class="ls-biz">
-    <a href="/admin/owners" class="ls-biz-back">&larr; {{ __('app.admin_biz.all_businesses') }}</a>
+    <a href="/admin/workspaces" class="ls-biz-back">&larr; {{ __('app.admin_biz.all_businesses') }}</a>
 
     <header class="ls-biz-head">
         <x-ui.avatar :name="$owner->business_name ?: $owner->name" size="lg" />

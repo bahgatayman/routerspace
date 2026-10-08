@@ -25,6 +25,7 @@ use App\Services\AvailabilityService;
 use App\Services\BusinessHoursService;
 use App\Services\CouponService;
 use App\Services\HourPackageService;
+use App\Services\InventoryService;
 use App\Services\RoomPricingService;
 use App\Services\SalesService;
 use App\Support\Duration;
@@ -717,7 +718,7 @@ class BookingController extends Controller
         return $warning ? $redirect->with('warning', $warning) : $redirect;
     }
 
-    public function updateStatus(Request $request, $id, CouponService $coupons, HourPackageService $packages): RedirectResponse
+    public function updateStatus(Request $request, $id, CouponService $coupons, HourPackageService $packages, InventoryService $inventory): RedirectResponse
     {
         $booking = Booking::where('owner_id', TenantContext::id())->with('room')->findOrFail($id);
 
@@ -791,7 +792,7 @@ class BookingController extends Controller
         } elseif ($validated['status'] === 'cancelled') {
             // Atomic claim so two racing cancels can't both return the
             // booking's package hours; history rows are kept either way.
-            $claimed = DB::transaction(function () use ($booking, $packages) {
+            $claimed = DB::transaction(function () use ($booking, $packages, $inventory) {
                 $updated = Booking::where('id', $booking->id)
                     ->where('owner_id', $booking->owner_id)
                     ->whereIn('status', ['pending', 'confirmed'])
@@ -799,6 +800,22 @@ class BookingController extends Controller
 
                 if ($updated) {
                     $packages->releaseBooking($booking);
+
+                    // SalesService::saleForBooking() marks a Sale 'completed'
+                    // the instant it's created, independent of the booking's
+                    // own status (the invoice is editable while still
+                    // pending/confirmed — Booking::invoiceIsEditable()).
+                    // Without this, cancelling a booking that already has
+                    // products on its invoice would leave that Sale
+                    // 'completed' forever: stock never returned, and every
+                    // revenue/product report keeps counting it as real.
+                    $sale = $booking->sale;
+                    if ($sale && $sale->status !== 'cancelled') {
+                        foreach ($sale->items as $item) {
+                            $inventory->giveBack($item);
+                        }
+                        $sale->update(['status' => 'cancelled']);
+                    }
                 }
 
                 return (bool) $updated;

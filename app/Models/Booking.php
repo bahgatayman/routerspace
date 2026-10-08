@@ -160,6 +160,39 @@ class Booking extends Model
         };
     }
 
+    /*
+    |----------------------------------------------------------------------
+    | Money rules — the ONE definition every report uses (owner Financials,
+    | Super Admin overview/dashboard/financials). Change them here only.
+    |----------------------------------------------------------------------
+    */
+
+    /** Revenue actually earned: what was paid on completed bookings (shared sessions close into these). */
+    public function scopeRevenueRecognised($query)
+    {
+        return $query->where('status', 'completed');
+    }
+
+    /** Bookings that count toward gross booking value (everything not cancelled / no-show). */
+    public function scopeCountsTowardGbv($query)
+    {
+        return $query->whereNotIn('status', ['cancelled', 'no_show']);
+    }
+
+    /** Still owed: net room charge (after coupon) above what was paid, not covered by an hour package. */
+    public function scopeOutstanding($query)
+    {
+        return $query->whereIn('status', ['pending', 'confirmed', 'checked_in', 'completed'])
+            ->where(fn ($q) => $q->whereNull('payment_method')->orWhere('payment_method', '!=', self::METHOD_PACKAGE))
+            ->whereRaw('(total_price - COALESCE(discount_total, 0) - COALESCE(amount_paid, 0)) > 0.004');
+    }
+
+    /** SQL expression for the outstanding amount of a row (pairs with scopeOutstanding). */
+    public const OUTSTANDING_SQL = 'total_price - COALESCE(discount_total, 0) - COALESCE(amount_paid, 0)';
+
+    /** SQL expression for a booking's gross value (net of coupon). */
+    public const GBV_SQL = 'total_price - COALESCE(discount_total, 0)';
+
     public function owner(): BelongsTo
     {
         return $this->belongsTo(Owner::class);

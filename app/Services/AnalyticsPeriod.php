@@ -40,6 +40,52 @@ final class AnalyticsPeriod
         return new self($now->copy()->startOfMonth(), $now->copy()->endOfMonth(), 'this_month');
     }
 
+    /** The last $days days including today (e.g. last 7 days). */
+    public static function lastDays(int $days): self
+    {
+        $now = Carbon::now();
+
+        return new self($now->copy()->subDays(max(1, $days) - 1)->startOfDay(), $now->copy()->endOfDay(), 'last_'.$days);
+    }
+
+    /** The last $months months up to and including today (e.g. 3 → today minus 3 months + 1 day … today). */
+    public static function lastMonths(int $months): self
+    {
+        $now = Carbon::now();
+
+        return new self($now->copy()->subMonthsNoOverflow(max(1, $months))->addDay()->startOfDay(), $now->copy()->endOfDay(), 'last_'.$months.'_months');
+    }
+
+    public static function previousMonth(): self
+    {
+        $start = Carbon::now()->startOfMonth()->subMonthNoOverflow();
+
+        return new self($start->copy(), $start->copy()->endOfMonth(), 'previous_month');
+    }
+
+    /**
+     * A filter preset by key (admin dashboards). Unknown keys fall back to
+     * last 30 days; 'custom' uses $from/$to (Y-m-d, already validated).
+     */
+    public static function fromPreset(string $preset, ?string $from = null, ?string $to = null): self
+    {
+        return match ($preset) {
+            'today' => self::today(),
+            'last_7' => self::lastDays(7),
+            'last_90' => self::lastDays(90),
+            'this_month' => self::thisMonth(),
+            'previous_month' => self::previousMonth(),
+            'custom' => ($from && $to) ? self::custom(Carbon::parse($from), Carbon::parse($to)) : self::lastDays(30),
+            default => self::lastDays(30),
+        };
+    }
+
+    /** Whole days in this window. */
+    public function days(): int
+    {
+        return (int) $this->start->copy()->startOfDay()->diffInDays($this->end->copy()->startOfDay()) + 1;
+    }
+
     public static function custom(Carbon $start, Carbon $end, string $label = 'custom'): self
     {
         return new self($start->copy()->startOfDay(), $end->copy()->endOfDay(), $label);

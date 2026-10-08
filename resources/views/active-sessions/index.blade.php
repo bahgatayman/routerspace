@@ -5,15 +5,6 @@
 @section('content')
 @php
     $canSell = $owner->hasFeature('sales');
-
-    // Summary strip — computed from every active session, regardless of the room filter.
-    $sumItems = $allSessions->sum(fn ($r) => (float) ($r->sale?->total ?? 0));
-    $sumRooms = $allSessions->sum(fn ($r) => ($r->isShared() || $r->model->isOpenSession())
-        ? (float) ($estimates[$r->type.'-'.$r->model->id]?->totalPrice ?? 0)
-        : (float) $r->model->total_price);
-    $endingSoon = $allSessions->filter(fn ($r) => ! $r->isShared() && ! $r->model->isOpenSession() && now()->diffInMinutes($r->model->endsAt(), false) <= 15)->count();
-    $seatsUsed = (int) $sharedRooms->sum(fn ($room) => $room->occupied_seats ?? 0);
-    $seatsTotal = (int) $sharedRooms->sum('capacity');
 @endphp
 <div class="ls-page">
     <x-ui.flash />
@@ -23,35 +14,6 @@
             <x-ui.button variant="primary" icon="play" data-ls-open="start-session-modal">{{ __('app.ui.sessions.start_session') }}</x-ui.button>
         </x-slot:actions>
     </x-ui.page-header>
-
-    <div class="ls-strip">
-        <div>
-            <span class="ls-strip-label">{{ __('app.ui.sessions.here_now') }}</span>
-            <span class="ls-strip-value is-brand">{{ $totalCount }}</span>
-        </div>
-        <div>
-            <span class="ls-strip-label">{{ __('app.ui.sessions.running_bill') }}</span>
-            <span class="ls-strip-value is-revenue"><x-ui.money :amount="$sumRooms + $sumItems" /></span>
-            <span class="ls-strip-meta">{{ __('app.ui.sessions.running_bill_meta') }}</span>
-        </div>
-        @if ($canSell)
-            <div class="ls-hide-sm">
-                <span class="ls-strip-label">{{ __('app.ui.sessions.products_in_bills') }}</span>
-                <span class="ls-strip-value"><x-ui.money :amount="$sumItems" /></span>
-            </div>
-        @endif
-        @if ($sharedRooms->isNotEmpty())
-            <div title="@foreach($sharedRooms as $room){{ $room->name }}: {{ $room->occupied_seats ?? 0 }}/{{ $room->capacity }}&#10;@endforeach">
-                <span class="ls-strip-label">{{ __('app.ui.sessions.shared_seats') }}</span>
-                <span class="ls-strip-value">{{ $seatsUsed }}<span class="ls-faint" style="font-size:14px;font-weight:500"> / {{ $seatsTotal }}</span></span>
-                <div class="ls-meter {{ $seatsTotal && $seatsUsed >= $seatsTotal ? 'is-danger' : '' }}" style="margin-top:6px"><i style="width: {{ $seatsTotal ? min(100, $seatsUsed / $seatsTotal * 100) : 0 }}%"></i></div>
-            </div>
-        @endif
-        <div class="{{ $endingSoon ? '' : 'ls-hide-sm' }}">
-            <span class="ls-strip-label">{{ __('app.ui.sessions.ending_soon_count') }}</span>
-            <span class="ls-strip-value {{ $endingSoon ? 'is-warn' : '' }}">{{ $endingSoon }}</span>
-        </div>
-    </div>
 
     @if ($totalCount > 0)
         <div class="ls-toolbar">
