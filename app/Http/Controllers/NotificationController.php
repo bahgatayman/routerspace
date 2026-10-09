@@ -5,11 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\Notification;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class NotificationController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $notifications = Notification::forOwner(TenantContext::id())
             ->latest()
@@ -17,7 +18,19 @@ class NotificationController extends Controller
 
         $unreadCount = Notification::forOwner(TenantContext::id())->unread()->count();
 
-        return view('notifications.index', compact('notifications', 'unreadCount'));
+        return Inertia::render('Notifications/Index', [
+            'notifications' => $notifications->through(fn (Notification $n) => [
+                'id' => $n->id,
+                'title' => $n->title,
+                'body' => $n->body,
+                'level' => $n->levelColor(),
+                'icon_path' => $n->iconPath(),
+                'read' => $n->isRead(),
+                'has_action' => (bool) $n->action_url,
+                'ago' => $n->created_at?->diffForHumans(),
+            ]),
+            'unreadCount' => $unreadCount,
+        ]);
     }
 
     /** Mark a single notification read and redirect to its target (bell click-through). */

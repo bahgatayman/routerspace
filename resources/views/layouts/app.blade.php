@@ -41,34 +41,8 @@
     // sees items it's also been granted the matching permission for.
     $can = fn (string $key) => ! $actingStaff || $actingStaff->hasPermission($key);
 
-    // Grouped navigation. Every item keeps the exact feature + permission gate it
-    // had before; a group label only renders when at least one of its items does.
-    $navGroups = [
-        ['label' => __('app.ui.nav_group.today'), 'items' => [
-            ['show' => true, 'href' => '/dashboard', 'active' => request()->is('dashboard'), 'icon' => 'home', 'label' => __('app.nav.dashboard')],
-            ['show' => $currentOwner->hasFeature('booking') && ($can('shared_sessions.view') || $can('bookings.view')), 'href' => '/active-sessions', 'active' => request()->is('active-sessions*'), 'icon' => 'live', 'label' => __('app.nav.active_sessions'), 'count' => $navActiveSessionsCount ?? 0],
-            ['show' => $currentOwner->hasFeature('booking') && $can('bookings.view'), 'href' => '/bookings/calendar', 'active' => request()->is('bookings*'), 'icon' => 'calendar', 'label' => __('app.nav.bookings')],
-        ]],
-        ['label' => __('app.ui.nav_group.manage'), 'items' => [
-            ['show' => $currentOwner->hasFeature('workspace') && $can('workspaces.view'), 'href' => '/workspaces', 'active' => request()->is('workspaces*'), 'icon' => 'building', 'label' => __('app.nav.workspaces')],
-            ['show' => ($currentOwner->hasFeature('hotspot') || $currentOwner->hasFeature('booking')) && $can('members.view'), 'href' => '/users', 'active' => request()->is('users*'), 'icon' => 'users', 'label' => __('app.nav.users')],
-            ['show' => $currentOwner->hasFeature('booking') && $can('packages.view'), 'href' => '/packages', 'active' => request()->is('packages*'), 'icon' => 'clock', 'label' => __('app.nav.packages')],
-            ['show' => $currentOwner->hasFeature('sales') && $can('products.view'), 'href' => '/products', 'active' => request()->is('products*'), 'icon' => 'box', 'label' => __('app.nav.products')],
-        ]],
-        ['label' => __('app.ui.nav_group.money'), 'items' => [
-            ['show' => ($currentOwner->hasFeature('booking') || $currentOwner->hasFeature('sales')) && $can('financials.view'), 'href' => '/financials', 'active' => request()->is('financials*'), 'icon' => 'money', 'label' => __('app.nav.financials')],
-            ['show' => ($currentOwner->hasFeature('booking') || $currentOwner->hasFeature('sales')) && $can('expenses.view'), 'href' => '/expenses', 'active' => request()->is('expenses*'), 'icon' => 'receipt', 'label' => __('app.nav.expenses')],
-            ['show' => ($currentOwner->hasFeature('booking') || $currentOwner->hasFeature('sales')) && $can('coupons.view'), 'href' => '/coupons', 'active' => request()->is('coupons*'), 'icon' => 'tag', 'label' => __('app.nav.coupons')],
-        ]],
-        ['label' => __('app.ui.nav_group.network'), 'items' => [
-            ['show' => $currentOwner->hasFeature('hotspot') && $can('hotspot.view_sessions'), 'href' => '/sessions', 'active' => request()->is('sessions*'), 'icon' => 'wifi', 'label' => __('app.nav.wifi_sessions')],
-            ['show' => $currentOwner->hasFeature('hotspot') && $can('hotspot.manage_speed'), 'href' => '/speed-profiles', 'active' => request()->is('speed-profiles*'), 'icon' => 'bolt', 'label' => __('app.nav.speed_profiles')],
-        ]],
-        ['label' => __('app.ui.nav_group.admin'), 'items' => [
-            ['show' => ! $actingStaff, 'href' => '/staff', 'active' => request()->is('staff*'), 'icon' => 'team', 'label' => __('app.nav.staff')],
-            ['show' => $can('settings.view'), 'href' => '/settings', 'active' => request()->is('settings*'), 'icon' => 'gear', 'label' => __('app.nav.settings')],
-        ]],
-    ];
+    // Grouped navigation — shared with the React layout (App\Support\OwnerNavigation).
+    $navGroups = \App\Support\OwnerNavigation::groups($currentOwner, $actingStaff, $navActiveSessionsCount ?? 0);
     $who = $actingStaff->name ?? $owner->name ?? $owner->business_name;
     $toneFor = fn ($c) => match ($c) { 'red', 'rose' => 'danger', 'yellow', 'amber', 'orange' => 'warning', 'green', 'emerald' => 'success', default => 'info' };
     $themeOptions = [

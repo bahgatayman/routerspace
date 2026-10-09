@@ -9,16 +9,18 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response as InertiaResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class RegisterController extends Controller
 {
-    public function showRegister(): View
+    public function showRegister(): InertiaResponse
     {
-        return view('auth.register');
+        return Inertia::render('Auth/Register');
     }
 
-    public function register(Request $request): RedirectResponse
+    public function register(Request $request): Response
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -56,6 +58,7 @@ class RegisterController extends Controller
 
         Auth::guard('owner')->login($owner);
 
-        return redirect('/dashboard');
+        // The session changes on sign-in: leave with a full page load (see LoginController::enter).
+        return $request->header('X-Inertia') ? Inertia::location(url('/dashboard')) : redirect('/dashboard');
     }
 }

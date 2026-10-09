@@ -6,13 +6,14 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Password;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ForgotPasswordController extends Controller
 {
-    public function showForgot(): View
+    public function showForgot(): Response
     {
-        return view('auth.forgot-password');
+        return Inertia::render('Auth/ForgotPassword');
     }
 
     public function sendResetLink(Request $request): RedirectResponse

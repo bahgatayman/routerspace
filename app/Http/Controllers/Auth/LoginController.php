@@ -6,16 +6,18 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response as InertiaResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class LoginController extends Controller
 {
-    public function showLogin(): View
+    public function showLogin(): InertiaResponse
     {
-        return view('auth.login');
+        return Inertia::render('Auth/Login');
     }
 
-    public function login(Request $request): RedirectResponse
+    public function login(Request $request): Response
     {
         $credentials = $request->validate([
             'email' => ['required', 'email'],
@@ -30,13 +32,13 @@ class LoginController extends Controller
         if (Auth::guard('admin')->attempt($credentials, $remember)) {
             $request->session()->regenerate();
 
-            return redirect()->intended('/admin/dashboard');
+            return $this->enter($request, redirect()->intended('/admin/dashboard'));
         }
 
         if (Auth::guard('owner')->attempt($credentials, $remember)) {
             $request->session()->regenerate();
 
-            return redirect()->intended('/dashboard');
+            return $this->enter($request, redirect()->intended('/dashboard'));
         }
 
         if (Auth::guard('staff')->attempt($credentials, $remember)) {
@@ -53,12 +55,22 @@ class LoginController extends Controller
             $request->session()->regenerate();
             $staff->forceFill(['last_login_at' => now()])->save();
 
-            return redirect()->intended('/dashboard');
+            return $this->enter($request, redirect()->intended('/dashboard'));
         }
 
         return back()->withErrors([
             'email' => 'The provided credentials do not match our records.',
         ])->onlyInput('email');
+    }
+
+    /**
+     * Signing in regenerates the session (and CSRF token), so leave with a
+     * full page load: a client-side visit would keep the old token in the
+     * document and break the plain logout / language forms.
+     */
+    private function enter(Request $request, RedirectResponse $redirect): Response
+    {
+        return $request->header('X-Inertia') ? Inertia::location($redirect->getTargetUrl()) : $redirect;
     }
 
     public function logout(Request $request): RedirectResponse
