@@ -22,6 +22,25 @@
 
             @error('mikrotik_host') <p class="text-sm text-red-600 mb-3">{{ $message }}</p> @enderror
 
+            @if ($owner->hasRouterConfigured())
+                @php
+                    $statusBadge = [
+                        'connected' => ['bg-green-50 text-green-700', __('app.mikrotik.status_connected')],
+                        'auth_failed' => ['bg-red-50 text-red-700', __('app.mikrotik.status_auth_failed')],
+                        'unreachable' => ['bg-amber-50 text-amber-700', __('app.mikrotik.status_unreachable')],
+                    ][$owner->mikrotik_last_check_status] ?? ['bg-gray-50 text-gray-500', __('app.mikrotik.status_unknown')];
+                @endphp
+                <div class="flex flex-wrap items-center gap-3 mb-4 text-sm">
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full font-medium {{ $statusBadge[0] }}">{{ $statusBadge[1] }}</span>
+                    <span class="text-gray-400">
+                        {{ $owner->mikrotik_last_checked_at ? __('app.mikrotik.last_checked_at', ['time' => $owner->mikrotik_last_checked_at->diffForHumans()]) : __('app.mikrotik.never_checked') }}
+                    </span>
+                    @if (($pendingSyncCount ?? 0) > 0)
+                        <a href="/router-sync-tasks" class="text-amber-700 underline">{{ __('app.mikrotik.pending_sync_count', ['count' => $pendingSyncCount]) }}</a>
+                    @endif
+                </div>
+            @endif
+
             <form method="POST" action="/settings" class="space-y-4">
                 @csrf
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">

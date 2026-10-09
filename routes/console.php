@@ -14,3 +14,8 @@ Schedule::command('notifications:refresh')->hourly();
 // Auto-complete exclusive-room bookings once their scheduled end time has
 // passed. Shared rooms are excluded — see CompleteExpiredBookings' docblock.
 Schedule::command('bookings:complete-expired')->everyFifteenMinutes();
+
+// Retry pending/failed MikroTik suspend/reactivate/speed-change tasks once
+// a router comes back online — see ReconcileMikroTikSync's own docblock for
+// why this is a scheduled command rather than a queued job.
+Schedule::command('mikrotik:reconcile')->everyFiveMinutes();

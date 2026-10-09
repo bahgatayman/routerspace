@@ -12,6 +12,14 @@ use Illuminate\View\View;
 
 class SpeedProfileController extends Controller
 {
+    /**
+     * Matches RouterOS rate-limit syntax (e.g. "10M", "512k") — the UI only
+     * ever offers the $speedOptions presets, but these columns accept any
+     * string server-side, so a direct POST could otherwise inject arbitrary
+     * text straight into the rate-limit attribute sent to the router.
+     */
+    private const SPEED_RULE = 'regex:/^\d+[kKmM]$/';
+
     public function __construct(private HotspotSyncService $sync) {}
 
     public function index(): View
@@ -39,8 +47,8 @@ class SpeedProfileController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:100|unique:speed_profiles,name,NULL,id,owner_id,'.TenantContext::id(),
-            'speed_download' => 'required|string',
-            'speed_upload' => 'required|string',
+            'speed_download' => ['required', 'string', self::SPEED_RULE],
+            'speed_upload' => ['required', 'string', self::SPEED_RULE],
             'is_default' => 'boolean',
         ]);
 
@@ -95,8 +103,8 @@ class SpeedProfileController extends Controller
 
         $validated = $request->validate([
             'name' => 'required|string|max:100|unique:speed_profiles,name,'.$id.',id,owner_id,'.TenantContext::id(),
-            'speed_download' => 'required|string',
-            'speed_upload' => 'required|string',
+            'speed_download' => ['required', 'string', self::SPEED_RULE],
+            'speed_upload' => ['required', 'string', self::SPEED_RULE],
             'is_default' => 'boolean',
         ]);
 
@@ -105,6 +113,11 @@ class SpeedProfileController extends Controller
                 ->where('id', '!=', $profile->id)
                 ->update(['is_default' => false]);
         }
+
+        // Captured before the rename below — the router still files this
+        // profile under its old name, and syncProfileToUsers() needs that
+        // name to find it there.
+        $priorName = $profile->name;
 
         $profile->update($validated);
 
@@ -115,7 +128,7 @@ class SpeedProfileController extends Controller
             ->get();
 
         try {
-            $syncErrors = $this->sync->syncProfileToUsers($owner, $profile, $assignedUsers);
+            $syncErrors = $this->sync->syncProfileToUsers($owner, $profile, $assignedUsers, $priorName);
         } catch (\Exception $e) {
             return back()->with('error', 'Profile updated in DB but MikroTik sync failed: '.$e->getMessage());
         }

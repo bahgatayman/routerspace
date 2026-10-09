@@ -44,6 +44,11 @@
                             @else
                                 <span class="bg-red-100 text-red-700 px-2 py-1 rounded-full text-xs font-medium">{{ __('app.status.inactive') }}</span>
                             @endif
+                            @if ($owner->hasFeature('hotspot') && $user->router_sync_status !== 'synced')
+                                <span class="ms-1 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {{ $user->router_sync_status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700' }}" title="{{ $user->router_sync_error }}">
+                                    {{ __('app.mikrotik.sync_status_'.$user->router_sync_status) }}
+                                </span>
+                            @endif
                         </td>
                         <td class="px-4 py-3 text-gray-500">{{ $user->created_at->format('M d, Y') }}</td>
                         <td class="px-4 py-3 flex gap-2">

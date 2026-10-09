@@ -34,6 +34,7 @@ use App\Http\Controllers\PackageTemplateController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoomController;
+use App\Http\Controllers\RouterSyncTaskController;
 use App\Http\Controllers\SaleController;
 use App\Http\Controllers\SessionController;
 use App\Http\Controllers\SettingsController;
@@ -119,6 +120,12 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
             Route::post('/speed-profiles/{id}/set-default', [SpeedProfileController::class, 'setDefault']);
         });
         Route::get('/sessions', [SessionController::class, 'index'])->middleware('permission:hotspot.view_sessions');
+
+        Route::middleware('permission:settings.manage')->group(function () {
+            Route::get('/router-sync-tasks', [RouterSyncTaskController::class, 'index']);
+            Route::post('/router-sync-tasks/{id}/retry', [RouterSyncTaskController::class, 'retry']);
+            Route::post('/router-sync-tasks/retry-all', [RouterSyncTaskController::class, 'retryAll']);
+        });
     });
 
     // Workspace feature routes

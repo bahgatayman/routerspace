@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\MikroTik\MikroTikAuthenticationException;
+use App\Exceptions\MikroTik\MikroTikConnectionException;
 use App\Http\Controllers\Concerns\GeneratesTimeSlots;
+use App\Models\RouterSyncTask;
 use App\Models\WorkingHour;
 use App\Services\ActivityLogger;
 use App\Services\HotspotSyncService;
@@ -51,6 +54,9 @@ class SettingsController extends Controller
             'workingHours' => $workingHours,
             'workingHoursTimeSlots' => $this->generateTimeSlots('00:00', '23:30'),
             'hasConfiguredWorkingHours' => $existingHours->isNotEmpty(),
+            'pendingSyncCount' => $owner->hasFeature('hotspot')
+                ? RouterSyncTask::where('owner_id', $owner->id)->unresolved()->count()
+                : 0,
         ]);
     }
 
@@ -92,6 +98,10 @@ class SettingsController extends Controller
             $this->sync->testConnection($owner);
 
             return back()->with('success', 'Connected to MikroTik successfully');
+        } catch (MikroTikAuthenticationException $e) {
+            return back()->with('error', "Authentication failed — check the router username/password: {$e->getMessage()}");
+        } catch (MikroTikConnectionException $e) {
+            return back()->with('error', "Router unreachable — check the host and port: {$e->getMessage()}");
         } catch (Exception $e) {
             return back()->with('error', "Connection failed: {$e->getMessage()}");
         }

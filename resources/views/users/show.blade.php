@@ -130,6 +130,11 @@
                         <h2 class="flex items-center gap-2 text-sm font-semibold text-gray-900 mb-4">
                             <svg class="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg>
                             {{ __('app.user.internet_plan') }}
+                            @if ($user->router_sync_status !== 'synced')
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ $user->router_sync_status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700' }}" title="{{ $user->router_sync_error }}">
+                                    {{ __('app.mikrotik.sync_status_'.$user->router_sync_status) }}
+                                </span>
+                            @endif
                         </h2>
 
                         <div class="rounded-xl bg-gradient-to-br from-blue-800 to-blue-600 text-white p-4">

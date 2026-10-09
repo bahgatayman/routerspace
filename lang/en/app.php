@@ -2729,4 +2729,33 @@ return [
             'no_staff' => 'No staff accounts — the owner runs everything alone.',
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | MikroTik router sync status
+    |--------------------------------------------------------------------------
+    */
+    'mikrotik' => [
+        'status_connected' => 'Connected',
+        'status_auth_failed' => 'Authentication failed',
+        'status_unreachable' => 'Unreachable',
+        'status_unknown' => 'Not checked yet',
+        'last_checked_at' => 'Last checked :time',
+        'never_checked' => 'Never checked',
+        'pending_sync_count' => ':count change(s) waiting to sync to the router',
+        'sync_status_synced' => 'Synced',
+        'sync_status_pending' => 'Pending',
+        'sync_status_failed' => 'Failed',
+        'retry' => 'Retry',
+        'retry_all' => 'Retry all',
+        'tasks_title' => 'Pending Router Sync',
+        'tasks_subtitle' => 'Changes that couldn\'t be confirmed on the router yet. They retry automatically every few minutes — you can also retry now.',
+        'no_tasks' => 'Nothing pending — everything is synced.',
+        'type_suspend' => 'Suspend',
+        'type_reactivate' => 'Reactivate',
+        'type_speed_change' => 'Speed change',
+        'attempts' => ':count attempt(s)',
+        'col_type' => 'Change',
+        'col_details' => 'Details',
+    ],
 ];

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\MikroTik\MikroTikConnectionException;
 use App\Models\Booking;
 use App\Models\HotspotUser;
 use App\Models\MemberPackage;
@@ -13,6 +14,7 @@ use App\Models\SpeedProfile;
 use App\Services\ActivityLogger;
 use App\Services\HotspotSyncService;
 use App\Services\MemberSearchService;
+use App\Support\PhoneNumber;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -82,8 +84,7 @@ class HotspotUserController extends Controller
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'phone' => ['required', 'string', 'max:20',
-                Rule::unique('hotspot_users', 'phone')->where('owner_id', $owner->id)],
+            'phone' => ['required', 'string', 'max:20', $this->uniquePhoneRule($owner)],
             'email' => 'nullable|email|max:255',
             'notes' => 'nullable|string|max:500',
         ]);
@@ -118,8 +119,7 @@ class HotspotUserController extends Controller
         // login/back redirect instead of a 422 carrying the field errors.
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'phone' => ['required', 'string', 'max:20',
-                Rule::unique('hotspot_users', 'phone')->where('owner_id', $owner->id)],
+            'phone' => ['required', 'string', 'max:20', $this->uniquePhoneRule($owner)],
         ]);
 
         if ($validator->fails()) {
@@ -140,10 +140,41 @@ class HotspotUserController extends Controller
     }
 
     /**
+     * Phone uniqueness, cross-format-aware: the existing exact-string unique
+     * rule stays (catches a literal retype of the same value), plus a new
+     * check against phone_normalized so "01012345678" and "+201012345678"
+     * for the same owner are recognized as the same number — without ever
+     * merging the colliding rows (see PhoneNumber's own docblock).
+     */
+    private function uniquePhoneRule(Owner $owner): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail) use ($owner) {
+            if (HotspotUser::where('owner_id', $owner->id)->where('phone', $value)->exists()) {
+                $fail('This phone number is already registered.');
+
+                return;
+            }
+
+            $normalized = PhoneNumber::normalize((string) $value);
+            if ($normalized !== null
+                && HotspotUser::where('owner_id', $owner->id)->where('phone_normalized', $normalized)->exists()) {
+                $fail('This phone number is already registered (under a different format).');
+            }
+        };
+    }
+
+    /**
      * Shared member-creation path for the full form and the inline quick-add.
      *
      * Router provisioning + default speed profile apply to hotspot owners only;
      * booking-only owners get the customer record with no MikroTik interaction.
+     *
+     * The ROUTER identity (router_username, and the password — kept equal to
+     * it so "type your phone number for both fields" stays true at the
+     * captive portal) is the canonical normalized form when the number
+     * parses as Egyptian mobile, falling back to the raw input otherwise.
+     * This only affects NEW members — see the migration's docblock for why
+     * existing members keep their original (already-provisioned) username.
      *
      * @throws \RuntimeException with an owner-facing message when the member
      *                           cannot be created (plan, profile or router).
@@ -151,7 +182,9 @@ class HotspotUserController extends Controller
     private function createMember(Owner $owner, array $data): HotspotUser
     {
         $phone = (string) $data['phone'];
-        $password = $phone;
+        $normalized = PhoneNumber::normalize($phone);
+        $routerUsername = $normalized ?? $phone;
+        $password = $routerUsername;
 
         if (! $owner->plan) {
             throw new \RuntimeException('No active plan assigned. Please contact your administrator.');
@@ -173,7 +206,7 @@ class HotspotUserController extends Controller
             }
 
             try {
-                $this->sync->createUser($owner, $phone, $password, $defaultProfile->name);
+                $this->sync->createUser($owner, $routerUsername, $password, $defaultProfile->name);
             } catch (\Exception $e) {
                 throw new \RuntimeException('MikroTik error: '.$e->getMessage());
             }
@@ -183,11 +216,15 @@ class HotspotUserController extends Controller
             'owner_id' => $owner->id,
             'name' => $data['name'],
             'phone' => $phone,
+            'phone_normalized' => $normalized,
+            'router_username' => $routerUsername,
             'password' => $password,
             'speed_download' => $defaultProfile->speed_download ?? '10M',
             'speed_upload' => $defaultProfile->speed_upload ?? '5M',
             'speed_profile_id' => $defaultProfile?->id,
             'status' => 'active',
+            'router_sync_status' => 'synced',
+            'router_synced_at' => now(),
             'email' => $data['email'] ?? null,
             'notes' => $data['notes'] ?? null,
         ]);
@@ -380,7 +417,7 @@ class HotspotUserController extends Controller
         $owner = TenantContext::user();
 
         try {
-            $this->sync->deleteUser($owner, $user->phone);
+            $this->sync->deleteUser($owner, $user->router_username ?? $user->phone);
         } catch (\Exception $e) {
             return back()->with('error', "Could not delete user from MikroTik: {$e->getMessage()}");
         }
@@ -392,19 +429,33 @@ class HotspotUserController extends Controller
         return redirect('/users')->with('success', 'User deleted successfully');
     }
 
+    /**
+     * Suspending/reactivating always applies the app-level status the owner
+     * asked for — that intent is never rolled back because the router is
+     * slow or unreachable (see HotspotSyncService::applyLifecycleChange()).
+     * What varies is whether the router has CONFIRMED it yet: a router
+     * failure here isn't a failed request, it's a successful one with a
+     * pending/failed router_sync_status the owner can see and retry.
+     */
     public function toggleStatus(int $id): RedirectResponse
     {
         $user = HotspotUser::where('id', $id)
             ->where('owner_id', TenantContext::id())
             ->firstOrFail();
+        $owner = TenantContext::user();
 
-        $user->update([
-            'status' => $user->status === 'active' ? 'inactive' : 'active',
-        ]);
-
+        $user->update(['status' => $user->status === 'active' ? 'inactive' : 'active']);
         $this->activityLogger->log('member.status_toggled', $user, "{$user->name} marked {$user->status}");
 
-        return back()->with('success', 'User status updated successfully');
+        try {
+            $user->status === 'inactive'
+                ? $this->sync->suspendUser($owner, $user)
+                : $this->sync->reactivateUser($owner, $user);
+        } catch (\Exception $e) {
+            return back()->with('warning', "Status updated to \"{$user->status}\" — the router hasn't confirmed it yet ({$e->getMessage()}). It will keep retrying; you can also retry manually from this page.");
+        }
+
+        return back()->with('success', 'User status updated and confirmed on the router');
     }
 
     public function updateSpeed(Request $request, int $id): RedirectResponse
@@ -424,18 +475,14 @@ class HotspotUserController extends Controller
         $owner = TenantContext::user();
 
         try {
-            $this->sync->setUserSpeed($owner, $user->phone, $profile->name);
+            $this->sync->applyVerifiedSpeed($owner, $user, $profile);
+        } catch (MikroTikConnectionException $e) {
+            return back()->with('warning', "Speed change saved — the router hasn't confirmed it yet ({$e->getMessage()}). It will keep retrying; you can also retry manually.");
         } catch (\Exception $e) {
             return back()->with('error', 'MikroTik error: '.$e->getMessage());
         }
 
-        $user->update([
-            'speed_download' => $profile->speed_download,
-            'speed_upload' => $profile->speed_upload,
-            'speed_profile_id' => $profile->id,
-        ]);
-
-        return back()->with('success', 'Speed updated successfully');
+        return back()->with('success', 'Speed updated and confirmed on the router');
     }
 
     public function search(Request $request): JsonResponse

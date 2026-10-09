@@ -24,6 +24,8 @@ class Owner extends Authenticatable
         'mikrotik_port',
         'mikrotik_username',
         'mikrotik_password',
+        'mikrotik_last_checked_at',
+        'mikrotik_last_check_status',
         'subscription_starts_at',
         'subscription_expires_at',
         'is_active',
@@ -40,6 +42,8 @@ class Owner extends Authenticatable
     {
         return [
             'mikrotik_port' => 'integer',
+            'mikrotik_password' => 'encrypted',
+            'mikrotik_last_checked_at' => 'datetime',
             'password' => 'hashed',
             'subscription_starts_at' => 'datetime',
             'subscription_expires_at' => 'datetime',

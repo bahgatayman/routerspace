@@ -12,14 +12,26 @@ class HotspotUser extends Model
         'owner_id',
         'name',
         'phone',
+        'phone_normalized',
+        'router_username',
         'password',
         'speed_download',
         'speed_upload',
         'status',
+        'router_sync_status',
+        'router_synced_at',
+        'router_sync_error',
         'speed_profile_id',
         'email',
         'notes',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'router_synced_at' => 'datetime',
+        ];
+    }
 
     protected $hidden = [
         'password',

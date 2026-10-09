@@ -2,14 +2,21 @@
 
 namespace App\Services;
 
+use App\Exceptions\MikroTik\MikroTikAuthenticationException;
+use App\Exceptions\MikroTik\MikroTikConnectionException;
+use App\Exceptions\MikroTik\MikroTikOperationException;
 use Exception;
 
 class MikroTikService
 {
     private $socket;
+
     private string $host;
+
     private int $port;
+
     private string $username;
+
     private string $password;
 
     public function __construct(string $host, int $port, string $username, string $password)
@@ -24,8 +31,8 @@ class MikroTikService
     {
         $this->socket = @fsockopen($this->host, $this->port, $errno, $errstr, 5);
 
-        if (!$this->socket) {
-            throw new Exception("Connection failed: $errstr ($errno)");
+        if (! $this->socket) {
+            throw new MikroTikConnectionException("Connection failed: $errstr ($errno)");
         }
 
         stream_set_timeout($this->socket, 5);
@@ -40,7 +47,7 @@ class MikroTikService
 
             if (isset($response[0]) && $response[0] === '!trap') {
                 $message = $response[1] ?? 'Unknown error';
-                throw new Exception("Login failed: $message");
+                throw new MikroTikAuthenticationException("Login failed: $message");
             }
 
             $challenge = null;
@@ -53,8 +60,8 @@ class MikroTikService
 
             if ($challenge) {
                 $md5Challenge = pack('H*', $challenge);
-                $md5Password = md5(chr(0) . $this->password . $md5Challenge);
-                $this->sendSentence(['/login', "=name=$this->username", "=response=00" . $md5Password]);
+                $md5Password = md5(chr(0).$this->password.$md5Challenge);
+                $this->sendSentence(['/login', "=name=$this->username", '=response=00'.$md5Password]);
                 $response = $this->readSentence();
 
                 if (isset($response[0]) && $response[0] === '!done') {
@@ -63,11 +70,11 @@ class MikroTikService
 
                 if (isset($response[0]) && $response[0] === '!trap') {
                     $message = $response[1] ?? 'Unknown error';
-                    throw new Exception("Login failed: $message");
+                    throw new MikroTikAuthenticationException("Login failed: $message");
                 }
             }
 
-            throw new Exception('Unexpected login response');
+            throw new MikroTikConnectionException('Unexpected login response');
         } catch (Exception $e) {
             $this->disconnect();
             throw $e;
@@ -86,35 +93,135 @@ class MikroTikService
     {
         $this->sendSentence([
             '/ip/hotspot/user/add',
-            '=name=' . $phone,
-            '=password=' . $password,
-            '=profile=' . $profileName,
+            '=name='.$phone,
+            '=password='.$password,
+            '=profile='.$profileName,
         ]);
         $response = $this->readSentence();
         if (isset($response[0]) && $response[0] === '!trap') {
             $message = $response[1] ?? 'Unknown error';
-            throw new Exception("Failed to create hotspot user: $message");
+            throw new MikroTikOperationException("Failed to create hotspot user: $message");
         }
+
         return in_array('!done', $response);
     }
 
     public function deleteHotspotUser(string $phone): bool
     {
-        $this->sendSentence(['/ip/hotspot/user/remove', "=.id=name=$phone"]);
+        $id = $this->findHotspotUserId($phone);
+
+        $this->sendSentence(['/ip/hotspot/user/remove', '=.id='.$id]);
         $response = $this->readSentence();
         if (isset($response[0]) && $response[0] === '!trap') {
             $message = $response[1] ?? 'Unknown error';
-            throw new Exception("Failed to delete hotspot user: $message");
+            throw new MikroTikOperationException("Failed to delete hotspot user: $message");
         }
+
         return in_array('!done', $response);
     }
 
     public function setUserSpeed(string $phone, string $profileName): bool
     {
+        $id = $this->findHotspotUserId($phone);
+
         $this->sendSentence([
-            '/ip/hotspot/user/print',
-            '?name=' . $phone,
+            '/ip/hotspot/user/set',
+            '=.id='.$id,
+            '=profile='.$profileName,
         ]);
+        $response = $this->readSentence();
+
+        return in_array('!done', $response);
+    }
+
+    /** Disable (not delete) a hotspot user — their account/profile/password stay on the router, just unable to log in. */
+    public function disableHotspotUser(string $phone): bool
+    {
+        $id = $this->findHotspotUserId($phone);
+
+        $this->sendSentence(['/ip/hotspot/user/set', '=.id='.$id, '=disabled=yes']);
+        $response = $this->readSentence();
+        if (isset($response[0]) && $response[0] === '!trap') {
+            $message = $response[1] ?? 'Unknown error';
+            throw new MikroTikOperationException("Failed to disable hotspot user: $message");
+        }
+
+        return in_array('!done', $response);
+    }
+
+    /** Re-enable a previously disabled hotspot user — their existing profile/password are untouched. */
+    public function enableHotspotUser(string $phone): bool
+    {
+        $id = $this->findHotspotUserId($phone);
+
+        $this->sendSentence(['/ip/hotspot/user/set', '=.id='.$id, '=disabled=no']);
+        $response = $this->readSentence();
+        if (isset($response[0]) && $response[0] === '!trap') {
+            $message = $response[1] ?? 'Unknown error';
+            throw new MikroTikOperationException("Failed to enable hotspot user: $message");
+        }
+
+        return in_array('!done', $response);
+    }
+
+    /**
+     * Read-back verification: the router's own idea of whether this user is
+     * currently disabled. Null if the user isn't found at all (distinct from
+     * false, which is a confirmed "not disabled" answer).
+     */
+    public function getHotspotUserDisabled(string $phone): ?bool
+    {
+        $this->sendSentence(['/ip/hotspot/user/print', '?name='.$phone]);
+        $response = $this->readSentence();
+
+        $found = false;
+        $disabled = false;
+        foreach ($response as $word) {
+            if (str_starts_with($word, '=.id=')) {
+                $found = true;
+            }
+            if (str_starts_with($word, '=disabled=')) {
+                $disabled = substr($word, 10) === 'true';
+            }
+        }
+
+        return $found ? $disabled : null;
+    }
+
+    /** Read-back verification: the profile currently assigned to this user on the router, or null if not found. */
+    public function getHotspotUserProfile(string $phone): ?string
+    {
+        $this->sendSentence(['/ip/hotspot/user/print', '?name='.$phone]);
+        $response = $this->readSentence();
+
+        foreach ($response as $word) {
+            if (str_starts_with($word, '=profile=')) {
+                return substr($word, 9);
+            }
+        }
+
+        return null;
+    }
+
+    /** Read-back verification: a profile's current rate-limit string ("upload/download"), or null if not found. */
+    public function getHotspotProfileRateLimit(string $name): ?string
+    {
+        $this->sendSentence(['/ip/hotspot/user/profile/print', '?name='.$name]);
+        $response = $this->readSentence();
+
+        foreach ($response as $word) {
+            if (str_starts_with($word, '=rate-limit=')) {
+                return substr($word, 12);
+            }
+        }
+
+        return null;
+    }
+
+    /** Shared by every method that mutates a specific hotspot user by name — resolves RouterOS's real numeric .id first. */
+    private function findHotspotUserId(string $phone): string
+    {
+        $this->sendSentence(['/ip/hotspot/user/print', '?name='.$phone]);
         $response = $this->readSentence();
         $id = null;
         foreach ($response as $word) {
@@ -122,17 +229,11 @@ class MikroTikService
                 $id = substr($word, 5);
             }
         }
-        if (!$id) {
-            throw new Exception("User '$phone' not found on MikroTik");
+        if (! $id) {
+            throw new MikroTikOperationException("User '$phone' not found on MikroTik");
         }
 
-        $this->sendSentence([
-            '/ip/hotspot/user/set',
-            '=.id=' . $id,
-            '=profile=' . $profileName,
-        ]);
-        $response = $this->readSentence();
-        return in_array('!done', $response);
+        return $id;
     }
 
     public function getActiveUsers(): array
@@ -164,7 +265,7 @@ class MikroTikService
                     }
                 }
 
-                if (!empty($user)) {
+                if (! empty($user)) {
                     $users[] = $user;
                 }
             }
@@ -175,27 +276,34 @@ class MikroTikService
 
     public function createHotspotProfile(string $name, string $speedDownload, string $speedUpload): bool
     {
-        $rateLimit = $speedUpload . '/' . $speedDownload;
+        $rateLimit = $speedUpload.'/'.$speedDownload;
         $this->sendSentence([
             '/ip/hotspot/user/profile/add',
-            '=name=' . $name,
-            '=rate-limit=' . $rateLimit,
+            '=name='.$name,
+            '=rate-limit='.$rateLimit,
         ]);
         $response = $this->readSentence();
         if (isset($response[0]) && $response[0] === '!trap') {
             $message = $response[1] ?? 'Unknown error';
-            throw new Exception("Failed to create hotspot profile: $message");
+            throw new MikroTikOperationException("Failed to create hotspot profile: $message");
         }
+
         return in_array('!done', $response);
     }
 
-    public function updateHotspotProfile(string $name, string $speedDownload, string $speedUpload): bool
+    /**
+     * $currentName is the name the profile is found under on the router right
+     * now; $newName (when different) renames it in the same /set call. The
+     * caller must pass the pre-rename name here — looking the profile up by
+     * an already-renamed DB value would never find it on the router.
+     */
+    public function updateHotspotProfile(string $currentName, string $speedDownload, string $speedUpload, ?string $newName = null): bool
     {
-        $rateLimit = $speedUpload . '/' . $speedDownload;
+        $rateLimit = $speedUpload.'/'.$speedDownload;
 
         $this->sendSentence([
             '/ip/hotspot/user/profile/print',
-            '?name=' . $name,
+            '?name='.$currentName,
         ]);
         $response = $this->readSentence();
         $id = null;
@@ -204,16 +312,22 @@ class MikroTikService
                 $id = substr($word, 5);
             }
         }
-        if (!$id) {
-            throw new Exception("Profile '$name' not found on MikroTik");
+        if (! $id) {
+            throw new MikroTikOperationException("Profile '$currentName' not found on MikroTik");
         }
 
-        $this->sendSentence([
+        $words = [
             '/ip/hotspot/user/profile/set',
-            '=.id=' . $id,
-            '=rate-limit=' . $rateLimit,
-        ]);
+            '=.id='.$id,
+            '=rate-limit='.$rateLimit,
+        ];
+        if ($newName !== null && $newName !== $currentName) {
+            $words[] = '=name='.$newName;
+        }
+
+        $this->sendSentence($words);
         $response = $this->readSentence();
+
         return in_array('!done', $response);
     }
 
@@ -221,7 +335,7 @@ class MikroTikService
     {
         $this->sendSentence([
             '/ip/hotspot/user/profile/print',
-            '?name=' . $name,
+            '?name='.$name,
         ]);
         $response = $this->readSentence();
         $id = null;
@@ -230,15 +344,16 @@ class MikroTikService
                 $id = substr($word, 5);
             }
         }
-        if (!$id) {
-            throw new Exception("Profile '$name' not found on MikroTik");
+        if (! $id) {
+            throw new MikroTikOperationException("Profile '$name' not found on MikroTik");
         }
 
         $this->sendSentence([
             '/ip/hotspot/user/profile/remove',
-            '=.id=' . $id,
+            '=.id='.$id,
         ]);
         $response = $this->readSentence();
+
         return in_array('!done', $response);
     }
 
@@ -271,12 +386,12 @@ class MikroTikService
     private function writeWord(string $word): void
     {
         $length = strlen($word);
-        $encoded = $this->encodeLength($length) . $word;
+        $encoded = $this->encodeLength($length).$word;
 
         $written = @fwrite($this->socket, $encoded, strlen($encoded));
 
         if ($written === false) {
-            throw new Exception('Failed to write to socket');
+            throw new MikroTikConnectionException('Failed to write to socket');
         }
     }
 
@@ -291,7 +406,7 @@ class MikroTikService
         $word = @fread($this->socket, $length);
 
         if ($word === false) {
-            throw new Exception('Failed to read from socket');
+            throw new MikroTikConnectionException('Failed to read from socket');
         }
 
         return $word;
@@ -304,18 +419,18 @@ class MikroTikService
         }
 
         if ($length < 0x4000) {
-            return chr(($length >> 8) | 0x80) . chr($length & 0xFF);
+            return chr(($length >> 8) | 0x80).chr($length & 0xFF);
         }
 
         if ($length < 0x200000) {
-            return chr(($length >> 16) | 0xC0) . chr(($length >> 8) & 0xFF) . chr($length & 0xFF);
+            return chr(($length >> 16) | 0xC0).chr(($length >> 8) & 0xFF).chr($length & 0xFF);
         }
 
         if ($length < 0x10000000) {
-            return chr(($length >> 24) | 0xE0) . chr(($length >> 16) & 0xFF) . chr(($length >> 8) & 0xFF) . chr($length & 0xFF);
+            return chr(($length >> 24) | 0xE0).chr(($length >> 16) & 0xFF).chr(($length >> 8) & 0xFF).chr($length & 0xFF);
         }
 
-        return chr(0xF0) . chr(($length >> 24) & 0xFF) . chr(($length >> 16) & 0xFF) . chr(($length >> 8) & 0xFF) . chr($length & 0xFF);
+        return chr(0xF0).chr(($length >> 24) & 0xFF).chr(($length >> 16) & 0xFF).chr(($length >> 8) & 0xFF).chr($length & 0xFF);
     }
 
     private function readLength(): int
@@ -323,7 +438,7 @@ class MikroTikService
         $byte = @fread($this->socket, 1);
 
         if ($byte === false || $byte === '') {
-            throw new Exception('Failed to read length byte');
+            throw new MikroTikConnectionException('Failed to read length byte');
         }
 
         $ord = ord($byte);
@@ -335,31 +450,35 @@ class MikroTikService
         if ($ord < 0xC0) {
             $next = @fread($this->socket, 1);
             if ($next === false) {
-                throw new Exception('Failed to read second length byte');
+                throw new MikroTikConnectionException('Failed to read second length byte');
             }
+
             return (($ord & 0x3F) << 8) | ord($next);
         }
 
         if ($ord < 0xE0) {
             $next = @fread($this->socket, 2);
             if ($next === false || strlen($next) < 2) {
-                throw new Exception('Failed to read length bytes');
+                throw new MikroTikConnectionException('Failed to read length bytes');
             }
+
             return (($ord & 0x1F) << 16) | (ord($next[0]) << 8) | ord($next[1]);
         }
 
         if ($ord < 0xF0) {
             $next = @fread($this->socket, 3);
             if ($next === false || strlen($next) < 3) {
-                throw new Exception('Failed to read length bytes');
+                throw new MikroTikConnectionException('Failed to read length bytes');
             }
+
             return (($ord & 0x0F) << 24) | (ord($next[0]) << 16) | (ord($next[1]) << 8) | ord($next[2]);
         }
 
         $next = @fread($this->socket, 4);
         if ($next === false || strlen($next) < 4) {
-            throw new Exception('Failed to read length bytes');
+            throw new MikroTikConnectionException('Failed to read length bytes');
         }
+
         return (ord($next[0]) << 24) | (ord($next[1]) << 16) | (ord($next[2]) << 8) | ord($next[3]);
     }
 }
