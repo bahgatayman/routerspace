@@ -200,7 +200,7 @@ class BookingAnalyticsService
             ->whereNotIn('status', ['cancelled', 'no_show'])
             ->whereDate('booking_date', '>=', $period->startDate())
             ->whereDate('booking_date', '<=', $period->endDate())
-            ->selectRaw("CAST(strftime('%w', booking_date) AS INTEGER) as dow, CAST(substr(start_time, 1, 2) AS INTEGER) as hour, COUNT(*) as c")
+            ->selectRaw($this->dayOfWeekSql().' as dow, CAST(substr(start_time, 1, 2) AS INTEGER) as hour, COUNT(*) as c')
             ->groupBy('dow', 'hour')
             ->get()
             ->reduce(function (array $grid, $row) {
@@ -208,6 +208,22 @@ class BookingAnalyticsService
 
                 return $grid;
             }, $grid);
+    }
+
+    /**
+     * Day-of-week SQL fragment for booking_date, 0=Sunday..6=Saturday on
+     * every driver this app runs on. SQLite has no DAYOFWEEK()/EXTRACT();
+     * its own strftime('%w', ...) already returns 0=Sunday..6=Saturday, so
+     * only that branch needs the cast. MySQL's DAYOFWEEK() returns
+     * 1=Sunday..7=Saturday, hence the "- 1" to match the same convention.
+     */
+    private function dayOfWeekSql(): string
+    {
+        return match (Booking::query()->getConnection()->getDriverName()) {
+            'mysql', 'mariadb' => '(DAYOFWEEK(booking_date) - 1)',
+            'pgsql' => 'EXTRACT(DOW FROM booking_date)::integer',
+            default => "CAST(strftime('%w', booking_date) AS INTEGER)",
+        };
     }
 
     /**

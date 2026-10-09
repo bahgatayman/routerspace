@@ -264,4 +264,35 @@ class BookingAnalyticsServiceTest extends TestCase
 
         $this->assertSame(array_fill(0, 7, array_fill(0, 24, 0)), $grid);
     }
+
+    /**
+     * No MySQL server is available in this test environment, so this
+     * verifies the exact SQL fragment picked per driver instead of running
+     * a live query — getDriverName() only reads config, it never opens a
+     * connection, so switching database.default here is safe. This is what
+     * directly guards the production bug: strftime('%w', ...) is SQLite-only
+     * and throws "FUNCTION ... strftime does not exist" on MySQL.
+     */
+    public function test_day_of_week_sql_picks_the_right_expression_per_driver(): void
+    {
+        $method = new \ReflectionMethod(BookingAnalyticsService::class, 'dayOfWeekSql');
+        $method->setAccessible(true);
+        $originalDefault = config('database.default');
+
+        try {
+            config(['database.default' => 'sqlite']);
+            $this->assertSame("CAST(strftime('%w', booking_date) AS INTEGER)", $method->invoke($this->bookingAnalytics));
+
+            config(['database.default' => 'mysql']);
+            $this->assertSame('(DAYOFWEEK(booking_date) - 1)', $method->invoke($this->bookingAnalytics));
+
+            config(['database.default' => 'mariadb']);
+            $this->assertSame('(DAYOFWEEK(booking_date) - 1)', $method->invoke($this->bookingAnalytics));
+
+            config(['database.default' => 'pgsql']);
+            $this->assertSame('EXTRACT(DOW FROM booking_date)::integer', $method->invoke($this->bookingAnalytics));
+        } finally {
+            config(['database.default' => $originalDefault]);
+        }
+    }
 }
