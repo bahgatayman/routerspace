@@ -10,12 +10,13 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /** Hour Package templates — the owner's reusable offers ("30 Hours Monthly"). */
 class PackageTemplateController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $owner = TenantContext::user();
 
@@ -27,18 +28,35 @@ class PackageTemplateController extends Controller
 
         $staff = auth('staff')->user();
 
-        return view('packages.index', [
-            'templates' => $templates,
-            'roomNames' => Room::where('owner_id', $owner->id)->pluck('name', 'id'),
+        $roomNames = Room::where('owner_id', $owner->id)->pluck('name', 'id');
+
+        return Inertia::render('Packages/Index', [
+            'templates' => $templates->map(function (PackageTemplate $t) use ($roomNames) {
+                $hours = $t->total_minutes / 60;
+                $perHour = $hours > 0 ? (float) $t->price / $hours : 0;
+                $rooms = $t->room_ids ? collect($t->room_ids)->map(fn ($id) => $roomNames[$id] ?? null)->filter() : null;
+
+                return [
+                    'id' => $t->id,
+                    'name' => $t->name,
+                    'is_active' => (bool) $t->is_active,
+                    'hours_label' => $t->hoursLabel(),
+                    'validity_days' => $t->validity_days,
+                    'price' => (float) $t->price,
+                    'per_hour' => round($perHour, 2),
+                    'rooms_label' => $rooms ? $rooms->implode(', ') : __('app.packages.all_rooms'),
+                    'sold_count' => $t->member_packages_count,
+                ];
+            })->values(),
             'canManage' => ! $staff || $staff->hasPermission('packages.manage'),
         ]);
     }
 
-    public function create(): View
+    public function create(): Response
     {
-        return view('packages.create', [
-            'template' => new PackageTemplate(['is_active' => true, 'validity_days' => 30]),
-            'roomGroups' => $this->ownerRoomsGrouped(TenantContext::user()),
+        return Inertia::render('Packages/Form', [
+            'template' => $this->formTemplate(new PackageTemplate(['is_active' => true, 'validity_days' => 30])),
+            'roomGroups' => $this->roomGroupsForForm($this->ownerRoomsGrouped(TenantContext::user())),
         ]);
     }
 
@@ -52,13 +70,13 @@ class PackageTemplateController extends Controller
         return redirect()->route('packages.index')->with('success', __('app.packages.template_created'));
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $owner = TenantContext::user();
 
-        return view('packages.edit', [
-            'template' => PackageTemplate::where('owner_id', $owner->id)->findOrFail($id),
-            'roomGroups' => $this->ownerRoomsGrouped($owner),
+        return Inertia::render('Packages/Form', [
+            'template' => $this->formTemplate(PackageTemplate::where('owner_id', $owner->id)->findOrFail($id)),
+            'roomGroups' => $this->roomGroupsForForm($this->ownerRoomsGrouped($owner)),
         ]);
     }
 
@@ -116,6 +134,29 @@ class PackageTemplateController extends Controller
             'room_ids' => $v['room_scope'] === 'specific' ? array_values(array_map('intval', $v['room_ids'] ?? [])) : null,
             'is_active' => $request->boolean('is_active'),
         ];
+    }
+
+    /** Form values as the old _form partial pre-filled them (hours shown without trailing zeros). */
+    private function formTemplate(PackageTemplate $template): array
+    {
+        return [
+            'id' => $template->id,
+            'name' => $template->name ?? '',
+            'hours' => $template->total_minutes ? rtrim(rtrim(number_format($template->total_minutes / 60, 2, '.', ''), '0'), '.') : '',
+            'price' => $template->price ?? '',
+            'validity_days' => $template->validity_days ?? '',
+            'room_scope' => empty($template->room_ids) ? 'all' : 'specific',
+            'room_ids' => array_values(array_map('intval', $template->room_ids ?? [])),
+            'is_active' => (bool) ($template->is_active ?? true),
+        ];
+    }
+
+    private function roomGroupsForForm(Collection $groups): array
+    {
+        return $groups->map(fn ($rooms, $group) => [
+            'label' => $group,
+            'rooms' => $rooms->map(fn (Room $room) => ['id' => $room->id, 'name' => $room->name])->values()->all(),
+        ])->values()->all();
     }
 
     /** @return Collection<string, Collection<int, Room>> */

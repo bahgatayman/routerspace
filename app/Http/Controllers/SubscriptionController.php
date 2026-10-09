@@ -6,7 +6,9 @@ use App\Models\Plan;
 use App\Models\SubscriptionRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Illuminate\Support\Facades\Lang;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class SubscriptionController extends Controller
 {
@@ -14,22 +16,22 @@ class SubscriptionController extends Controller
      * Shown by CheckSubscription when the owner's subscription lapsed. Lists the
      * plans so they can ask to renew instead of hitting a dead end.
      */
-    public function expired(): View|RedirectResponse
+    public function expired(): Response|RedirectResponse
     {
         if (auth('owner')->user()->isSubscriptionActive()) {
             return redirect('/dashboard');
         }
 
-        return view('subscription.expired', $this->planPickerData());
+        return Inertia::render('Subscription/Expired', $this->planPickerData());
     }
 
     /**
      * Same plan picker for owners whose subscription is still running — renew
      * early or move to a different plan.
      */
-    public function plans(): View
+    public function plans(): Response
     {
-        return view('subscription.plans', $this->planPickerData());
+        return Inertia::render('Subscription/Plans', $this->planPickerData());
     }
 
     public function requestRenewal(Request $request): RedirectResponse
@@ -95,23 +97,80 @@ class SubscriptionController extends Controller
         return back()->with('success', __('app.subscription.request_cancelled'));
     }
 
-    /** Shared payload for both plan screens. */
+    /** Shared payload for both plan screens — explicit arrays, every amount formatted here. */
     private function planPickerData(): array
     {
         $owner = auth('owner')->user()->load('plan');
+        $status = $owner->subscriptionStatus();
+        $usedSlots = $owner->hotspotUsers()->count();
+        $maxSlots = $owner->plan?->max_members ?? 0;
+        $egp = fn ($amount) => 'ج.م '.number_format((float) $amount, 2);
+
+        $plans = Plan::where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('price_per_month')
+            ->get();
+        $pending = $this->pendingRequest();
+        $recent = SubscriptionRequest::where('owner_id', $owner->id)
+            ->with('plan')
+            ->latest()
+            ->take(5)
+            ->get();
 
         return [
-            'owner' => $owner,
-            'plans' => Plan::where('is_active', true)
-                ->orderBy('sort_order')
-                ->orderBy('price_per_month')
-                ->get(),
-            'pendingRequest' => $this->pendingRequest(),
-            'recentRequests' => SubscriptionRequest::where('owner_id', $owner->id)
-                ->with('plan')
-                ->latest()
-                ->take(5)
-                ->get(),
+            'owner' => [
+                'business_name' => $owner->business_name,
+                'plan_id' => $owner->plan_id,
+                'plan_name' => $owner->plan?->name,
+                'status' => $status,
+                'days_left' => $owner->daysUntilExpiry(),
+                'expires_at' => $owner->subscription_expires_at?->format('d M Y'),
+                'used_slots' => $usedSlots,
+                'max_slots' => $maxSlots,
+                'usage' => $maxSlots > 0 ? min(100, ($usedSlots / $maxSlots) * 100) : 0,
+            ],
+            'monthOptions' => [1, 3, 6, 12],
+            'plans' => $plans->map(fn (Plan $plan) => [
+                'id' => $plan->id,
+                'name' => $plan->name,
+                'is_free' => $plan->isFree(),
+                'price_whole' => number_format((float) $plan->price_per_month, 0),
+                'price' => $egp($plan->price_per_month),
+                // Billed total for each selectable duration (the old picker script multiplied in the browser).
+                'totals' => collect([1, 3, 6, 12])->mapWithKeys(fn ($m) => [$m => $egp($plan->price_per_month * $m)])->all(),
+                // 0 / null on a plan limit means unlimited (see Owner::canAddMore*).
+                'limits' => collect([
+                    ['label' => __('app.common.members'), 'value' => $plan->max_members, 'unlimited' => false],
+                    ['label' => __('app.nav.workspaces'), 'value' => $plan->max_workspaces, 'unlimited' => true],
+                    ['label' => __('app.plan.max_rooms'), 'value' => $plan->max_rooms, 'unlimited' => true],
+                    ['label' => __('app.plan.max_products'), 'value' => $plan->max_products, 'unlimited' => true],
+                ])->reject(fn ($l) => $l['value'] === null && ! $l['unlimited'])
+                    ->map(fn ($l) => [
+                        'label' => $l['label'],
+                        'value' => $l['unlimited'] && ! $l['value'] ? __('app.subscription.unlimited') : (string) $l['value'],
+                    ])->values()->all(),
+                // Unknown keys fall back to the raw name rather than printing "app.feature.x".
+                'features' => collect($plan->defaultFeatures())
+                    ->map(fn ($f) => Lang::has('app.feature.'.$f) ? __('app.feature.'.$f) : ucfirst($f))->values()->all(),
+            ])->values(),
+            'pendingRequest' => $pending ? [
+                'id' => $pending->id,
+                'plan_name' => $pending->plan?->name,
+                'months' => $pending->months,
+                'amount' => $egp($pending->amount),
+                'requested_on' => $pending->created_at->format('d M Y, H:i'),
+            ] : null,
+            'recentRequests' => $recent->map(fn (SubscriptionRequest $req) => [
+                'id' => $req->id,
+                'plan_name' => $req->plan?->name,
+                'months' => $req->months,
+                'date' => $req->created_at->format('d M Y'),
+                'admin_note' => $req->admin_note,
+                'amount' => $egp($req->amount),
+                'status' => $req->status,
+                'status_label' => __('app.subscription.status_'.$req->status),
+                'color' => $req->statusColor(),
+            ])->values(),
         ];
     }
 

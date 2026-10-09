@@ -9,9 +9,11 @@ use App\Models\Owner;
 use App\Models\Room;
 use App\Models\Workspace;
 use App\Services\AvailabilityService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * Super Admin → every room on the platform, with its business and location.
@@ -26,7 +28,7 @@ class RoomController extends Controller
 
     public const SORTS = ['name' => 'name', 'capacity' => 'capacity', 'price' => 'price_per_hour', 'bookings' => 'period_bookings', 'earnings' => 'period_earnings', 'created' => 'created_at'];
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         [$period, $range] = $this->resolvePeriod($request);
         $search = trim((string) $request->query('q', ''));
@@ -55,18 +57,33 @@ class RoomController extends Controller
             ->paginate(25)
             ->withQueryString();
 
-        return view('admin.rooms.index', [
-            'rooms' => $rooms,
-            'owners' => Owner::has('rooms')->orderBy('business_name')->get(['id', 'business_name', 'name']),
-            'locations' => $ownerId ? Workspace::where('owner_id', $ownerId)->orderBy('name')->get(['id', 'name']) : collect(),
+        return Inertia::render('Admin/Rooms/Index', [
+            'rooms' => $rooms->through(fn (Room $room) => [
+                'id' => $room->id,
+                'name' => $room->name,
+                'owner_id' => $room->owner_id,
+                'business' => $room->owner?->business_name,
+                'location_id' => $room->workspace ? $room->workspace_id : null,
+                'location' => $room->workspace?->name,
+                'type' => $room->typeLabel(),
+                'capacity' => $room->capacity,
+                'pricing' => $room->pricingSummary(),
+                'period_bookings' => (int) $room->period_bookings,
+                'period_earnings' => (float) $room->period_earnings,
+                'is_available' => (bool) $room->is_available,
+            ]),
+            'owners' => Owner::has('rooms')->orderBy('business_name')->get(['id', 'business_name', 'name'])
+                ->map(fn ($o) => ['id' => $o->id, 'name' => $o->business_name ?: $o->name]),
+            'locations' => $ownerId ? Workspace::where('owner_id', $ownerId)->orderBy('name')->get(['id', 'name']) : [],
             'filters' => ['q' => $search, 'owner' => $ownerId, 'location' => $locationId, 'type' => $type, 'available' => $available, 'idle' => $idle],
             'sort' => $sort,
             'dir' => $dir,
             'range' => $range,
+            'types' => self::TYPES,
         ]);
     }
 
-    public function show(Request $request, int $room, AvailabilityService $availability): View
+    public function show(Request $request, int $room, AvailabilityService $availability): Response
     {
         [$period, $range] = $this->resolvePeriod($request);
         $room = Room::with(['owner', 'workspace', 'plans' => fn ($q) => $q->orderBy('sort_order'), 'pricingProfiles' => fn ($q) => $q->orderBy('sort_order')])->findOrFail($room);
@@ -88,12 +105,43 @@ class RoomController extends Controller
             'all_time' => $base()->count(),
         ];
 
-        return view('admin.rooms.show', [
-            'room' => $room,
+        $recent = $base()->with('hotspotUser:id,name,phone')->latest('booking_date')->latest('start_time')->take(10)->get();
+        $shared = $room->isShared();
+
+        return Inertia::render('Admin/Rooms/Show', [
+            'room' => [
+                'id' => $room->id,
+                'name' => $room->name,
+                'is_available' => (bool) $room->is_available,
+                'owner_id' => $room->owner_id,
+                'business' => $room->owner?->business_name,
+                'location_id' => $room->workspace ? $room->workspace_id : null,
+                'location' => $room->workspace?->name,
+                'type' => $room->typeLabel(),
+                'capacity' => $room->capacity,
+                'pricing_model' => $room->pricing_model ?: 'hourly',
+                'pricing' => $room->pricingSummary(),
+                'is_shared' => $shared,
+                'billing_unit' => $shared ? $room->billingUnitLabel() : null,
+                'buffer_minutes' => $room->billing_buffer_minutes,
+                'description' => $room->description,
+                'profiles' => $room->pricingProfiles->map(fn ($p) => ['id' => $p->id, 'name' => $p->name, 'is_active' => (bool) $p->is_active, 'price_per_hour' => (float) $p->price_per_hour])->values(),
+                'plans' => $room->plans->map(fn ($p) => ['id' => $p->id, 'name' => $p->name, 'price' => (float) $p->price])->values(),
+            ],
             'stats' => $stats,
             'range' => $range,
-            'today' => $availability->freeBusyForDay($room, today()->toDateString()),
-            'recent' => $base()->with('hotspotUser:id,name,phone')->latest('booking_date')->latest('start_time')->take(10)->get(),
+            'today' => collect($availability->freeBusyForDay($room, today()->toDateString()))->map(fn ($seg) => [
+                'start' => Carbon::parse($seg['start'])->format('g:i A'),
+                'end' => Carbon::parse($seg['end'])->format('g:i A'),
+                'state' => $seg['closed'] ? 'closed' : ($seg['available'] <= 0 ? 'full' : ($seg['used'] > 0 ? 'partial' : 'free')),
+                'closed' => (bool) $seg['closed'],
+                'available' => $seg['available'],
+                'capacity' => $seg['capacity'],
+            ])->values(),
+            // Hidden table columns (business, room) come from this room: no extra queries.
+            'recent' => $recent->map(fn (Booking $b) => BookingController::tableRow(
+                $b->setRelation('owner', $room->owner)->setRelation('room', $room)
+            ))->values(),
         ]);
     }
 }

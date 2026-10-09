@@ -8,6 +8,7 @@ use App\Models\WorkingHour;
 use Carbon\Carbon;
 use Database\Seeders\FeatureSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -59,8 +60,7 @@ class DashboardWorkingHoursTest extends TestCase
 
         $this->actingAs($owner, 'owner')->get('/dashboard')
             ->assertOk()
-            ->assertDontSee(__('app.label.open_now'))
-            ->assertDontSee(__('app.label.closed_now'));
+            ->assertInertia(fn (Assert $page) => $page->component('Dashboard/Index')->where('workingHours', null));
     }
 
     public function test_badge_shows_open_now_within_configured_hours(): void
@@ -74,7 +74,7 @@ class DashboardWorkingHoursTest extends TestCase
 
         $this->actingAs($owner, 'owner')->get('/dashboard')
             ->assertOk()
-            ->assertSee(__('app.label.open_now'));
+            ->assertInertia(fn (Assert $page) => $page->where('workingHours.isOpenNow', true));
     }
 
     public function test_badge_shows_closed_now_outside_configured_hours(): void
@@ -88,7 +88,7 @@ class DashboardWorkingHoursTest extends TestCase
 
         $this->actingAs($owner, 'owner')->get('/dashboard')
             ->assertOk()
-            ->assertSee(__('app.label.closed_now'));
+            ->assertInertia(fn (Assert $page) => $page->where('workingHours.isOpenNow', false));
     }
 
     public function test_badge_is_hidden_for_a_hotspot_only_owner(): void
@@ -101,7 +101,6 @@ class DashboardWorkingHoursTest extends TestCase
 
         $this->actingAs($owner, 'owner')->get('/dashboard')
             ->assertOk()
-            ->assertDontSee(__('app.label.open_now'))
-            ->assertDontSee(__('app.label.closed_now'));
+            ->assertInertia(fn (Assert $page) => $page->component('Dashboard/Index')->where('workingHours', null));
     }
 }

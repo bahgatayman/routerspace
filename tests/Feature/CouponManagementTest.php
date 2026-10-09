@@ -243,8 +243,8 @@ class CouponManagementTest extends TestCase
 
         $response = $this->asGuard($owner, 'owner')->get('/coupons?search=findme');
 
-        $response->assertSee('FINDME');
-        $response->assertDontSee('HIDDEN');
+        $this->assertSame(['FINDME'], collect($response->inertiaProps('coupons.data'))->pluck('code')->all());
+        $this->assertStringNotContainsString('HIDDEN', json_encode($response->inertiaProps()));
     }
 
     public function test_index_status_filter_shows_only_matching_coupons(): void
@@ -255,8 +255,8 @@ class CouponManagementTest extends TestCase
 
         $response = $this->asGuard($owner, 'owner')->get('/coupons?status=inactive');
 
-        $response->assertSee('TURNEDOFF');
-        $response->assertDontSee('STAYSON');
+        $this->assertSame(['TURNEDOFF'], collect($response->inertiaProps('coupons.data'))->pluck('code')->all());
+        $this->assertStringNotContainsString('STAYSON', json_encode($response->inertiaProps()));
     }
 
     // --- Safe delete ---

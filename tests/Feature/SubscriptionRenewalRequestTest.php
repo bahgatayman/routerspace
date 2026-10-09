@@ -9,6 +9,7 @@ use App\Models\Subscription;
 use App\Models\SubscriptionRequest;
 use Database\Seeders\FeatureSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -62,11 +63,14 @@ class SubscriptionRenewalRequestTest extends TestCase
         $this->actingAs($owner, 'owner')->get('/dashboard')->assertRedirect(route('subscription.expired'));
 
         // ...but the expired screen now lists every active plan.
+        // (the request form renders whenever plans exist and nothing is pending)
         $this->actingAs($owner, 'owner')->get('/subscription/expired')
             ->assertOk()
-            ->assertSee('Basic')
-            ->assertSee('Pro')
-            ->assertSee(__('app.subscription.request_renewal'));
+            ->assertInertia(fn (Assert $p) => $p->component('Subscription/Expired')
+                ->has('plans', 2)
+                ->where('plans.0.name', 'Basic')
+                ->where('plans.1.name', 'Pro')
+                ->where('pendingRequest', null));
     }
 
     public function test_plans_page_shows_the_owner_where_they_stand(): void
@@ -76,10 +80,12 @@ class SubscriptionRenewalRequestTest extends TestCase
 
         $this->actingAs($owner, 'owner')->get('/subscription/plans')
             ->assertOk()
-            ->assertSee('Basic')                                     // current plan name in the header
-            ->assertSee($expiry->format('d M Y'))                    // when it runs out
-            ->assertSee(__('app.profile.members_used'))              // usage meter
-            ->assertSee(__('app.subscription.billed_total'));        // summary panel
+            ->assertInertia(fn (Assert $p) => $p->component('Subscription/Plans')
+                ->where('owner.plan_name', 'Basic')                  // current plan name in the header
+                ->where('owner.expires_at', $expiry->format('d M Y')) // when it runs out
+                ->where('owner.used_slots', 0)                       // usage meter
+                ->where('owner.max_slots', 50)
+                ->has('plans', 2));                                  // picker + summary panel
     }
 
     public function test_duration_is_a_choice_of_terms_and_unlimited_limits_read_as_unlimited(): void
@@ -89,15 +95,18 @@ class SubscriptionRenewalRequestTest extends TestCase
         // 0 on a plan limit means unlimited (Owner::canAddMoreWorkspaces etc.).
         $this->pro->update(['max_workspaces' => 0, 'max_rooms' => 5]);
 
-        $html = $this->actingAs($owner, 'owner')->get('/subscription/plans')->assertOk()->getContent();
+        $res = $this->actingAs($owner, 'owner')->get('/subscription/plans')->assertOk();
 
-        foreach ([1, 3, 6, 12] as $term) {
-            $this->assertStringContainsString('name="months" value="' . $term . '"', $html);
-        }
-        $this->assertStringContainsString(__('app.subscription.unlimited'), $html);
-
-        // Prices are exposed per card so the total updates without a round trip.
-        $this->assertStringContainsString('data-price="' . $this->pro->price_per_month . '"', $html);
+        $res->assertInertia(fn (Assert $p) => $p->component('Subscription/Plans')
+            ->where('monthOptions', [1, 3, 6, 12])
+            ->where('plans.1.name', 'Pro')
+            // Workspaces = 0 reads as unlimited; rooms keep their number.
+            ->where('plans.1.limits.1.value', __('app.subscription.unlimited'))
+            ->where('plans.1.limits.2.value', '5')
+            // Totals are pre-computed per term so the summary updates without a round trip.
+            ->where('plans.1.totals.1', 'ج.م 250.00')
+            ->where('plans.1.totals.3', 'ج.م 750.00')
+            ->where('plans.1.totals.12', 'ج.م 3,000.00'));
     }
 
     public function test_expired_owner_can_submit_a_renewal_request(): void
@@ -281,7 +290,10 @@ class SubscriptionRenewalRequestTest extends TestCase
 
         $this->actingAs($admin, 'admin')->get('/admin/subscription-requests')
             ->assertOk()
-            ->assertSee('Nile Works')
-            ->assertSee('Pro');
+            ->assertInertia(fn (Assert $p) => $p->component('Admin/SubscriptionRequests/Index')
+                ->has('pending', 1)
+                ->where('pending.0.business', 'Nile Works')
+                ->where('pending.0.plan', 'Pro')
+                ->where('pending.0.months', 4));
     }
 }

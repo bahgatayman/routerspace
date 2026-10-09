@@ -11,13 +11,14 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class StaffController extends Controller
 {
     public function __construct(private ActivityLogger $activityLogger) {}
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $search = $request->get('search');
         $status = in_array($request->get('status'), ['active', 'disabled'], true) ? $request->get('status') : null;
@@ -44,15 +45,35 @@ class StaffController extends Controller
         ];
         $counts['disabled'] = $counts['all'] - $counts['active'];
 
-        return view('staff.index', compact('staff', 'search', 'status', 'counts'));
+        return Inertia::render('Staff/Index', [
+            'staff' => $staff->through(fn (Staff $member) => [
+                'id' => $member->id,
+                'name' => $member->name,
+                'email' => $member->email,
+                'is_active' => (bool) $member->is_active,
+                'has_role' => (bool) $member->role,
+                'role_label' => $member->role ? __('app.role.'.$member->role->key) : __('app.staff.custom_permissions'),
+                'permissions_count' => $member->permissions_count,
+                'last_login_title' => $member->last_login_at?->format('M d, Y H:i'),
+                'last_login_ago' => $member->last_login_at?->diffForHumans(),
+            ]),
+            'search' => $search,
+            'status' => $status,
+            'counts' => $counts,
+        ]);
     }
 
-    public function create(): View
+    public function create(): Response
     {
         $roles = Role::whereNull('owner_id')->orderBy('name')->get();
         $permissions = Permission::where('is_active', true)->orderBy('group')->orderBy('name')->get()->groupBy('group');
 
-        return view('staff.create', compact('roles', 'permissions'));
+        return Inertia::render('Staff/Form', [
+            'staff' => null,
+            'roles' => $this->roleOptions($roles),
+            'permissionGroups' => $this->permissionGroups($permissions),
+            'granted' => [],
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -75,7 +96,7 @@ class StaffController extends Controller
         return redirect('/staff')->with('success', 'Staff member added successfully.');
     }
 
-    public function edit(Staff $staff): View
+    public function edit(Staff $staff): Response
     {
         $this->authorizeStaff($staff);
 
@@ -83,7 +104,18 @@ class StaffController extends Controller
         $permissions = Permission::where('is_active', true)->orderBy('group')->orderBy('name')->get()->groupBy('group');
         $grantedPermissionIds = $staff->permissions()->pluck('permissions.id')->all();
 
-        return view('staff.edit', compact('staff', 'roles', 'permissions', 'grantedPermissionIds'));
+        return Inertia::render('Staff/Form', [
+            'staff' => [
+                'id' => $staff->id,
+                'name' => $staff->name,
+                'email' => $staff->email,
+                'role_id' => $staff->role_id,
+                'is_active' => (bool) $staff->is_active,
+            ],
+            'roles' => $this->roleOptions($roles),
+            'permissionGroups' => $this->permissionGroups($permissions),
+            'granted' => array_values(array_map('intval', $grantedPermissionIds)),
+        ]);
     }
 
     public function update(Request $request, Staff $staff): RedirectResponse
@@ -151,6 +183,30 @@ class StaffController extends Controller
         $this->activityLogger->log('staff.deleted', $staff, "Removed staff member {$staff->name}");
 
         return redirect('/staff')->with('success', 'Staff member removed.');
+    }
+
+    /** Role <select> options, each with the permission keys it bulk-checks in the grid. */
+    private function roleOptions($roles): array
+    {
+        return $roles->map(fn (Role $role) => [
+            'id' => $role->id,
+            'label' => __('app.role.'.$role->key),
+            'permission_keys' => $role->permissions->pluck('key')->values()->all(),
+        ])->values()->all();
+    }
+
+    /** Permission catalog grouped like the old _permission-grid partial (every group, no role filtering). */
+    private function permissionGroups($permissions): array
+    {
+        return $permissions->map(fn ($items, $group) => [
+            'key' => $group,
+            'label' => __('app.permission_group.'.$group),
+            'items' => $items->map(fn (Permission $p) => [
+                'id' => $p->id,
+                'key' => $p->key,
+                'label' => __('app.permission.'.$p->key),
+            ])->values()->all(),
+        ])->values()->all();
     }
 
     /**

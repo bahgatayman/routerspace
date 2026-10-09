@@ -7,7 +7,8 @@ use App\Models\Booking;
 use App\Models\Owner;
 use App\Models\Workspace;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * Super Admin → Locations (the `workspaces` table: a business's physical
@@ -16,7 +17,7 @@ use Illuminate\View\View;
  */
 class WorkspaceController extends Controller
 {
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $search = trim((string) $request->query('q', ''));
         $ownerId = Owner::whereKey($request->integer('owner'))->value('id');
@@ -33,14 +34,25 @@ class WorkspaceController extends Controller
             ->paginate(25)
             ->withQueryString();
 
-        return view('admin.locations.index', [
-            'locations' => $locations,
-            'owners' => Owner::has('workspaces')->orderBy('business_name')->get(['id', 'business_name', 'name']),
+        return Inertia::render('Admin/Locations/Index', [
+            'locations' => $locations->through(fn (Workspace $l) => [
+                'id' => $l->id,
+                'name' => $l->name,
+                'address' => $l->address,
+                'owner_id' => $l->owner_id,
+                'business' => $l->owner?->business_name,
+                'city' => $l->city,
+                'rooms_count' => $l->rooms_count,
+                'available_rooms_count' => $l->available_rooms_count,
+                'is_active' => (bool) $l->is_active,
+            ]),
+            'owners' => Owner::has('workspaces')->orderBy('business_name')->get(['id', 'business_name', 'name'])
+                ->map(fn ($o) => ['id' => $o->id, 'name' => $o->business_name ?: $o->name]),
             'filters' => ['q' => $search, 'owner' => $ownerId],
         ]);
     }
 
-    public function show(int $id): View
+    public function show(int $id): Response
     {
         $location = Workspace::with(['owner:id,business_name,name', 'rooms' => fn ($q) => $q->orderBy('name')])->findOrFail($id);
 
@@ -49,6 +61,26 @@ class WorkspaceController extends Controller
             ->selectRaw('room_id, COUNT(*) as n, SUM(CASE WHEN status = ? THEN amount_paid ELSE 0 END) as earned', ['completed'])
             ->groupBy('room_id')->get()->keyBy('room_id');
 
-        return view('admin.locations.show', compact('location', 'bookings'));
+        return Inertia::render('Admin/Locations/Show', [
+            'location' => [
+                'id' => $location->id,
+                'name' => $location->name,
+                'is_active' => (bool) $location->is_active,
+                'owner_id' => $location->owner_id,
+                'business' => $location->owner?->business_name,
+                'meta' => array_values(array_filter([$location->city, $location->address, $location->phone])),
+                'description' => $location->description,
+            ],
+            'rooms' => $location->rooms->map(fn ($room) => [
+                'id' => $room->id,
+                'name' => $room->name,
+                'type' => $room->typeLabel(),
+                'capacity' => $room->capacity,
+                'pricing' => $room->pricingSummary(),
+                'bookings' => (int) ($bookings[$room->id]->n ?? 0),
+                'earned' => (float) ($bookings[$room->id]->earned ?? 0),
+                'is_available' => (bool) $room->is_available,
+            ])->values(),
+        ]);
     }
 }

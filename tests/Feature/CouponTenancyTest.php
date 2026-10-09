@@ -162,7 +162,8 @@ class CouponTenancyTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/coupons');
 
         $response->assertOk();
-        $response->assertSee('MINEVISIBLE');
-        $response->assertDontSee('THEIRSHIDDEN');
+        $this->assertSame(['MINEVISIBLE'], collect($response->inertiaProps('coupons.data'))->pluck('code')->all());
+        // Tenant isolation: the other owner's code appears nowhere in the page props.
+        $this->assertStringNotContainsString('THEIRSHIDDEN', json_encode($response->inertiaProps()));
     }
 }

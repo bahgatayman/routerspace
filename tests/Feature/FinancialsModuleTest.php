@@ -20,6 +20,7 @@ use Database\Seeders\FeatureSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Maatwebsite\Excel\Facades\Excel;
 use Tests\TestCase;
 
@@ -140,7 +141,7 @@ class FinancialsModuleTest extends TestCase
         $response = $this->asGuard($owner, 'owner')->get('/financials/transactions?period=today');
 
         $response->assertOk();
-        $this->assertSame(2, $response->viewData('bookings')->total());
+        $this->assertSame(2, $response->inertiaProps('bookings.total'));
     }
 
     // --- No double-counting: Booking + attached completed Sale ---
@@ -163,7 +164,10 @@ class FinancialsModuleTest extends TestCase
         $response = $this->asGuard($owner, 'owner')->get("/financials/transactions/{$booking->id}");
 
         $response->assertOk();
-        $response->assertSee('125.00'); // 100 room + 25 product, combined — one figure, not two rows
+        // 100 room + 25 product, combined — one figure, not two rows
+        $response->assertInertia(fn (Assert $page) => $page->component('Financials/TransactionShow')
+            ->where('booking.grand_total', 125)
+            ->has('booking.sale.items', 1));
         $this->assertSame(125.0, $booking->fresh()->grandTotal());
     }
 
@@ -180,7 +184,7 @@ class FinancialsModuleTest extends TestCase
         $response = $this->asGuard($owner, 'owner')->get('/financials?period=today');
 
         $response->assertOk();
-        $this->assertSame(100.0, $response->viewData('bookingRevenue'));
+        $this->assertEquals(100.0, $response->inertiaProps('bookingRevenue'));
     }
 
     // --- Tenant isolation ---

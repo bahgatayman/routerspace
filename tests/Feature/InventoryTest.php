@@ -24,6 +24,7 @@ use Database\Seeders\FeatureSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -419,7 +420,8 @@ class InventoryTest extends TestCase
         $this->assertSame(20.0, $item->lineProfit(), '2 × (25 − 15), not 2 × (25 − 18).');
         $this->assertSame(14.0, $p->fresh()->profitPerUnit() * 2, 'Only new sales use the new cost.');
 
-        $this->actingAs($owner, 'owner')->get("/products/{$p->id}")->assertOk()->assertSee('EGP 20.00', false);
+        $this->actingAs($owner, 'owner')->get("/products/{$p->id}")->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Products/Show')->where('sold.profit', 20));
     }
 
     // ----------------------------------------------------- tenancy & gating
@@ -451,7 +453,8 @@ class InventoryTest extends TestCase
         // cola() created the product as the owner; drop that session so only the staff guard is signed in.
         auth('owner')->logout();
 
-        $this->actingAs($staff, 'staff')->get("/products/{$p->id}")->assertOk()->assertDontSee('id="adjust-stock"', false);
+        $this->actingAs($staff, 'staff')->get("/products/{$p->id}")->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Products/Show')->where('canManage', false));
         $this->actingAs($staff, 'staff')->post("/products/{$p->id}/stock", ['direction' => 'restock', 'quantity' => 5]);
         $this->assertSame(10, $p->fresh()->stock_quantity);
     }
@@ -474,12 +477,12 @@ class InventoryTest extends TestCase
         $gone = $this->cola($owner, 0, 5, ['name' => 'Gone Cola']);
         $plenty = $this->cola($owner, 50, 5, ['name' => 'Plenty Cola']);
         // Product cards only (the names also appear in the bell's stock notifications).
-        $card = fn (Product $p) => 'id="product-'.$p->id.'-name"';
+        $ids = fn ($res) => collect($res->inertiaProps('products.data'))->pluck('id')->all();
 
-        $this->actingAs($owner, 'owner')->get('/products?stock=low')->assertOk()
-            ->assertSee($card($low), false)->assertDontSee($card($gone), false)->assertDontSee($card($plenty), false);
-        $this->actingAs($owner, 'owner')->get('/products?stock=out')->assertOk()
-            ->assertSee($card($gone), false)->assertDontSee($card($low), false);
+        $res = $this->actingAs($owner, 'owner')->get('/products?stock=low')->assertOk();
+        $this->assertSame([$low->id], $ids($res));
+        $res = $this->actingAs($owner, 'owner')->get('/products?stock=out')->assertOk();
+        $this->assertSame([$gone->id], $ids($res));
     }
 
     public function test_inventory_service_reports_available_units(): void

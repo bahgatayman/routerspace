@@ -13,6 +13,8 @@ use App\Models\SpeedProfile;
 use App\Services\ActivityLogger;
 use App\Services\HotspotSyncService;
 use App\Services\MemberSearchService;
+use App\Support\Duration;
+use App\Support\Highlight;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -20,7 +22,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class HotspotUserController extends Controller
 {
@@ -31,14 +34,14 @@ class HotspotUserController extends Controller
     ) {}
 
     /**
-     * Live search: the search box debounces on the client and fetches this
-     * same route with X-Requested-With set, getting back just the table
-     * partial to swap in — a normal (non-AJAX) request still renders the
-     * full page. Ranking/pagination is MemberSearchService's job (case-
-     * insensitive, partial, fuzzy-tolerant — see its docblock); this method
-     * only re-hydrates the full rows for whichever page it decided on.
+     * Live search: the search box debounces on the client and re-requests
+     * this same route as an Inertia partial reload (only `users` + `search`,
+     * ?search= kept in the URL) — a normal request renders the full page.
+     * Ranking/pagination is MemberSearchService's job (case-insensitive,
+     * partial, fuzzy-tolerant — see its docblock); this method only
+     * re-hydrates the full rows for whichever page it decided on.
      */
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $search = trim((string) $request->query('search', ''));
         $page = max(1, (int) $request->query('page', 1));
@@ -65,15 +68,60 @@ class HotspotUserController extends Controller
         $byId = $fullUsers->keyBy('id');
         $paginator->setCollection($ids->map(fn ($id) => $byId[$id])->values());
 
-        return view($request->ajax() ? 'users._table' : 'users.index', [
-            'users' => $paginator,
+        return Inertia::render('Users/Index', [
+            'users' => $paginator->withQueryString()->through(fn (HotspotUser $u) => $this->indexRow($u, $search)),
             'search' => $search,
+            'hasHotspot' => $owner->hasFeature('hotspot'),
         ]);
     }
 
-    public function create(): View
+    /**
+     * One table row for Users/Index. Highlight::mark() returns HTML that is
+     * already escaped (only its own <mark> tags are raw), so the page can
+     * render name_html/phone_html as HTML safely.
+     *
+     * @return array<string, mixed>
+     */
+    private function indexRow(HotspotUser $user, string $search): array
     {
-        return view('users.create');
+        $package = null;
+        if ($user->relationLoaded('packages') && ($pkg = $user->packages->first())) {
+            $left = Duration::label($user->packages->sum(fn ($p) => $p->remainingMinutes()));
+            $soon = $pkg->isExpiringSoon();
+            $package = [
+                'soon' => $soon,
+                'title' => $user->packages->pluck('name')->implode(', '),
+                'text' => $soon ? __('app.packages.expiring_left', ['time' => $left]) : __('app.packages.left', ['time' => $left]),
+            ];
+        }
+
+        return [
+            'id' => $user->id,
+            'name_html' => Highlight::mark($user->name, $search),
+            'phone_html' => Highlight::mark($user->phone, $search),
+            'speed_download' => $user->speed_download,
+            'speed_upload' => $user->speed_upload,
+            'status' => $user->status,
+            'created' => $user->created_at?->format('M d, Y'),
+            'package' => $package,
+        ];
+    }
+
+    public function create(): Response
+    {
+        $owner = TenantContext::user();
+        $plan = $owner->plan;
+
+        return Inertia::render('Users/Create', [
+            'hasHotspot' => $owner->hasFeature('hotspot'),
+            'plan' => $plan ? [
+                'name' => $plan->name,
+                'max_members' => $plan->max_members,
+                'members' => $owner->hotspotUsers()->count(),
+                'percent' => $owner->usagePercentage(),
+                'remaining' => $owner->remainingUserSlots(),
+            ] : null,
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -197,7 +245,7 @@ class HotspotUserController extends Controller
         return $member;
     }
 
-    public function show(int $id): View
+    public function show(int $id): Response
     {
         $owner = TenantContext::user();
 
@@ -253,23 +301,122 @@ class HotspotUserController extends Controller
             ? MemberPackage::where('owner_id', $owner->id)->where('hotspot_user_id', $user->id)->latest('id')->get()
             : collect();
 
-        return view('users.show', [
-            'user' => $user,
-            'speedProfiles' => $speedProfiles,
-            'recentBookings' => $recentBookings,
-            'openSession' => $openSession,
-            'stats' => $stats,
-            'activity' => $this->activityFeed($owner, $user),
+        $packageUsages = $showPackages
+            ? PackageUsage::where('owner_id', $owner->id)->where('hotspot_user_id', $user->id)
+                ->with(['memberPackage:id,name', 'booking:id,booking_date'])->latest('id')->take(30)->get()
+            : collect();
+        $packageTemplates = $showPackages
+            ? PackageTemplate::where('owner_id', $owner->id)->where('is_active', true)->orderBy('name')->get()
+            : collect();
+        $fmtDate = fn ($d) => $d?->translatedFormat('M j, Y');
+
+        // Compact summary card: the active package expiring soonest.
+        $activePackages = $packages->filter(fn (MemberPackage $p) => $p->status() === MemberPackage::STATUS_ACTIVE)
+            ->sortBy('expires_on')->values();
+        $mainPackage = $activePackages->first();
+
+        return Inertia::render('Users/Show', [
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'phone' => $user->phone,
+                'email' => $user->email,
+                'notes' => $user->notes,
+                'status' => $user->status,
+                'speed_download' => $user->speed_download,
+                'speed_upload' => $user->speed_upload,
+                'speed_profile_id' => $user->speed_profile_id,
+                'speed_profile_name' => $user->speedProfile?->name,
+                'member_since' => $user->created_at?->translatedFormat('F Y'),
+                'created' => $user->created_at?->format('M d, Y'),
+            ],
+            'hasHotspot' => $owner->hasFeature('hotspot'),
+            'hasBooking' => $owner->hasFeature('booking'),
+            'speedProfiles' => $speedProfiles->map(fn (SpeedProfile $p) => [
+                'id' => $p->id,
+                'name' => $p->name,
+                'speed_download' => $p->speed_download,
+                'speed_upload' => $p->speed_upload,
+            ])->values(),
+            'recentBookings' => $recentBookings->map(fn (Booking $b) => [
+                'id' => $b->id,
+                'place' => $b->room?->workspace?->name.' / '.$b->room?->name,
+                'date' => $b->booking_date?->format('d M Y'),
+                'total_hours' => $b->total_hours,
+                'status_label' => $b->statusLabel(),
+                'status_class' => $b->statusBadgeClass(),
+                'total_price' => (float) $b->total_price,
+            ])->values(),
+            'hasOpenSession' => (bool) $openSession,
+            'stats' => $stats ? [
+                'bookings' => $stats['bookings'],
+                'spent' => $stats['spent'],
+                'minutes' => (int) $stats['minutes'],
+                'last' => $stats['last']?->format('d M Y'),
+            ] : null,
+            'activity' => $this->activityFeed($owner, $user)->map(fn (array $item) => [
+                'type' => $item['type'],
+                'room' => $item['room'] ?? null,
+                'price' => (float) ($item['price'] ?? 0),
+                'minutes' => (int) ($item['minutes'] ?? 0),
+                'ago' => $item['at']?->diffForHumans(),
+            ])->values(),
             'showPackages' => $showPackages,
-            'packages' => $packages,
-            'packageUsages' => $showPackages
-                ? PackageUsage::where('owner_id', $owner->id)->where('hotspot_user_id', $user->id)
-                    ->with(['memberPackage:id,name', 'booking:id,booking_date'])->latest('id')->take(30)->get()
-                : collect(),
-            'packageTemplates' => $showPackages
-                ? PackageTemplate::where('owner_id', $owner->id)->where('is_active', true)->orderBy('name')->get()
-                : collect(),
             'canAssignPackages' => $showPackages && (! $staff || $staff->hasPermission('packages.assign')),
+            'packageSummary' => $mainPackage ? [
+                'name' => $mainPackage->name,
+                'soon' => $mainPackage->isExpiringSoon(),
+                'percent' => $mainPackage->progressPercent(),
+                'more' => $activePackages->count() - 1,
+                'remaining_text' => __('app.packages.remaining_of', ['remaining' => $mainPackage->remainingLabel(), 'total' => $mainPackage->totalLabel()]),
+                'used_label' => $mainPackage->usedLabel(),
+                'expires_text' => __('app.packages.expires', ['date' => $fmtDate($mainPackage->expires_on)]),
+            ] : null,
+            'packages' => $packages->map(function (MemberPackage $pkg) use ($fmtDate) {
+                $status = $pkg->status();
+
+                return [
+                    'id' => $pkg->id,
+                    'name' => $pkg->name,
+                    'status' => $status,
+                    'status_tone' => $pkg->statusTone(),
+                    'soon' => $pkg->isExpiringSoon(),
+                    'percent' => $pkg->progressPercent(),
+                    'remaining_minutes' => $pkg->remainingMinutes(),
+                    'starts_text' => $status === MemberPackage::STATUS_SCHEDULED ? __('app.packages.starts', ['date' => $fmtDate($pkg->starts_on)]) : null,
+                    'expires_text' => $status === MemberPackage::STATUS_EXPIRED
+                        ? __('app.packages.expired_on', ['date' => $fmtDate($pkg->expires_on)])
+                        : __('app.packages.expires', ['date' => $fmtDate($pkg->expires_on)]),
+                    'used_of' => __('app.packages.used_of', ['used' => $pkg->usedLabel(), 'total' => $pkg->totalLabel()]),
+                    'left_text' => __('app.packages.left', ['time' => $pkg->remainingLabel()]),
+                    'price_paid' => (float) $pkg->price_paid,
+                    'cancelled_reason' => $pkg->cancelled_reason,
+                    'cancellable' => ! $pkg->cancelled_at && $status !== MemberPackage::STATUS_EXPIRED,
+                    'cancel_url' => route('member-packages.cancel', $pkg->id),
+                ];
+            })->values(),
+            'packageUsages' => $packageUsages->map(fn (PackageUsage $u) => [
+                'id' => $u->id,
+                'label' => $u->label(),
+                'booking_id' => $u->booking?->id,
+                'at' => $u->created_at?->translatedFormat('M j, g:i A'),
+                'package_name' => $u->memberPackage?->name,
+                'is_out' => $u->minutes > 0,
+                'change' => $u->changeLabel(),
+            ])->values(),
+            'packageTemplates' => $packageTemplates->map(fn (PackageTemplate $t) => [
+                'id' => $t->id,
+                'name' => $t->name,
+                'hours' => rtrim(rtrim(number_format($t->total_minutes / 60, 2, '.', ''), '0'), '.'),
+                'hours_label' => $t->hoursLabel(),
+                'price' => (string) $t->price,
+                'days' => (int) $t->validity_days,
+            ])->values(),
+            'packageStoreUrl' => route('member-packages.store', $user->id),
+            'packageDefaults' => [
+                'starts_on' => today()->toDateString(),
+                'expires_on' => today()->addDays(29)->toDateString(),
+            ],
         ]);
     }
 
@@ -335,14 +482,14 @@ class HotspotUserController extends Controller
         return $items->sortByDesc('at')->take($limit)->values();
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $user = HotspotUser::where('id', $id)
             ->where('owner_id', TenantContext::id())
             ->firstOrFail();
 
-        return view('users.edit', [
-            'user' => $user,
+        return Inertia::render('Users/Edit', [
+            'user' => $user->only(['id', 'name', 'phone', 'email', 'notes', 'status']),
         ]);
     }
 

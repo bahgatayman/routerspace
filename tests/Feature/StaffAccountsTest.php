@@ -17,6 +17,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -227,17 +228,20 @@ class StaffAccountsTest extends TestCase
 
         $asReceptionist = $this->asGuard($receptionist, 'staff')->get('/dashboard');
         $asReceptionist->assertOk();
-        $asReceptionist->assertDontSee(__('app.dashboard.revenue_today'));
-        $asReceptionist->assertDontSee(__('app.dashboard.revenue_trend'));
+        // The React dashboard renders from props: hidden sections are never sent at all.
+        $this->assertFalse($asReceptionist->inertiaProps('showRevenue'));
+        $this->assertNull($asReceptionist->inertiaProps('revenue')); // no revenue KPI, no trend
+        $this->assertFalse($asReceptionist->inertiaProps('canViewRevenue'));
 
         $asManager = $this->asGuard($manager, 'staff')->get('/dashboard');
         $asManager->assertOk();
-        $asManager->assertSee(__('app.dashboard.revenue_today'));
-        $asManager->assertSee(__('app.dashboard.revenue_trend'));
+        $this->assertTrue($asManager->inertiaProps('showRevenue'));
+        $this->assertIsArray($asManager->inertiaProps('revenue.trend'));
 
         $asOwner = $this->asGuard($owner, 'owner')->get('/dashboard');
         $asOwner->assertOk();
-        $asOwner->assertSee(__('app.dashboard.revenue_today'));
+        $this->assertTrue($asOwner->inertiaProps('showRevenue'));
+        $this->assertNotNull($asOwner->inertiaProps('revenue.today'));
     }
 
     public function test_dashboard_hides_workspace_overview_and_features_from_staff(): void
@@ -253,20 +257,21 @@ class StaffAccountsTest extends TestCase
 
         $asNoGrants = $this->asGuard($noGrants, 'staff')->get('/dashboard');
         $asNoGrants->assertOk();
-        $asNoGrants->assertDontSee(__('app.dashboard.current_occupancy'));
-        $asNoGrants->assertDontSee(__('app.label.available_rooms'));
-        // "Your Features" is billing-facing tenant info, never shown to any staff.
-        $asNoGrants->assertDontSee(__('app.label.your_features'));
+        // Occupancy + available rooms both live in the `occupancy` prop.
+        $this->assertFalse($asNoGrants->inertiaProps('showWorkspace'));
+        $this->assertNull($asNoGrants->inertiaProps('occupancy'));
+        // "Your Features" is billing-facing tenant info, never sent to any staff.
+        $this->assertNull($asNoGrants->inertiaProps('ownerFeatures'));
 
         $asManager = $this->asGuard($manager, 'staff')->get('/dashboard');
         $asManager->assertOk();
-        $asManager->assertSee(__('app.dashboard.current_occupancy'));
-        $asManager->assertDontSee(__('app.label.your_features'));
+        $this->assertNotNull($asManager->inertiaProps('occupancy'));
+        $this->assertNull($asManager->inertiaProps('ownerFeatures'));
 
         $asOwner = $this->asGuard($owner, 'owner')->get('/dashboard');
         $asOwner->assertOk();
-        $asOwner->assertSee(__('app.dashboard.current_occupancy'));
-        $asOwner->assertSee(__('app.label.your_features'));
+        $this->assertNotNull($asOwner->inertiaProps('occupancy'));
+        $this->assertIsArray($asOwner->inertiaProps('ownerFeatures'));
     }
 
     public function test_receptionist_can_create_a_booking_but_not_cancel_one(): void
@@ -392,7 +397,9 @@ class StaffAccountsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get("/staff/{$staff->id}/activity?range=all");
 
         $response->assertOk();
-        $response->assertSee('1');
+        $response->assertInertia(fn (Assert $p) => $p->component('Staff/Activity')
+            ->where('counts.0.action', 'booking.created')
+            ->where('counts.0.total', 1));
     }
 
     public function test_the_staff_edit_screen_is_fully_translated_in_arabic(): void
@@ -404,6 +411,11 @@ class StaffAccountsTest extends TestCase
             ->actingAs($owner, 'owner')->get("/staff/{$staff->id}/edit");
 
         $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p->component('Staff/Form'));
+        // Labels are resolved server-side and shipped as props.
+        $response = new \Illuminate\Testing\TestResponse(new \Illuminate\Http\Response(
+            json_encode([$response->inertiaProps('permissionGroups'), $response->inertiaProps('roles')], JSON_UNESCAPED_UNICODE)
+        ));
         // Asserted against literal strings, not __() — a call to __() would
         // fail the exact same way the page does if the lookup key breaks
         // again, making the assertion pass even while the page is broken.
@@ -439,8 +451,10 @@ class StaffAccountsTest extends TestCase
             ->actingAs($owner, 'owner')->get("/staff/{$staff->id}/activity?range=all");
 
         $response->assertOk();
-        $response->assertSee('تم إنشاء حجز'); // events.booking.created
-        $response->assertDontSee('app.staff.events.', false);
+        $response->assertInertia(fn (Assert $p) => $p->component('Staff/Activity'));
+        $labels = json_encode([$response->inertiaProps('counts'), $response->inertiaProps('activity.data')], JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('تم إنشاء حجز', $labels); // events.booking.created
+        $this->assertStringNotContainsString('app.staff.events.', $labels);
     }
 
     public function test_owner_can_view_the_staff_management_screens(): void
@@ -448,9 +462,12 @@ class StaffAccountsTest extends TestCase
         $owner = $this->owner();
         $staff = $this->staff($owner);
 
-        $this->actingAs($owner, 'owner')->get('/staff')->assertOk()->assertSee($staff->name);
-        $this->actingAs($owner, 'owner')->get('/staff/create')->assertOk();
-        $this->actingAs($owner, 'owner')->get("/staff/{$staff->id}/edit")->assertOk()->assertSee($staff->email);
+        $this->actingAs($owner, 'owner')->get('/staff')->assertOk()
+            ->assertInertia(fn (Assert $p) => $p->component('Staff/Index')->where('staff.data.0.name', $staff->name));
+        $this->actingAs($owner, 'owner')->get('/staff/create')->assertOk()
+            ->assertInertia(fn (Assert $p) => $p->component('Staff/Form')->where('staff', null));
+        $this->actingAs($owner, 'owner')->get("/staff/{$staff->id}/edit")->assertOk()
+            ->assertInertia(fn (Assert $p) => $p->component('Staff/Form')->where('staff.email', $staff->email));
     }
 
     /**
@@ -480,14 +497,16 @@ class StaffAccountsTest extends TestCase
             "/staff/{$staff->id}/edit" => $this->actingAs($owner, 'owner')->get("/staff/{$staff->id}/edit"),
         ] as $url => $response) {
             $response->assertOk();
+            $rendered = collect($response->inertiaProps('permissionGroups'));
+            $items = $rendered->flatMap(fn ($g) => $g['items']);
 
             foreach ($groups as $group) {
-                $response->assertSee(__('app.permission_group.'.$group));
+                $this->assertContains(__('app.permission_group.'.$group), $rendered->pluck('label')->all(), "{$url} misses group {$group}");
             }
 
             foreach ($permissions as $permission) {
-                $response->assertSee('value="'.$permission->id.'"', false);
-                $response->assertSee(__('app.permission.'.$permission->key));
+                $this->assertContains($permission->id, $items->pluck('id')->all(), "{$url} misses permission {$permission->key}");
+                $this->assertContains(__('app.permission.'.$permission->key), $items->pluck('label')->all());
             }
         }
     }

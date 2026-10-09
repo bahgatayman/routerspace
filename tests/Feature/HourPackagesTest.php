@@ -187,8 +187,12 @@ class HourPackagesTest extends TestCase
         $this->assertNull($custom->package_template_id);
         $this->assertSame(150, $custom->total_minutes);
 
-        $this->actingAs($owner, 'owner')->get("/users/{$member->id}")->assertOk()
-            ->assertSee('30 Hours Monthly')->assertSee('Trial')->assertSee('30h');
+        $profile = $this->actingAs($owner, 'owner')->get("/users/{$member->id}")->assertOk()
+            ->assertInertia(fn (\Inertia\Testing\AssertableInertia $p) => $p->component('Users/Show')->where('showPackages', true));
+        $names = collect($profile->inertiaProps('packages'))->pluck('name');
+        $this->assertContains('30 Hours Monthly', $names);
+        $this->assertContains('Trial', $names);
+        $this->assertStringContainsString('30h', json_encode($profile->inertiaProps('packages'), JSON_UNESCAPED_UNICODE));
     }
 
     public function test_status_is_derived(): void

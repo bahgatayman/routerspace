@@ -9,15 +9,17 @@ use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\SubscriptionRequest;
 use App\Services\AdminAuditLogger;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class PlanController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $plans = Plan::withCount([
             'owners',
@@ -28,33 +30,87 @@ class PlanController extends Controller
             ->orderBy('sort_order')
             ->get();
         $requests = SubscriptionRequest::selectRaw('plan_id, COUNT(*) as n')->groupBy('plan_id')->pluck('n', 'plan_id');
+        $featureNames = Feature::pluck('name', 'key');
 
-        return view('admin.plans.index', ['plans' => $plans, 'requests' => $requests, 'featureNames' => Feature::pluck('name', 'key')]);
-    }
-
-    public function show(int $plan): View
-    {
-        $plan = Plan::withCount(['owners', 'subscriptions'])->withSum('subscriptions as revenue', 'amount_paid')->findOrFail($plan);
-        $active = $plan->owners()->where('is_active', true)->where('subscription_expires_at', '>', now())->count();
-
-        return view('admin.plans.show', [
-            'plan' => $plan,
-            'active' => $active,
-            'mrr' => $active * (float) $plan->price_per_month,
-            'requests' => SubscriptionRequest::where('plan_id', $plan->id)->count(),
-            'features' => Feature::orderBy('id')->get(['key', 'name']),
-            'owners' => $plan->owners()->withCount(['rooms', 'products'])->orderBy('business_name')->paginate(20),
-            'payments' => Subscription::with(['owner:id,business_name,name', 'admin:id,name'])->where('plan_id', $plan->id)->latest()->take(10)->get(),
-            'targets' => Plan::where('id', '!=', $plan->id)->orderBy('sort_order')->get(['id', 'name', 'is_active', 'price_per_month']),
-            'used' => $this->usage($plan),
+        return Inertia::render('Admin/Plans/Index', [
+            'plans' => $plans->map(fn (Plan $plan) => [
+                'id' => $plan->id,
+                'name' => $plan->name,
+                'slug' => $plan->slug,
+                'is_active' => (bool) $plan->is_active,
+                'price_per_month' => (float) $plan->price_per_month,
+                'owners_count' => (int) $plan->owners_count,
+                'active_owners_count' => (int) $plan->active_owners_count,
+                'mrr' => $plan->active_owners_count * (float) $plan->price_per_month,
+                'revenue' => (float) $plan->revenue,
+                'limits' => $plan->only(['max_members', 'max_workspaces', 'max_rooms', 'max_products']),
+                'features' => collect($plan->features ?? [])->map(fn ($f) => $featureNames[$f] ?? $f)->values(),
+                'used' => $plan->owners_count + $plan->subscriptions_count + ($requests[$plan->id] ?? 0) > 0,
+            ])->values(),
         ]);
     }
 
-    public function create(): View
+    public function show(int $plan): Response
+    {
+        $plan = Plan::withCount(['owners', 'subscriptions'])->withSum('subscriptions as revenue', 'amount_paid')->findOrFail($plan);
+        $active = $plan->owners()->where('is_active', true)->where('subscription_expires_at', '>', now())->count();
+        $statusTone = ['active' => 'ok', 'expiring_soon' => 'warn', 'expired' => 'danger', 'disabled' => 'danger', 'never' => 'neutral'];
+        $used = $this->usage($plan);
+
+        return Inertia::render('Admin/Plans/Show', [
+            'plan' => [
+                'id' => $plan->id,
+                'name' => $plan->name,
+                'slug' => $plan->slug,
+                'is_active' => (bool) $plan->is_active,
+                'price_per_month' => (float) $plan->price_per_month,
+                'owners_count' => (int) $plan->owners_count,
+                'subscriptions_count' => (int) $plan->subscriptions_count,
+                'revenue' => (float) $plan->revenue,
+                'limits' => $plan->only(['max_members', 'max_workspaces', 'max_rooms', 'max_products']),
+            ],
+            'active' => $active,
+            'mrr' => $active * (float) $plan->price_per_month,
+            'requests' => SubscriptionRequest::where('plan_id', $plan->id)->count(),
+            'features' => Feature::orderBy('id')->get(['key', 'name'])->map(fn ($f) => [
+                'key' => $f->key, 'name' => $f->name, 'on' => in_array($f->key, $plan->features ?? [], true),
+            ]),
+            'owners' => $plan->owners()->withCount(['rooms', 'products'])->orderBy('business_name')->paginate(20)
+                ->through(function (Owner $o) use ($statusTone) {
+                    $st = $o->subscriptionStatus();
+
+                    return [
+                        'id' => $o->id,
+                        'name' => $o->business_name ?: $o->name,
+                        'status' => $st,
+                        'status_tone' => $statusTone[$st] ?? 'neutral',
+                        'rooms_count' => $o->rooms_count,
+                        'products_count' => $o->products_count,
+                        'expires' => $o->subscription_expires_at?->translatedFormat('M j, Y'),
+                    ];
+                }),
+            'payments' => Subscription::with(['owner:id,business_name,name', 'admin:id,name'])->where('plan_id', $plan->id)->latest()->take(10)->get()
+                ->map(fn ($s) => [
+                    'id' => $s->id,
+                    'owner_id' => $s->owner_id,
+                    'business' => $s->owner?->business_name,
+                    'months' => (int) $s->months,
+                    'admin' => $s->admin?->name,
+                    'amount' => (float) $s->amount_paid,
+                    'date' => $s->created_at?->translatedFormat('M j, Y'),
+                ]),
+            'targets' => Plan::where('id', '!=', $plan->id)->orderBy('sort_order')->get(['id', 'name', 'is_active', 'price_per_month'])
+                ->map(fn ($p) => ['id' => $p->id, 'name' => $p->name, 'is_active' => (bool) $p->is_active, 'price_per_month' => (float) $p->price_per_month]),
+            'used' => $used,
+            'inUse' => array_sum($used) > 0,
+        ]);
+    }
+
+    public function create(): Response
     {
         $features = Feature::where('is_active', true)->orderBy('id')->get();
 
-        return view('admin.plans.create', compact('features'));
+        return Inertia::render('Admin/Plans/Form', ['plan' => null, 'features' => $this->featureOptions($features)]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -67,12 +123,25 @@ class PlanController extends Controller
         return redirect()->route('admin.plans.show', $plan->id)->with('success', __('app.admin_platform.plan_msg.created'));
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $plan = Plan::findOrFail($id);
         $features = Feature::where('is_active', true)->orderBy('id')->get();
 
-        return view('admin.plans.edit', compact('plan', 'features'));
+        return Inertia::render('Admin/Plans/Form', [
+            'plan' => $plan->only(['id', 'name', 'slug', 'price_per_month', 'max_members', 'max_workspaces', 'max_rooms', 'max_products', 'sort_order'])
+                + ['features' => array_values($plan->features ?? [])],
+            'features' => $this->featureOptions($features),
+        ]);
+    }
+
+    /**
+     * @param  Collection<int, Feature>  $features
+     * @return array<int, array{key: string, name: string}>
+     */
+    private function featureOptions(Collection $features): array
+    {
+        return $features->map(fn ($f) => ['key' => $f->key, 'name' => $f->name])->values()->all();
     }
 
     public function update(Request $request, int $id): RedirectResponse

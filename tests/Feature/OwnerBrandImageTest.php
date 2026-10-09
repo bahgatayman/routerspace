@@ -8,6 +8,7 @@ use Database\Seeders\FeatureSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -107,14 +108,19 @@ class OwnerBrandImageTest extends TestCase
         // No image yet → initials placeholder from the business name.
         $this->assertSame('NW', $owner->initials());
         $this->assertNull($owner->logoUrl());
-        $this->actingAs($owner, 'owner')->get('/profile')->assertOk()->assertSee('NW');
+        $this->actingAs($owner, 'owner')->get('/profile')->assertOk()
+            ->assertInertia(fn (Assert $p) => $p->component('Profile/Index')
+                ->where('owner.initials', 'NW')
+                ->where('owner.logo_url', null));
 
         $this->actingAs($owner, 'owner')
             ->post('/profile/logo', ['logo' => UploadedFile::fake()->image('brand.png')]);
 
+        $path = $owner->refresh()->logo_path;
         $this->actingAs($owner, 'owner')->get('/profile')
             ->assertOk()
-            ->assertSee($owner->refresh()->logo_path, false);
+            ->assertInertia(fn (Assert $p) => $p->component('Profile/Index')
+                ->where('owner.logo_url', fn ($url) => str_contains((string) $url, $path)));
     }
 
     public function test_one_owner_cannot_touch_another_owners_image(): void

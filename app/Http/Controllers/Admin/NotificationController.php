@@ -10,13 +10,15 @@ use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class NotificationController extends Controller
 {
     public function __construct(private NotificationService $notifications) {}
 
     /** Compose form + recent broadcast history. */
-    public function index()
+    public function index(): Response
     {
         $owners = Owner::orderBy('business_name')->get(['id', 'business_name', 'name', 'is_active']);
 
@@ -42,7 +44,18 @@ class NotificationController extends Controller
             ->take(15)
             ->values();
 
-        return view('admin.notifications.index', compact('owners', 'recent'));
+        return Inertia::render('Admin/Notifications/Index', [
+            'owners' => $owners->map(fn (Owner $o) => ['id' => $o->id, 'name' => $o->business_name ?: $o->name, 'is_active' => (bool) $o->is_active]),
+            'recent' => $recent->map(fn ($r, $i) => [
+                'key' => $i,
+                'title' => $r->title,
+                'body' => $r->body,
+                'level' => $r->level,
+                'sent' => $r->sent_at->format('M j, H:i'),
+                'recipients' => $r->recipients,
+                'read_count' => $r->read_count,
+            ]),
+        ]);
     }
 
     /** Send a notification to all, active-only, or selected owners. */

@@ -101,7 +101,10 @@ class BookingClickToBookTest extends TestCase
             ->get('/bookings/calendar?view=day&date='.$date);
 
         $response->assertOk();
-        $response->assertSee('/bookings/create?room_id='.$room->id, false);
+        $entry = collect($response->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id);
+        $links = collect($entry['slots'])->pluck('create_url')->filter();
+        $this->assertNotEmpty($links);
+        $this->assertStringStartsWith('/bookings/create?room_id='.$room->id, $links->first());
     }
 
     public function test_booked_slot_is_not_offered_as_a_click_to_book_link(): void
@@ -121,14 +124,12 @@ class BookingClickToBookTest extends TestCase
             ->get('/bookings/calendar?view=day&date='.$date);
 
         $response->assertOk();
-        $response->assertViewHas('dayRooms', function ($dayRooms) use ($room) {
-            $entry = collect($dayRooms)->firstWhere('room.id', $room->id);
-            $tenAmSlot = collect($entry['slots'])->firstWhere('start', '10:00');
-
-            return $tenAmSlot['available'] === false;
-        });
+        $entry = collect($response->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id);
+        $tenAmSlot = collect($entry['slots'])->firstWhere('start', '10:00');
+        $this->assertFalse($tenAmSlot['available']);
         // The 10:00 link must not appear as a bookable href for this room/date.
-        $response->assertDontSee('start_time=10%3A00&end_time=11%3A00', false);
+        $this->assertNull($tenAmSlot['create_url']);
+        $this->assertStringNotContainsString('start_time=10%3A00&end_time=11%3A00', json_encode($response->inertiaProps()));
     }
 
     public function test_shared_room_has_no_click_to_book_slots(): void
@@ -140,11 +141,8 @@ class BookingClickToBookTest extends TestCase
             ->get('/bookings/calendar?view=day&room_id='.$room->id);
 
         $response->assertOk();
-        $response->assertViewHas('dayRooms', function ($dayRooms) use ($room) {
-            $entry = collect($dayRooms)->firstWhere('room.id', $room->id);
-
-            return $entry['slots'] === [];
-        });
+        $entry = collect($response->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id);
+        $this->assertSame([], $entry['slots']);
     }
 
     // --- Stale calendar data: the server always re-checks on submit ---
@@ -191,12 +189,14 @@ class BookingClickToBookTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/bookings/availability');
 
         $response->assertOk();
-        $response->assertViewIs('bookings.availability');
+        $this->assertSame('Bookings/Availability', $response->inertiaPage()['component']);
         // Unlike the create form, shared rooms are selectable here too — this
-        // is a read-only capacity check, not an advance-booking write path.
-        $response->assertSee($exclusive->name);
-        $response->assertSee('Shared Room');
-        $response->assertDontSee('<option value="'.$shared->id.'" disabled', false);
+        // is a read-only capacity check, not an advance-booking write path
+        // (the React select renders every listed room as an enabled option).
+        $ids = collect($response->inertiaProps('roomGroups'))->flatMap(fn ($g) => $g['rooms'])->pluck('id');
+        $this->assertTrue($ids->contains($exclusive->id));
+        $this->assertTrue($ids->contains($shared->id));
+        $this->assertStringContainsString('Shared Room', json_encode($response->inertiaProps('roomGroups')));
     }
 
     public function test_availability_lookup_uses_the_same_check_availability_endpoint(): void

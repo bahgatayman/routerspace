@@ -322,7 +322,13 @@ class AvailabilityRangeTest extends TestCase
         $rooms = $this->check([])->assertOk()->json('rooms');
         $this->assertSame([$mine->id], array_column($rooms, 'room_id'), 'Only my rooms.');
 
-        $this->actingAs($this->owner, 'owner')->get('/bookings/availability')->assertOk()
-            ->assertSee(__('app.availability.mode_range'))->assertSee('availability-range', false);
+        // The React page lists only my rooms and fetches the range endpoint.
+        $page = $this->actingAs($this->owner, 'owner')->get('/bookings/availability')->assertOk();
+        $this->assertSame('Bookings/Availability', $page->inertiaPage()['component']);
+        $ids = collect($page->inertiaProps('roomGroups'))->flatMap(fn ($g) => $g['rooms'])->pluck('id')->all();
+        $this->assertSame([$mine->id], $ids, 'Only my rooms on the page.');
+        $jsx = file_get_contents(resource_path('js/Pages/Bookings/Availability.jsx'));
+        $this->assertStringContainsString("t('availability.mode_range')", $jsx);
+        $this->assertStringContainsString('/bookings/availability-range?', $jsx);
     }
 }

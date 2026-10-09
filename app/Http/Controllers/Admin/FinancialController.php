@@ -9,10 +9,12 @@ use App\Models\Owner;
 use App\Models\Plan;
 use App\Services\Admin\PlatformAnalyticsService;
 use App\Services\AnalyticsPeriod;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * Super Admin → Financials. Two kinds of money, never mixed:
@@ -32,7 +34,7 @@ class FinancialController extends Controller
 
     public const PAYMENTS = ['paid', 'partial', 'unpaid'];
 
-    public function index(Request $request, PlatformAnalyticsService $analytics): View
+    public function index(Request $request, PlatformAnalyticsService $analytics): Response
     {
         [$period, $range] = $this->resolvePeriod($request);
         $ownerId = Owner::whereKey($request->integer('owner'))->value('id');
@@ -99,17 +101,36 @@ class FinancialController extends Controller
             ],
         ];
 
-        return view('admin.financial.index', [
-            'range' => $range,
+        $fmt = fn (?string $d) => $d ? Carbon::parse($d)->translatedFormat('M j, Y') : null;
+
+        return Inertia::render('Admin/Financial/Index', [
+            'range' => $range + ['from_label' => $fmt($range['from']), 'to_label' => $fmt($range['to'])],
             'cards' => $cards,
             'charts' => $charts,
-            'byPlan' => $byPlan,
-            'transactions' => $this->transactions($period, $ownerId, $planId, $type, $payment, $sort, $dir),
-            'owners' => Owner::orderBy('business_name')->get(['id', 'business_name', 'name']),
+            'transactions' => $this->transactions($period, $ownerId, $planId, $type, $payment, $sort, $dir)
+                ->through(fn ($tx) => [
+                    'key' => $tx->type.'-'.$tx->id,
+                    'type' => $tx->type,
+                    'id' => $tx->id,
+                    'owner_id' => $tx->owner_id,
+                    'workspace' => $tx->workspace,
+                    'payer' => $tx->payer,
+                    'ref' => $tx->ref,
+                    'amount' => (float) $tx->amount,
+                    'status' => $tx->status,
+                    'counted' => (bool) $tx->counted,
+                    'date' => Carbon::parse($tx->at)->translatedFormat('M j, Y'),
+                    'url' => match ($tx->type) {
+                        'subscription' => '/admin/owners/'.$tx->owner_id.'/subscription', 'booking' => '/admin/bookings/'.$tx->id, default => $tx->ref ? '/admin/bookings/'.$tx->ref : null
+                    },
+                ]),
+            'owners' => Owner::orderBy('business_name')->get(['id', 'business_name', 'name'])
+                ->map(fn ($o) => ['id' => $o->id, 'name' => $o->business_name ?: $o->name]),
             'plans' => Plan::orderBy('sort_order')->get(['id', 'name']),
             'filters' => ['owner' => $ownerId, 'plan' => $planId, 'type' => $type, 'payment' => $payment],
             'sort' => $sort,
             'dir' => $dir,
+            'options' => ['types' => self::TYPES, 'payments' => self::PAYMENTS],
         ]);
     }
 

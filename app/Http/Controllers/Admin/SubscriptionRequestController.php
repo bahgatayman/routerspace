@@ -9,7 +9,8 @@ use App\Services\NotificationService;
 use App\Services\SubscriptionRenewalService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * Admin queue for owner-initiated renewal requests. Payment is settled out of
@@ -17,15 +18,38 @@ use Illuminate\View\View;
  */
 class SubscriptionRequestController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
-        return view('admin.subscription-requests.index', [
-            'pending' => SubscriptionRequest::with(['owner', 'plan'])->pending()->oldest()->get(),
-            'handled' => SubscriptionRequest::with(['owner', 'plan', 'admin'])
-                ->where('status', '!=', SubscriptionRequest::STATUS_PENDING)
-                ->latest('handled_at')
-                ->take(20)
-                ->get(),
+        $pending = SubscriptionRequest::with(['owner', 'plan'])->pending()->oldest()->get();
+        $handled = SubscriptionRequest::with(['owner', 'plan', 'admin'])
+            ->where('status', '!=', SubscriptionRequest::STATUS_PENDING)
+            ->latest('handled_at')
+            ->take(20)
+            ->get();
+
+        return Inertia::render('Admin/SubscriptionRequests/Index', [
+            'pending' => $pending->map(fn (SubscriptionRequest $req) => [
+                'id' => $req->id,
+                'owner_id' => $req->owner_id,
+                'business' => $req->owner?->business_name,
+                'plan' => $req->plan?->name,
+                'months' => $req->months,
+                'amount' => (float) $req->amount,
+                'requested' => $req->created_at->format('d M Y, H:i'),
+                'expires' => $req->owner?->subscription_expires_at?->format('d M Y'),
+                'note' => $req->note,
+            ])->values(),
+            'handled' => $handled->map(fn (SubscriptionRequest $req) => [
+                'id' => $req->id,
+                'business' => $req->owner?->business_name,
+                'plan' => $req->plan?->name,
+                'months' => $req->months,
+                'amount' => (float) $req->amount,
+                'status' => $req->status,
+                'color' => $req->statusColor(),
+                'admin' => $req->admin?->name,
+                'handled' => $req->handled_at?->format('d M Y'),
+            ])->values(),
         ]);
     }
 

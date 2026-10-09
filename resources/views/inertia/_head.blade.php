@@ -17,8 +17,10 @@
     ];
 @endphp
 <script>window.LS_I18N = @json($lsI18n);</script>
-{{-- All UI strings for the React pages (lang/{locale}/app.php), once per full load. --}}
-<script>window.LS_LANG = @json(__('app'));</script>
+{{-- All UI strings for the React pages (lang/{locale}/app.php), once per full load. Keys missing from the
+     current locale fall back to English, exactly like Blade's __() does. --}}
+@php $lsLang = app()->getLocale() === 'en' ? __('app') : array_replace_recursive((array) __('app', [], 'en'), (array) __('app')); @endphp
+<script>window.LS_LANG = @json($lsLang);</script>
 <style>html, body { height: 100%; } .app-shell { height: 100vh; height: 100dvh; overflow: hidden; }</style>
 <script src="/js/panel.js?v={{ @filemtime(public_path('js/panel.js')) }}" defer></script>
 @viteReactRefresh

@@ -6,9 +6,11 @@ use App\Http\Controllers\Admin\Concerns\ResolvesPeriod;
 use App\Http\Controllers\Controller;
 use App\Models\Owner;
 use App\Models\Plan;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * Super Admin → Workspaces: the directory of every business (Owner = tenant).
@@ -28,7 +30,7 @@ class WorkspaceDirectoryController extends Controller
         'bookings' => 'period_bookings', 'earnings' => 'period_earnings', 'activity' => 'last_booking_at',
     ];
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         [$period, $range] = $this->resolvePeriod($request);
         $search = trim((string) $request->query('q', ''));
@@ -69,11 +71,32 @@ class WorkspaceDirectoryController extends Controller
             ->paginate(20)
             ->withQueryString();
 
-        return view('admin.workspaces.index', [
-            'owners' => $owners,
-            'counts' => $counts,
+        $chip = fn (?string $s) => $request->fullUrlWithQuery(['status' => $s, 'page' => null]);
+
+        return Inertia::render('Admin/Workspaces/Index', [
+            'owners' => $owners->onEachSide(1)->through(fn (Owner $o) => [
+                'id' => $o->id,
+                'name' => $o->business_name ?: $o->name,
+                'business_name' => $o->business_name,
+                'owner_name' => $o->name,
+                'email' => $o->email,
+                'status' => $o->subscriptionStatus(),
+                'plan' => $o->plan?->name,
+                'locations_count' => (int) $o->locations_count,
+                'rooms_count' => (int) $o->rooms_count,
+                'products_count' => (int) $o->products_count,
+                'period_bookings' => (int) $o->period_bookings,
+                'booking_earnings' => (float) $o->booking_earnings,
+                'sales_earnings' => (float) $o->sales_earnings,
+                'earnings' => (float) $o->booking_earnings + (float) $o->sales_earnings,
+                'expires' => $o->subscription_expires_at?->translatedFormat('M j, Y'),
+                'last_activity' => $o->last_booking_at ? Carbon::parse($o->last_booking_at)->diffForHumans() : null,
+                'joined' => $o->created_at?->translatedFormat('M j, Y'),
+            ]),
+            'counts' => $counts->all(),
+            'chips' => ['all' => $chip(null)] + $counts->keys()->mapWithKeys(fn ($s) => [$s => $chip($s)])->all(),
             'total' => $counts->sum(),
-            'plans' => Plan::orderBy('sort_order')->get(['id', 'name']),
+            'plans' => Plan::orderBy('sort_order')->get(['id', 'name'])->map->only(['id', 'name'])->all(),
             'filters' => ['q' => $search, 'status' => $status, 'plan' => $planId, 'joined_from' => $joinedFrom, 'joined_to' => $joinedTo],
             'sort' => $sort,
             'dir' => $dir,

@@ -23,6 +23,7 @@ use Database\Seeders\FeatureSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -177,8 +178,9 @@ class AdminPlatformTest extends TestCase
 
         $this->assertEquals(90, app(PlatformAnalyticsService::class)->earnings(AnalyticsPeriod::fromPreset('this_month')));
         $res = $this->asAdmin()->get('/admin/financial?preset=this_month')->assertOk();
-        $this->assertEquals(90, $res->viewData('cards')['earnings']['value']);
-        $this->asAdmin()->get('/admin/bookings?type=session')->assertOk()->assertSee('#'.$booking->id);
+        $this->assertEquals(90, $res->inertiaProps('cards.earnings.value'));
+        $ids = collect($this->asAdmin()->get('/admin/bookings?type=session')->assertOk()->inertiaProps('bookings.data'))->pluck('id');
+        $this->assertContains($booking->id, $ids);
     }
 
     public function test_financials_page_filters_and_transactions_table(): void
@@ -186,24 +188,27 @@ class AdminPlatformTest extends TestCase
         [$a, $b] = $this->seedPlatform();
 
         $res = $this->asAdmin()->get('/admin/financial?preset=this_month')->assertOk();
-        $this->assertEquals(1500, $res->viewData('cards')['platform_revenue']['value']);
-        $types = collect($res->viewData('transactions')->items())->countBy('type')->all();
+        $res->assertInertia(fn (Assert $p) => $p->component('Admin/Financial/Index'));
+        $this->assertEquals(1500, $res->inertiaProps('cards.platform_revenue.value'));
+        $types = collect($res->inertiaProps('transactions.data'))->countBy('type')->all();
         // 2 subscriptions, 5 bookings with money paid (package excluded — no cash), 2 sales (open one listed, flagged not earned).
         $this->assertSame(['booking' => 4, 'sale' => 2, 'subscription' => 2], collect($types)->sortKeys()->all());
 
         $res = $this->asAdmin()->get("/admin/financial?preset=this_month&owner={$a->id}")->assertOk();
-        $this->assertEquals(500, $res->viewData('cards')['platform_revenue']['value']);
-        $this->assertEquals(700, $res->viewData('cards')['earnings']['value']);
-        $res->assertDontSee('Bravo Secret Room');
+        $this->assertEquals(500, $res->inertiaProps('cards.platform_revenue.value'));
+        $this->assertEquals(700, $res->inertiaProps('cards.earnings.value'));
+        $this->assertStringNotContainsString('Bravo Secret Room', json_encode($res->inertiaProps()));
 
         $res = $this->asAdmin()->get('/admin/financial?preset=this_month&type=subscription')->assertOk();
-        $this->assertSame(['subscription'], collect($res->viewData('transactions')->items())->pluck('type')->unique()->values()->all());
+        $this->assertSame(['subscription'], collect($res->inertiaProps('transactions.data'))->pluck('type')->unique()->values()->all());
 
         $res = $this->asAdmin()->get('/admin/financial?preset=this_month&payment=partial')->assertOk();
-        $this->assertSame([100.0], collect($res->viewData('transactions')->items())->pluck('amount')->map(fn ($v) => (float) $v)->all());
+        $this->assertSame([100.0], collect($res->inertiaProps('transactions.data'))->pluck('amount')->map(fn ($v) => (float) $v)->all());
 
-        // Untracked metrics are labelled, never estimated.
-        $res->assertSee(__('app.admin_platform.not_tracked.refunds.name'))->assertSee(__('app.admin_platform.not_tracked_badge'));
+        // Untracked metrics are labelled (lang lines the page renders), never estimated (no figure is passed for them).
+        $this->assertNotSame('app.admin_platform.not_tracked.refunds.name', __('app.admin_platform.not_tracked.refunds.name'));
+        $this->assertNotSame('app.admin_platform.not_tracked_badge', __('app.admin_platform.not_tracked_badge'));
+        $this->assertArrayNotHasKey('refunds', $res->inertiaProps('cards'));
     }
 
     // ------------------------------------------------------------------ directory
@@ -216,21 +221,27 @@ class AdminPlatformTest extends TestCase
         $this->business('Echo Suspended', null, now()->addMonth(), false);
 
         $res = $this->asAdmin()->get('/admin/workspaces?preset=this_month&sort=earnings&dir=desc')->assertOk();
-        $owners = $res->viewData('owners');
-        $this->assertSame('Bravo', $owners->first()->business_name);
-        $this->assertEquals(7777, (float) $owners->first()->booking_earnings);
+        $this->assertSame('Admin/Workspaces/Index', $res->inertiaPage()['component']);
+        $owners = collect($res->inertiaProps('owners.data'));
+        $this->assertSame('Bravo', $owners->first()['business_name']);
+        $this->assertEquals(7777, $owners->first()['booking_earnings']);
         $alpha = $owners->firstWhere('id', $a->id);
-        $this->assertEquals(620, (float) $alpha->booking_earnings);
-        $this->assertEquals(80, (float) $alpha->sales_earnings);
-        $this->assertSame(4, $alpha->period_bookings); // cancelled + no-show excluded
-        $this->assertSame(1, $alpha->rooms_count);
+        $this->assertEquals(620, $alpha['booking_earnings']);
+        $this->assertEquals(80, $alpha['sales_earnings']);
+        $this->assertSame(4, $alpha['period_bookings']); // cancelled + no-show excluded
+        $this->assertSame(1, $alpha['rooms_count']);
 
-        $counts = $res->viewData('counts')->all();
+        $counts = $res->inertiaProps('counts');
         $this->assertSame(['active' => 2, 'expiring' => 1, 'expired' => 1, 'suspended' => 1, 'never' => 0], $counts);
 
-        $this->asAdmin()->get('/admin/workspaces?status=expiring')->assertOk()->assertSee('Charlie Expiring')->assertDontSee('Delta Expired');
-        $this->asAdmin()->get('/admin/workspaces?q=alph')->assertOk()->assertSee('Alpha')->assertDontSee('Bravo');
-        $this->asAdmin()->get('/admin/workspaces?q='.$b->id)->assertOk()->assertSee('Bravo');
+        $names = fn (string $url) => json_encode($this->asAdmin()->get($url)->assertOk()->inertiaProps('owners'), JSON_UNESCAPED_UNICODE);
+        $expiring = $names('/admin/workspaces?status=expiring');
+        $this->assertStringContainsString('Charlie Expiring', $expiring);
+        $this->assertStringNotContainsString('Delta Expired', $expiring);
+        $alph = json_encode($this->asAdmin()->get('/admin/workspaces?q=alph')->assertOk()->inertiaProps(), JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('Alpha', $alph);
+        $this->assertStringNotContainsString('Bravo', $alph);
+        $this->assertStringContainsString('Bravo', $names('/admin/workspaces?q='.$b->id));
         $this->asAdmin()->get('/admin/workspaces?sort=DROP TABLE&dir=sideways&status=bogus&preset=nope')->assertOk();
         $this->asAdmin()->get('/admin/owners')->assertRedirect('/admin/workspaces');
     }
@@ -245,20 +256,25 @@ class AdminPlatformTest extends TestCase
         StaffActivityLog::create(['owner_id' => $b->id, 'actor_type' => 'owner', 'actor_name' => 'Bravo Boss', 'actor_email' => 'b@t.local', 'action' => 'x', 'subject_type' => Owner::class, 'subject_id' => $b->id, 'description' => 'Bravo secret action']);
         StaffActivityLog::create(['owner_id' => $a->id, 'actor_type' => 'owner', 'actor_name' => 'Alpha Boss', 'actor_email' => 'a@t.local', 'action' => 'x', 'subject_type' => Owner::class, 'subject_id' => $a->id, 'description' => 'Alpha visible action']);
 
-        foreach (['products', 'rooms', 'bookings?preset=this_month', 'financials?preset=this_month', 'activity', 'audit', ''] as $tab) {
-            $this->asAdmin()->get("/admin/owners/{$a->id}/{$tab}")->assertOk()
-                ->assertDontSee('Bravo Secret')->assertDontSee('7,777')->assertDontSee('Bravo secret action');
+        // Every tab's page props (what the React page renders) carry only Alpha's data.
+        $props = fn (string $tab) => json_encode($this->asAdmin()->get("/admin/owners/{$a->id}/{$tab}")->assertOk()->inertiaProps(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        foreach (['products', 'rooms', 'bookings?preset=this_month', 'financials?preset=this_month', 'activity', 'audit', '', 'users', 'subscription'] as $tab) {
+            $json = $props($tab);
+            foreach (['Bravo Secret', '7,777', '7777', 'Bravo secret action', 'Bravo Boss'] as $leak) {
+                $this->assertStringNotContainsString($leak, $json, "Tab '{$tab}' leaked: {$leak}");
+            }
+            $this->asAdmin()->get("/admin/owners/{$a->id}/{$tab}")->assertDontSee('Bravo Secret')->assertDontSee('7,777')->assertDontSee('Bravo secret action');
         }
-        $this->asAdmin()->get("/admin/owners/{$a->id}/products")->assertSee('Alpha Tea');
-        $this->asAdmin()->get("/admin/owners/{$a->id}/rooms")->assertSee('Alpha Room');
-        $this->asAdmin()->get("/admin/owners/{$a->id}/activity")->assertSee('Alpha visible action');
+        $this->assertStringContainsString('Alpha Tea', $props('products'));
+        $this->assertStringContainsString('Alpha Room', $props('rooms'));
+        $this->assertStringContainsString('Alpha visible action', $props('activity'));
 
-        $fin = $this->asAdmin()->get("/admin/owners/{$a->id}/financials?preset=this_month")->viewData('cards');
+        $fin = $this->asAdmin()->get("/admin/owners/{$a->id}/financials?preset=this_month")->inertiaProps('cards');
         $this->assertEquals(700, $fin['earnings']['value']);
         $this->assertEquals(500, $fin['platform_revenue']['value']);
 
         // Product detail is owner-scoped: a foreign product id is a 404, not a leak.
-        $this->asAdmin()->get("/admin/owners/{$a->id}/products/{$mine->id}")->assertOk()->assertSee('Alpha Tea');
+        $this->assertSame('Alpha Tea', $this->asAdmin()->get("/admin/owners/{$a->id}/products/{$mine->id}")->assertOk()->inertiaProps('product.name'));
         $this->asAdmin()->get("/admin/owners/{$a->id}/products/{$coffee->id}")->assertNotFound();
         $bws = Workspace::where('owner_id', $b->id)->first();
         $this->asAdmin()->get("/admin/owners/{$a->id}/rooms?workspace={$bws->id}")->assertNotFound();
@@ -270,12 +286,13 @@ class AdminPlatformTest extends TestCase
         [$a] = $this->seedPlatform();
 
         $res = $this->asAdmin()->get("/admin/owners/{$a->id}/bookings?preset=this_month")->assertOk();
-        $res->assertSee(__('app.admin_platform.chart.status_title'));
+        $this->assertSame('Admin/Business/Bookings', $res->inertiaPage()['component']);
 
         // Alpha's seeded bookings this period: 3 completed, 1 confirmed, 1 cancelled, 1 no_show.
         // Order follows BookingController::STATUSES (pending, confirmed, checked_in,
         // open, completed, cancelled, no_show), zero-count statuses omitted.
-        $chart = $res->viewData('statusChart');
+        $chart = $res->inertiaProps('statusChart');
+        $this->assertCount(4, $chart['links'], 'Each slice links to its status chip.');
         $this->assertSame('doughnut', $chart['type']);
         $this->assertSame(
             ['Confirmed', 'Completed', 'Cancelled', 'No-show'],
@@ -290,16 +307,17 @@ class AdminPlatformTest extends TestCase
 
         // seedPlatform()'s one Sale for Alpha has no SaleItem line — no per-product
         // breakdown exists yet, so the analytics section stays hidden.
-        $this->asAdmin()->get("/admin/owners/{$a->id}/products?preset=this_month")->assertOk()
-            ->assertDontSee(__('app.dashboard.product_sales_trend'));
+        $this->assertFalse($this->asAdmin()->get("/admin/owners/{$a->id}/products?preset=this_month")->assertOk()->inertiaProps('hasProductSales'));
 
         $product = Product::create(['owner_id' => $a->id, 'name' => 'Alpha Coffee', 'type' => 'product', 'price' => 10, 'is_active' => true]);
         $sale = Sale::create(['owner_id' => $a->id, 'status' => 'completed', 'sold_at' => '2026-10-12 10:00:00', 'subtotal' => 40, 'total' => 40]);
         $sale->items()->create(['product_id' => $product->id, 'name' => 'Alpha Coffee', 'unit_price' => 10, 'quantity' => 4, 'line_total' => 40]);
 
         $res = $this->asAdmin()->get("/admin/owners/{$a->id}/products?preset=this_month")->assertOk();
-        $res->assertSee(__('app.dashboard.product_sales_trend'))->assertSee('Alpha Coffee');
-        $this->assertSame(4, $res->viewData('productSummary')['totalUnits']);
+        $this->assertTrue($res->inertiaProps('hasProductSales'));
+        $this->assertSame('Alpha Coffee', $res->inertiaProps('productSummary.topProduct'));
+        $this->assertSame(['Alpha Coffee'], $res->inertiaProps('topProductsChart.labels'));
+        $this->assertSame(4, $res->inertiaProps('productSummary')['totalUnits']);
     }
 
     // ------------------------------------------------------------------ rooms
@@ -309,17 +327,27 @@ class AdminPlatformTest extends TestCase
         [$a, $b, $ar, $br] = $this->seedPlatform();
         $idle = $this->room($a, 'Alpha Idle Room');
 
-        $res = $this->asAdmin()->get('/admin/rooms?preset=this_month')->assertOk()->assertSee('Alpha Room')->assertSee('Bravo Secret Room');
-        $this->assertSame(3, $res->viewData('rooms')->total());
+        $names = fn ($res) => collect($res->inertiaProps('rooms.data'))->pluck('name')->all();
+        $res = $this->asAdmin()->get('/admin/rooms?preset=this_month')->assertOk();
+        $res->assertInertia(fn (Assert $p) => $p->component('Admin/Rooms/Index'));
+        $this->assertContains('Alpha Room', $names($res));
+        $this->assertContains('Bravo Secret Room', $names($res));
+        $this->assertSame(3, $res->inertiaProps('rooms.total'));
 
-        $this->asAdmin()->get("/admin/rooms?owner={$a->id}")->assertOk()->assertSee('Alpha Room')->assertDontSee('Bravo Secret Room');
-        $this->asAdmin()->get('/admin/rooms?idle=1&preset=this_month')->assertOk()->assertSee('Alpha Idle Room')->assertDontSee('Bravo Secret Room');
+        $res = $this->asAdmin()->get("/admin/rooms?owner={$a->id}")->assertOk();
+        $this->assertContains('Alpha Room', $names($res));
+        $this->assertStringNotContainsString('Bravo Secret Room', json_encode($res->inertiaProps()));
+        $res = $this->asAdmin()->get('/admin/rooms?idle=1&preset=this_month')->assertOk();
+        $this->assertContains('Alpha Idle Room', $names($res));
+        $this->assertStringNotContainsString('Bravo Secret Room', json_encode($res->inertiaProps()));
         // A location of another business is ignored when filtering by a business.
         $bws = Workspace::where('owner_id', $b->id)->first();
-        $this->assertNull($this->asAdmin()->get("/admin/rooms?owner={$a->id}&location={$bws->id}")->viewData('filters')['location']);
+        $this->assertNull($this->asAdmin()->get("/admin/rooms?owner={$a->id}&location={$bws->id}")->inertiaProps('filters.location'));
 
-        $show = $this->asAdmin()->get("/admin/rooms/{$ar->id}?preset=this_month")->assertOk()->assertSee('Alpha')->assertDontSee('Bravo Secret Room');
-        $stats = $show->viewData('stats');
+        $show = $this->asAdmin()->get("/admin/rooms/{$ar->id}?preset=this_month")->assertOk();
+        $show->assertInertia(fn (Assert $p) => $p->component('Admin/Rooms/Show')->where('room.business', 'Alpha'));
+        $this->assertStringNotContainsString('Bravo Secret Room', json_encode($show->inertiaProps()));
+        $stats = $show->inertiaProps('stats');
         $this->assertSame(6, $stats['bookings']);
         $this->assertEquals(620, $stats['earnings']);
         $this->assertEquals(300, $stats['outstanding']);
@@ -333,23 +361,26 @@ class AdminPlatformTest extends TestCase
         [$a, $b, $ar] = $this->seedPlatform();
 
         $res = $this->asAdmin()->get('/admin/bookings')->assertOk();
-        $this->assertSame(7, $res->viewData('stats')['total']);
-        $this->assertEquals(300, $res->viewData('stats')['outstanding']);
+        $res->assertInertia(fn (Assert $p) => $p->component('Admin/Bookings/Index'));
+        $this->assertSame(7, $res->inertiaProps('stats.total'));
+        $this->assertEquals(300, $res->inertiaProps('stats.outstanding'));
 
         $res = $this->asAdmin()->get("/admin/bookings?owner={$a->id}&status=cancelled")->assertOk();
-        $this->assertSame(['cancelled'], collect($res->viewData('bookings')->items())->pluck('status')->unique()->values()->all());
-        $this->assertSame(6, $res->viewData('stats')['total']); // stats ignore the status chip, respect the owner
+        $this->assertSame(['cancelled'], collect($res->inertiaProps('bookings.data'))->pluck('status')->unique()->values()->all());
+        $this->assertSame(6, $res->inertiaProps('stats.total')); // stats ignore the status chip, respect the owner
 
-        $due = $this->asAdmin()->get('/admin/bookings?payment=due')->viewData('bookings');
-        $this->assertSame(['confirmed'], collect($due->items())->pluck('status')->all());
-        $pkg = $this->asAdmin()->get('/admin/bookings?type=package')->viewData('bookings');
-        $this->assertSame(1, $pkg->total());
-        $range = $this->asAdmin()->get('/admin/bookings?preset=custom&from=2026-10-05&to=2026-10-06')->viewData('bookings');
-        $this->assertSame(2, $range->total());
+        $due = $this->asAdmin()->get('/admin/bookings?payment=due')->inertiaProps('bookings');
+        $this->assertSame(['confirmed'], collect($due['data'])->pluck('status')->all());
+        $pkg = $this->asAdmin()->get('/admin/bookings?type=package')->inertiaProps('bookings');
+        $this->assertSame(1, $pkg['total']);
+        $range = $this->asAdmin()->get('/admin/bookings?preset=custom&from=2026-10-05&to=2026-10-06')->inertiaProps('bookings');
+        $this->assertSame(2, $range['total']);
 
         $one = Booking::where('owner_id', $a->id)->where('status', 'confirmed')->first();
-        $this->asAdmin()->get('/admin/bookings?q='.$one->id)->assertOk()->assertSee('/admin/bookings/'.$one->id, false);
-        $this->asAdmin()->get('/admin/bookings/'.$one->id)->assertOk()->assertSee('Alpha Room')->assertSee('300.00');
+        $this->assertContains($one->id, collect($this->asAdmin()->get('/admin/bookings?q='.$one->id)->assertOk()->inertiaProps('bookings.data'))->pluck('id')->all());
+        $this->asAdmin()->get('/admin/bookings/'.$one->id)->assertOk()
+            ->assertInertia(fn (Assert $p) => $p->component('Admin/Bookings/Show')->where('booking.room', 'Alpha Room')
+                ->where('booking.balance_due', fn ($v) => (float) $v === 300.0));
         $this->asAdmin()->get('/admin/bookings/999999')->assertNotFound();
     }
 
@@ -362,7 +393,7 @@ class AdminPlatformTest extends TestCase
         $this->booking($room, '2026-10-10', 'completed', 300, 300); // last 30 days
         $this->booking($room, '2026-09-01', 'completed', 100, 100); // previous 30 days
 
-        $kpis = $this->asAdmin()->get('/admin/dashboard')->assertOk()->viewData('kpis');
+        $kpis = $this->asAdmin()->get('/admin/dashboard')->assertOk()->inertiaProps('kpis');
         $this->assertEquals(300, $kpis['earnings']['value']);
         $this->assertEquals(100, $kpis['earnings']['previous']);
         $this->assertEquals(200.0, $kpis['earnings']['change']);
@@ -387,7 +418,7 @@ class AdminPlatformTest extends TestCase
         $this->business('Gone', null, now()->subDays(5));
         $this->business('Empty Shell');
 
-        $keys = collect($this->asAdmin()->get('/admin/dashboard')->assertOk()->viewData('insights')['items'])->pluck('key');
+        $keys = collect($this->asAdmin()->get('/admin/dashboard')->assertOk()->inertiaProps('insights')['items'])->pluck('key');
         foreach (['declining', 'cancellations', 'expiring', 'expired', 'no_rooms', 'top_earnings'] as $k) {
             $this->assertContains($k, $keys, "missing insight {$k}");
         }
@@ -402,7 +433,7 @@ class AdminPlatformTest extends TestCase
         $sr = $this->room($small, 'S');
         $this->booking($sr, '2026-10-10', 'cancelled', 50, 0);
         $this->booking($sr, '2026-09-01', 'completed', 100, 100);
-        $keys = collect($this->actingAs($admin, 'admin')->get('/admin/dashboard')->viewData('insights')['items'])->pluck('key');
+        $keys = collect($this->actingAs($admin, 'admin')->get('/admin/dashboard')->inertiaProps('insights')['items'])->pluck('key');
         $this->assertNotContains('cancellations', $keys);
         $this->assertNotContains('declining', $keys);
     }
@@ -413,7 +444,12 @@ class AdminPlatformTest extends TestCase
             '/admin/dashboard?preset=custom&from=2025-01-01&to=2026-10-15', '/admin/financial?preset=today'] as $url) {
             $this->asAdmin()->get($url)->assertOk();
         }
-        $this->asAdmin()->get('/admin/dashboard')->assertSee(__('app.admin_platform.chart.empty'));
+        // Every dashboard chart is all-zero → ChartCard shows admin_platform.chart.empty, never a fake line.
+        $charts = $this->asAdmin()->get('/admin/dashboard')->assertOk()->inertiaProps('charts');
+        foreach ($charts as $key => $spec) {
+            $sum = collect($spec['datasets'])->flatMap(fn ($d) => $d['data'])->sum(fn ($v) => abs((float) $v));
+            $this->assertEquals(0, $sum, "Chart {$key} should render the empty state.");
+        }
     }
 
     public function test_pages_render_in_arabic(): void
@@ -471,7 +507,9 @@ class AdminPlatformTest extends TestCase
                 ->assertRedirect("/admin/plans/{$old->id}")->assertSessionHasErrors('target_plan_id');
         }
         $this->asAdmin()->postJson("/admin/plans/{$new->id}/toggle")->assertOk()->assertJsonPath('is_active', false);
-        $this->asAdmin()->get("/admin/plans/{$new->id}")->assertOk()->assertSee('Xray')->assertSee('Zulu');
+        $onPlan = collect($this->asAdmin()->get("/admin/plans/{$new->id}")->assertOk()->inertiaProps('owners.data'))->pluck('name');
+        $this->assertContains('Xray', $onPlan);
+        $this->assertContains('Zulu', $onPlan);
     }
 
     public function test_plan_cards_show_usage(): void
@@ -480,10 +518,11 @@ class AdminPlatformTest extends TestCase
         $this->business('P1', $plan);
         $this->business('P2', $plan, now()->subDay());
         $res = $this->asAdmin()->get('/admin/plans')->assertOk();
-        $card = $res->viewData('plans')->firstWhere('id', $plan->id);
-        $this->assertSame(2, $card->owners_count);
-        $this->assertSame(1, $card->active_owners_count);
-        $res->assertSee('500.00');
+        $card = collect($res->inertiaProps('plans'))->firstWhere('id', $plan->id);
+        $this->assertSame(2, $card['owners_count']);
+        $this->assertSame(1, $card['active_owners_count']);
+        $this->assertEquals(500, $card['price_per_month']);
+        $this->assertEquals(500, $card['mrr']);
     }
 
     // ------------------------------------------------------------------ authorization

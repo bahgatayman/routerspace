@@ -133,6 +133,12 @@ class DashboardAnalyticsTest extends TestCase
 
     // --- Basic rendering ---
 
+    /** All page props as JSON — for "this value appears / never appears anywhere on the page" checks. */
+    private function propsJson($response): string
+    {
+        return json_encode($response->inertiaProps(), JSON_UNESCAPED_UNICODE);
+    }
+
     public function test_dashboard_renders_the_new_kpis_for_a_fully_featured_owner(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
@@ -144,12 +150,14 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertSee(__('app.dashboard.revenue_today'));
-        $response->assertSee('ج.م 175.00'); // 150 booking + 25 sale
-        $response->assertSee(__('app.dashboard.current_occupancy'));
-        $response->assertSee(__('app.dashboard.needs_attention'));
-        $response->assertSee(__('app.dashboard.todays_schedule'));
-        $response->assertSee(__('app.dashboard.room_utilization_details'));
+        $this->assertSame('Dashboard/Index', $response->inertiaPage()['component']);
+        $this->assertTrue($response->inertiaProps('showRevenue'));
+        $this->assertEquals(175.0, $response->inertiaProps('revenue.today')); // 150 booking + 25 sale
+        $this->assertTrue($response->inertiaProps('showWorkspace'));
+        $this->assertNotNull($response->inertiaProps('occupancy'));
+        $this->assertNotNull($response->inertiaProps('needsAttention'));
+        $this->assertIsArray($response->inertiaProps('booking.todaysSchedule'));
+        $this->assertIsArray($response->inertiaProps('roomUtilization'));
     }
 
     public function test_dashboard_renders_the_products_section_for_a_sales_feature_owner(): void
@@ -162,10 +170,10 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertSee(__('app.dashboard.product_analytics'));
-        $response->assertSee('Coffee');
-        $response->assertSee(__('app.dashboard.top_selling_product'));
-        $response->assertSee(__('app.dashboard.product_sales_trend'));
+        $this->assertTrue($response->inertiaProps('showProducts'));
+        $this->assertSame('Coffee', $response->inertiaProps('products.summary.topProduct.name'));
+        $this->assertTrue($response->inertiaProps('products.hasSales'));
+        $this->assertSame('Coffee', $response->inertiaProps('products.top.0.name'));
     }
 
     public function test_dashboard_skips_the_products_section_without_the_sales_feature(): void
@@ -175,7 +183,8 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertDontSee(__('app.dashboard.product_analytics'));
+        $this->assertFalse($response->inertiaProps('showProducts'));
+        $this->assertNull($response->inertiaProps('products'));
     }
 
     public function test_products_section_renders_empty_state_with_no_sales_in_period(): void
@@ -185,8 +194,8 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertSee(__('app.dashboard.product_analytics'));
-        $response->assertSee(__('app.dashboard.no_product_sales_for_period'));
+        $this->assertTrue($response->inertiaProps('showProducts'));
+        $this->assertFalse($response->inertiaProps('products.hasSales'));
     }
 
     public function test_dashboard_hides_smart_insights_when_nothing_qualifies(): void
@@ -196,7 +205,7 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertDontSee(__('app.dashboard.smart_insights'));
+        $this->assertSame([], $response->inertiaProps('smartInsights'));
     }
 
     public function test_dashboard_shows_smart_insights_with_a_revenue_change_sentence(): void
@@ -210,34 +219,22 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard?period=30d');
 
         $response->assertOk();
-        $response->assertSee(__('app.dashboard.smart_insights'));
+        $this->assertNotEmpty($response->inertiaProps('smartInsights'));
+        $this->assertSame($response->inertiaProps('revenue.changeSentence'), $response->inertiaProps('smartInsights.0'));
     }
 
     public function test_needs_attention_reflects_unread_notification_count(): void
     {
         $owner = $this->owner();
         Notification::create(['owner_id' => $owner->id, 'type' => 'general', 'level' => 'warning', 'title' => 'Alert one']);
-        // Already read — must not inflate the count. (Its title can still
-        // legitimately appear in the header bell's separate "recent" list,
-        // which shows read+unread — so this only checks the KPI count, not
-        // page-wide text absence.)
+        // Already read — must not inflate the count, nor appear in the list.
         Notification::create(['owner_id' => $owner->id, 'type' => 'general', 'level' => 'info', 'title' => 'Alert two', 'read_at' => now()]);
 
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertSee('Alert one');
-        $this->assertSame(1, $this->extractNeedsAttentionCount($response->getContent()));
-    }
-
-    private function extractNeedsAttentionCount(string $html): int
-    {
-        $label = preg_quote(__('app.dashboard.needs_attention'), '/');
-        preg_match("/{$label}<\/p>\\s*<p[^>]*>(\\d+)<\/p>/", $html, $matches);
-
-        $this->assertNotEmpty($matches, 'Could not locate the "Needs Attention" figure in the dashboard HTML.');
-
-        return (int) $matches[1];
+        $this->assertSame(1, $response->inertiaProps('needsAttention.count'));
+        $this->assertSame(['Alert one'], array_column($response->inertiaProps('needsAttention.items'), 'title'));
     }
 
     public function test_needs_attention_shows_all_caught_up_when_nothing_is_unread(): void
@@ -247,7 +244,8 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertSee(__('app.dashboard.all_caught_up'));
+        $this->assertSame(0, $response->inertiaProps('needsAttention.count'));
+        $this->assertSame([], $response->inertiaProps('needsAttention.items'));
     }
 
     // --- Period switching ---
@@ -264,11 +262,12 @@ class DashboardAnalyticsTest extends TestCase
 
         $today = $this->actingAs($owner, 'owner')->get('/dashboard?period=today');
         $today->assertOk();
-        $today->assertDontSee('25 Aug'); // that day isn't in a 1-day trend window
+        // that day isn't in a 1-day trend window
+        $this->assertNotContains('25 Aug', array_column($today->inertiaProps('revenue.trend'), 'label'));
 
         $week = $this->actingAs($owner, 'owner')->get('/dashboard?period=7d');
         $week->assertOk();
-        $week->assertSee('25 Aug');
+        $this->assertContains('25 Aug', array_column($week->inertiaProps('revenue.trend'), 'label'));
     }
 
     public function test_new_customers_count_reflects_the_selected_period(): void
@@ -285,18 +284,8 @@ class DashboardAnalyticsTest extends TestCase
         $month = $this->actingAs($owner, 'owner')->get('/dashboard?period=30d');
         $month->assertOk();
 
-        $this->assertSame(0, $this->extractNewCustomers($week->getContent()));
-        $this->assertSame(1, $this->extractNewCustomers($month->getContent()));
-    }
-
-    private function extractNewCustomers(string $html): int
-    {
-        $label = preg_quote(__('app.dashboard.new_customers'), '/');
-        preg_match("/{$label}<\/p>\\s*<p[^>]*>(\\d+)<\/p>/", $html, $matches);
-
-        $this->assertNotEmpty($matches, 'Could not locate the "New Customers" figure in the dashboard HTML.');
-
-        return (int) $matches[1];
+        $this->assertSame(0, $week->inertiaProps('customers.newCustomers'));
+        $this->assertSame(1, $month->inertiaProps('customers.newCustomers'));
     }
 
     public function test_an_unrecognized_period_value_falls_back_to_today_without_error(): void
@@ -306,7 +295,7 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard?period=bogus');
 
         $response->assertOk();
-        $response->assertSee(__('app.dashboard.period_today'));
+        $this->assertSame('today', $response->inertiaProps('periodKey'));
     }
 
     // --- Owner isolation ---
@@ -326,9 +315,12 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertSee('My Room');
+        $json = $this->propsJson($response);
+        $this->assertStringContainsString('My Room', $json);
+        $this->assertStringNotContainsString('Secret Room', $json);
+        $this->assertStringNotContainsString('999', $json);
+        $this->assertStringNotContainsString('Other owners alert', $json);
         $response->assertDontSee('Secret Room');
-        $response->assertDontSee('999.00');
         $response->assertDontSee('Other owners alert');
     }
 
@@ -341,11 +333,13 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertDontSee(__('app.dashboard.revenue_today'));
-        $response->assertDontSee(__('app.dashboard.current_occupancy'));
-        $response->assertDontSee(__('app.dashboard.todays_schedule'));
+        $this->assertFalse($response->inertiaProps('showRevenue'));
+        $this->assertNull($response->inertiaProps('revenue'));
+        $this->assertFalse($response->inertiaProps('showWorkspace'));
+        $this->assertNull($response->inertiaProps('occupancy'));
+        $this->assertNull($response->inertiaProps('booking')); // no today's schedule
         // Needs Attention is universal — shown regardless of feature mix.
-        $response->assertSee(__('app.dashboard.needs_attention'));
+        $this->assertNotNull($response->inertiaProps('needsAttention'));
     }
 
     public function test_booking_only_owner_without_workspace_feature_sees_bookings_but_not_occupancy(): void
@@ -357,10 +351,11 @@ class DashboardAnalyticsTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/dashboard');
 
         $response->assertOk();
-        $response->assertSee(__('app.label.today_bookings'));
-        $response->assertSee(__('app.dashboard.peak_hours'));
-        $response->assertDontSee(__('app.dashboard.current_occupancy'));
-        $response->assertDontSee(__('app.dashboard.room_utilization_details'));
+        $this->assertNotNull($response->inertiaProps('booking.todayBookings'));
+        $this->assertIsArray($response->inertiaProps('booking.peakHoursGrid'));
+        $this->assertFalse($response->inertiaProps('showWorkspace'));
+        $this->assertNull($response->inertiaProps('occupancy'));
+        $this->assertNull($response->inertiaProps('roomUtilization'));
     }
 
     // --- No N+1: cost must not scale with room/booking count ---

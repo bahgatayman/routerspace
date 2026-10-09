@@ -6,11 +6,12 @@ use App\Models\Staff;
 use App\Models\StaffActivityLog;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class StaffActivityController extends Controller
 {
-    public function show(Request $request, Staff $staff): View
+    public function show(Request $request, Staff $staff): Response
     {
         abort_unless($staff->owner_id === TenantContext::id(), 404);
 
@@ -38,6 +39,20 @@ class StaffActivityController extends Controller
             ->paginate(20)
             ->withQueryString();
 
-        return view('staff.activity', compact('staff', 'counts', 'activity', 'range'));
+        return Inertia::render('Staff/Activity', [
+            'staff' => ['id' => $staff->id, 'name' => $staff->name],
+            'counts' => $counts->map(fn ($total, $action) => [
+                'action' => $action,
+                'label' => __('app.staff.events.'.$action),
+                'total' => (int) $total,
+            ])->values(),
+            'activity' => $activity->through(fn (StaffActivityLog $entry) => [
+                'id' => $entry->id,
+                'created' => $entry->created_at->format('M d, Y H:i'),
+                'label' => __('app.staff.events.'.$entry->action),
+                'description' => $entry->description,
+            ]),
+            'range' => $range,
+        ]);
     }
 }

@@ -390,11 +390,13 @@ class BookingDeletionTest extends TestCase
         $booking = $this->booking($owner, $room, $member, ['start_time' => now()->format('H:i'), 'end_time' => now()->addHour()->format('H:i')]);
 
         $staff = $this->staff($owner, 'staff');
-        $html = $this->actingAs($staff, 'staff')->get("/bookings/{$booking->id}")->assertOk()->getContent();
-        $this->assertStringNotContainsString('data-ls-open="delete-booking-modal"', $html);
+        $asStaff = $this->actingAs($staff, 'staff')->get("/bookings/{$booking->id}")->assertOk();
+        $this->assertFalse($asStaff->inertiaProps('canDelete')); // the React page renders no delete button
 
         $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/check-in", ['party_size' => 1])->assertRedirect();
-        $html = $this->actingAs($owner, 'owner')->get("/bookings/{$booking->id}")->assertOk()->getContent();
-        $this->assertStringContainsString(__('app.booking.delete_disabled_checked_in'), $html);
+        $asOwner = $this->actingAs($owner, 'owner')->get("/bookings/{$booking->id}")->assertOk();
+        // checked_in → the page shows booking.delete_disabled_checked_in instead of the button.
+        $this->assertSame('checked_in', $asOwner->inertiaProps('booking.status'));
+        $this->assertStringContainsString("t('booking.delete_disabled_checked_in')", file_get_contents(resource_path('js/Pages/Bookings/Show.jsx')));
     }
 }

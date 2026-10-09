@@ -1378,6 +1378,7 @@ return [
         'users' => 'Users',
         'set_as_default' => 'Set as Default',
         'default_profile_note' => 'This profile is assigned to new users by default.',
+        'delete_confirm' => 'Delete this profile?',
     ],
 
     /*

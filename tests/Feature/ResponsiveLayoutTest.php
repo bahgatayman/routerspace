@@ -100,10 +100,38 @@ class ResponsiveLayoutTest extends TestCase
 
     public function test_booking_detail_keeps_its_items_table_wrapped(): void
     {
-        $html = $this->actingAs($this->owner, 'owner')
-            ->get("/bookings/{$this->booking->id}")->assertOk()->getContent();
+        // /bookings/{id} is a React page: its markup lives in the JSX, not the server HTML.
+        $res = $this->actingAs($this->owner, 'owner')->get("/bookings/{$this->booking->id}")->assertOk();
+        $this->assertSame('Bookings/Show', $res->inertiaPage()['component']);
 
-        $this->assertSame(0, $this->unwrappedTables($html));
+        $this->assertSame(0, $this->unwrappedJsxTables('js/Pages/Bookings/Show.jsx'));
+    }
+
+    /** React pages (bookings list/calendar, dashboard): every <table> sits in its own overflow-x-auto scroller. */
+    public function test_react_booking_and_dashboard_tables_are_wrapped(): void
+    {
+        foreach (['js/Pages/Bookings/Index.jsx', 'js/Pages/Bookings/Calendar.jsx', 'js/Pages/Dashboard/Index.jsx', 'js/Components/Dashboard/ProductsSection.jsx'] as $file) {
+            $this->assertSame(0, $this->unwrappedJsxTables($file), "Unwrapped <table> in {$file}");
+        }
+    }
+
+    /** Tables in a JSX file not opened directly inside an overflow-x-auto wrapper. */
+    private function unwrappedJsxTables(string $file): int
+    {
+        $jsx = file_get_contents(resource_path($file));
+        preg_match_all('/<table\b/', $jsx, $tables, PREG_OFFSET_CAPTURE);
+        $unwrapped = 0;
+        foreach ($tables[0] as [, $offset]) {
+            // The wrapper must be the element right before the table.
+            $before = substr($jsx, 0, $offset);
+            $lastOpen = strrpos($before, '<');
+            $wrapper = $lastOpen === false ? '' : substr($before, $lastOpen);
+            if (! str_contains($wrapper, 'overflow-x-auto')) {
+                $unwrapped++;
+            }
+        }
+
+        return $unwrapped;
     }
 
     public function test_admin_financial_tables_are_wrapped(): void
@@ -117,17 +145,21 @@ class ResponsiveLayoutTest extends TestCase
 
     public function test_the_app_shell_is_pinned_to_the_viewport(): void
     {
+        // /dashboard is a React page: the shell markup is rendered by the persistent OwnerLayout,
+        // and the pinning CSS comes from the Inertia root template's <head>.
         $html = $this->actingAs($this->owner, 'owner')->get('/dashboard')->assertOk()->getContent();
+        $layout = file_get_contents(resource_path('js/Layouts/OwnerLayout.jsx'));
 
         // Fixed-height shell, not a min-height that grows with content.
-        $this->assertStringContainsString('class="app-shell', $html);
+        $this->assertStringContainsString('className="app-shell', $layout);
         $this->assertStringContainsString('height: 100dvh', $html);
         $this->assertStringContainsString('overflow: hidden', $html);
 
         // Only <main> scrolls, and it can shrink inside the flex column.
-        $this->assertStringContainsString('flex-1 min-h-0 overflow-y-auto', $html);
+        $this->assertStringContainsString('flex-1 min-h-0 overflow-y-auto', $layout);
 
         // The old growing shell is gone.
+        $this->assertStringNotContainsString('min-h-screen flex flex-col lg:flex-row', $layout);
         $this->assertStringNotContainsString('<div class="min-h-screen flex flex-col lg:flex-row">', $html);
     }
 
@@ -135,9 +167,12 @@ class ResponsiveLayoutTest extends TestCase
     {
         $admin = Admin::create(['name' => 'Boss', 'email' => 'shell@t.local', 'password' => 'password']);
 
-        $html = $this->actingAs($admin, 'admin')->get('/admin/dashboard')->assertOk()->getContent();
+        // /admin/dashboard is a React page: the shell markup is rendered by the persistent AdminLayout.
+        $res = $this->actingAs($admin, 'admin')->get('/admin/dashboard')->assertOk();
+        $this->assertSame('Admin/Dashboard/Index', $res->inertiaPage()['component']);
+        $layout = file_get_contents(resource_path('js/Layouts/AdminLayout.jsx'));
 
-        $this->assertStringContainsString('class="app-shell', $html);
-        $this->assertStringContainsString('flex-1 min-h-0 overflow-y-auto', $html);
+        $this->assertStringContainsString('className="app-shell', $layout);
+        $this->assertStringContainsString('flex-1 min-h-0 overflow-y-auto', $layout);
     }
 }

@@ -11,7 +11,8 @@ use Exception;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class SettingsController extends Controller
 {
@@ -28,7 +29,7 @@ class SettingsController extends Controller
 
     public function __construct(private HotspotSyncService $sync, private ActivityLogger $activityLogger) {}
 
-    public function index(): View
+    public function index(): Response
     {
         $owner = TenantContext::user();
 
@@ -46,10 +47,22 @@ class SettingsController extends Controller
             ];
         });
 
-        return view('settings.index', [
-            'owner' => $owner,
-            'workingHours' => $workingHours,
-            'workingHoursTimeSlots' => $this->generateTimeSlots('00:00', '23:30'),
+        // The router password is never sent to the page: a blank field keeps the stored one.
+        return Inertia::render('Settings/Index', [
+            'features' => [
+                'hotspot' => $owner->hasFeature('hotspot'),
+                'workspace' => $owner->hasFeature('workspace'),
+                'booking' => $owner->hasFeature('booking'),
+            ],
+            'router' => [
+                'mikrotik_host' => $owner->mikrotik_host,
+                'mikrotik_port' => $owner->mikrotik_port ?? 8728,
+                'mikrotik_username' => $owner->mikrotik_username,
+                'configured' => $owner->hasRouterConfigured(),
+            ],
+            'workingHours' => $workingHours->values(),
+            'workingHoursTimeSlots' => collect($this->generateTimeSlots('00:00', '23:30'))
+                ->map(fn ($label, $value) => ['value' => (string) $value, 'label' => $label])->values(),
             'hasConfiguredWorkingHours' => $existingHours->isNotEmpty(),
         ]);
     }

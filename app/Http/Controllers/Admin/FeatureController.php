@@ -6,15 +6,33 @@ use App\Http\Controllers\Controller;
 use App\Models\Feature;
 use App\Models\Owner;
 use App\Services\AdminAuditLogger;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class FeatureController extends Controller
 {
-    public function index()
+    public function index(): Response
     {
         $features = Feature::withCount('owners')->get();
         $owners = Owner::with('features')->get();
 
-        return view('admin.features.index', compact('features', 'owners'));
+        return Inertia::render('Admin/Features/Index', [
+            'features' => $features->map(fn (Feature $f) => [
+                'id' => $f->id,
+                'name' => $f->name,
+                'key' => $f->key,
+                'icon' => $f->icon,
+                'description' => $f->description,
+                'owners_count' => $f->owners_count,
+                'is_active' => (bool) $f->is_active,
+            ])->values(),
+            'owners' => $owners->map(fn (Owner $o) => [
+                'id' => $o->id,
+                'name' => $o->name,
+                'business_name' => $o->business_name,
+                'feature_ids' => $o->features->pluck('id')->values(),
+            ])->values(),
+        ]);
     }
 
     public function toggleGlobal($featureId)

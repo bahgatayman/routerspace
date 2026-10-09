@@ -10,7 +10,8 @@ use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class WorkspaceController extends Controller
 {
@@ -24,7 +25,7 @@ class WorkspaceController extends Controller
      * (?workspace=) picks which one's rooms are shown; an unknown/foreign id
      * degrades to the owner's own first workspace rather than a 404.
      */
-    public function index(Request $request, AvailabilityService $availability): View
+    public function index(Request $request, AvailabilityService $availability): Response
     {
         $workspaces = Workspace::where('owner_id', TenantContext::id())
             ->withCount('rooms')
@@ -32,12 +33,7 @@ class WorkspaceController extends Controller
             ->get();
 
         if ($workspaces->isEmpty()) {
-            return view('workspaces.index', [
-                'workspaces' => $workspaces,
-                'activeWorkspace' => null,
-                'rooms' => collect(),
-                'roomStats' => null,
-            ]);
+            return $this->renderIndex($request, $workspaces, null, collect(), null);
         }
 
         // firstWhere() searches within this already owner-scoped collection,
@@ -49,7 +45,60 @@ class WorkspaceController extends Controller
 
         [$rooms, $roomStats] = $this->roomsForWorkspace($activeWorkspace, $request, $availability);
 
-        return view('workspaces.index', compact('workspaces', 'activeWorkspace', 'rooms', 'roomStats'));
+        return $this->renderIndex($request, $workspaces, $activeWorkspace, $rooms, $roomStats);
+    }
+
+    /**
+     * Workspaces/Index props: explicit arrays only. Status, labels, pricing
+     * summary and every URL are decided here (Room helpers / route()), the
+     * page only renders them.
+     *
+     * @param  Collection<int, Workspace>  $workspaces
+     * @param  Collection<int, Room>  $rooms
+     */
+    private function renderIndex(Request $request, Collection $workspaces, ?Workspace $active, Collection $rooms, ?array $roomStats): Response
+    {
+        return Inertia::render('Workspaces/Index', [
+            'workspaces' => $workspaces->map(fn (Workspace $ws) => [
+                'id' => $ws->id,
+                'name' => $ws->name,
+                'rooms_count' => (int) $ws->rooms_count,
+                'url' => route('workspaces.index', ['workspace' => $ws->id]),
+            ])->values(),
+            'activeWorkspace' => $active ? [
+                'id' => $active->id,
+                'name' => $active->name,
+                'create_room_url' => route('rooms.create', $active),
+            ] : null,
+            'rooms' => $rooms->map(function (Room $room) use ($active) {
+                $statusKey = $room->statusKey($room->occupied_seats);
+                $editUrl = route('rooms.edit', [$active, $room]);
+
+                return [
+                    'id' => $room->id,
+                    'name' => $room->name,
+                    'type_label' => $room->typeLabel(),
+                    'capacity' => $room->capacity,
+                    'description' => $room->description,
+                    'is_available' => (bool) $room->is_available,
+                    'status_key' => $statusKey,
+                    'status_label' => $room->statusLabel($room->occupied_seats),
+                    'pricing_summary' => $room->pricingSummary(),
+                    'plans_count' => (int) $room->plans_count,
+                    'plans_label' => $room->plans_count ? trans_choice('app.plans.count', $room->plans_count, ['count' => $room->plans_count]) : null,
+                    'profiles_count' => (int) ($room->pricing_profiles_count ?? 0),
+                    'profiles_label' => ($room->pricing_profiles_count ?? 0)
+                        ? trans_choice('app.pricing_profiles.count', $room->pricing_profiles_count, ['count' => $room->pricing_profiles_count])
+                        : null,
+                    'edit_url' => $editUrl,
+                    'toggle_url' => route('rooms.toggle', [$active, $room]),
+                    'destroy_url' => route('rooms.destroy', [$active, $room]),
+                ];
+            })->values(),
+            'roomStats' => $roomStats,
+            'type' => $request->query('type') ?: null,
+            'createWorkspaceUrl' => route('workspaces.create'),
+        ]);
     }
 
     /**
@@ -94,9 +143,9 @@ class WorkspaceController extends Controller
         return [$rooms, $roomStats];
     }
 
-    public function create(): View
+    public function create(): Response
     {
-        return view('workspaces.create');
+        return Inertia::render('Workspaces/Create');
     }
 
     public function store(Request $request): RedirectResponse
@@ -123,13 +172,15 @@ class WorkspaceController extends Controller
             ->with('success', 'Workspace created successfully.');
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $workspace = Workspace::where('id', $id)
             ->where('owner_id', TenantContext::id())
             ->firstOrFail();
 
-        return view('workspaces.edit', compact('workspace'));
+        return Inertia::render('Workspaces/Edit', [
+            'workspace' => $workspace->only(['id', 'name', 'description', 'address', 'city', 'phone']),
+        ]);
     }
 
     public function update(Request $request, int $id): RedirectResponse

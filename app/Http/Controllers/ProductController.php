@@ -13,7 +13,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ProductController extends Controller
 {
@@ -22,7 +23,7 @@ class ProductController extends Controller
         private InventoryService $inventory,
     ) {}
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $ownerId = TenantContext::id();
         $stock = in_array($request->get('stock'), ['low', 'out'], true) ? $request->get('stock') : null;
@@ -41,11 +42,26 @@ class ProductController extends Controller
             'out' => $this->scopeOut(Product::where('owner_id', $ownerId))->count(),
         ];
 
-        return view('sales.products.index', compact('products', 'stock', 'counts'));
+        return Inertia::render('Products/Index', [
+            'products' => $products->through(fn (Product $p) => [
+                'id' => $p->id,
+                'name' => $p->name,
+                'sku' => $p->sku,
+                'is_service' => $p->isService(),
+                'is_active' => (bool) $p->is_active,
+                'status' => $p->stockStatus(),
+                'price' => (float) $p->price,
+                'purchase_price' => (float) $p->purchase_price,
+                'profit' => $p->profitPerUnit(),
+                'stock_quantity' => (int) $p->stock_quantity,
+            ]),
+            'stock' => $stock,
+            'counts' => $counts,
+        ]);
     }
 
     /** Product details: pricing, stock metrics, sales-to-date profit and the stock history. */
-    public function show(int $id): View
+    public function show(int $id): Response
     {
         $product = $this->ownedProduct($id);
 
@@ -68,12 +84,42 @@ class ProductController extends Controller
             'unknown_cost_units' => (int) (clone $lines)->whereNull('sale_items.unit_cost')->sum('sale_items.quantity'),
         ];
 
-        return view('sales.products.show', compact('product', 'movements', 'sold'));
+        $staff = auth('staff')->user();
+
+        return Inertia::render('Products/Show', [
+            'product' => [
+                ...$this->productFields($product),
+                'status' => $product->stockStatus(),
+                'profit' => $product->profitPerUnit(),
+                'margin' => $product->marginPercent(),
+                'inventory_value' => $product->inventoryValue(),
+                'potential_revenue' => $product->potentialRevenue(),
+                'potential_profit' => $product->potentialProfit(),
+            ],
+            'movements' => $movements->through(fn (InventoryMovement $m) => [
+                'id' => $m->id,
+                'date_short' => $m->created_at->format('M d, H:i'),
+                'date_full' => $m->created_at->format('M d, Y H:i'),
+                'change' => (int) $m->quantity_change,
+                'label' => $m->label(),
+                'reason' => $m->reason ? __('app.inventory.reasons.'.$m->reason) : null,
+                'note' => $m->note,
+                'booking_id' => $m->sale?->booking_id,
+                'booking_ref' => $m->sale?->booking_id ? '#'.str_pad((string) $m->sale->booking_id, 4, '0', STR_PAD_LEFT) : null,
+                'walk_in' => (bool) $m->sale?->shared_session_id,
+                'by' => $m->actorName(),
+                'after' => (int) $m->new_quantity,
+            ]),
+            'sold' => $sold,
+            'canManage' => ! $staff || $staff->hasPermission('products.manage'),
+            'reasons' => collect(InventoryMovement::REASONS)
+                ->map(fn ($r) => ['value' => $r, 'label' => __('app.inventory.reasons.'.$r)])->all(),
+        ]);
     }
 
-    public function create(): View
+    public function create(): Response
     {
-        return view('sales.products.create');
+        return Inertia::render('Products/Form', ['product' => null]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -98,11 +144,13 @@ class ProductController extends Controller
         return redirect('/products')->with('success', __('app.sales.product_created'));
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $product = $this->ownedProduct($id);
 
-        return view('sales.products.edit', compact('product'));
+        return Inertia::render('Products/Form', [
+            'product' => [...$this->productFields($product), 'tracks_stock' => $product->tracksStock()],
+        ]);
     }
 
     public function update(Request $request, int $id): RedirectResponse
@@ -183,6 +231,25 @@ class ProductController extends Controller
         $this->activityLogger->log('product.toggled', $product, "{$product->name} ".($product->is_active ? 'activated' : 'deactivated'));
 
         return back()->with('success', __('app.sales.product_updated'));
+    }
+
+    /** The displayed/editable attributes of a product (explicit — never the model). */
+    private function productFields(Product $product): array
+    {
+        return [
+            'id' => $product->id,
+            'name' => $product->name,
+            'type' => $product->type,
+            'is_service' => $product->isService(),
+            'sku' => $product->sku,
+            'description' => $product->description,
+            'price' => (float) $product->price,
+            'purchase_price' => (float) $product->purchase_price,
+            'is_active' => (bool) $product->is_active,
+            'track_stock' => (bool) $product->track_stock,
+            'stock_quantity' => (int) $product->stock_quantity,
+            'low_stock_threshold' => $product->low_stock_threshold,
+        ];
     }
 
     private function ownedProduct(int $id): Product

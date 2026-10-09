@@ -8,29 +8,38 @@ use App\Services\HotspotSyncService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class SpeedProfileController extends Controller
 {
     public function __construct(private HotspotSyncService $sync) {}
 
-    public function index(): View
+    public function index(): Response
     {
         $profiles = SpeedProfile::where('owner_id', TenantContext::id())
             ->withCount('hotspotUsers')
             ->orderBy('name')
             ->get();
 
-        return view('speed-profiles.index', [
-            'profiles' => $profiles,
+        return Inertia::render('SpeedProfiles/Index', [
+            'profiles' => $profiles->map(fn (SpeedProfile $p) => [
+                'id' => $p->id,
+                'name' => $p->name,
+                'speed_download' => $p->speed_download,
+                'speed_upload' => $p->speed_upload,
+                'is_default' => (bool) $p->is_default,
+                'users_count' => $p->hotspot_users_count,
+            ])->values(),
         ]);
     }
 
-    public function create(): View
+    public function create(): Response
     {
         $speedOptions = ['1M', '2M', '5M', '10M', '20M', '50M', '100M'];
 
-        return view('speed-profiles.create', [
+        return Inertia::render('SpeedProfiles/Form', [
+            'profile' => null,
             'speedOptions' => $speedOptions,
         ]);
     }
@@ -73,7 +82,7 @@ class SpeedProfileController extends Controller
         return redirect('/speed-profiles')->with('success', 'Speed profile created successfully');
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $profile = SpeedProfile::where('id', $id)
             ->where('owner_id', TenantContext::id())
@@ -81,8 +90,14 @@ class SpeedProfileController extends Controller
 
         $speedOptions = ['1M', '2M', '5M', '10M', '20M', '50M', '100M'];
 
-        return view('speed-profiles.edit', [
-            'profile' => $profile,
+        return Inertia::render('SpeedProfiles/Form', [
+            'profile' => [
+                'id' => $profile->id,
+                'name' => $profile->name,
+                'speed_download' => $profile->speed_download,
+                'speed_upload' => $profile->speed_upload,
+                'is_default' => (bool) $profile->is_default,
+            ],
             'speedOptions' => $speedOptions,
         ]);
     }

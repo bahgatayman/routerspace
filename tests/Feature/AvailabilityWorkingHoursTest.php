@@ -299,7 +299,12 @@ class AvailabilityWorkingHoursTest extends TestCase
         // The 07:00-08:00 (booked) and 08:00-10:00 (empty) closed spans
         // have different 'used' counts, so they render as two adjacent
         // segments rather than merging into one 07:00-10:00 block.
+        // (The React DayRooms renders a closed block's tooltip as
+        // "start–end: <working_hours.closed>", so the block data is asserted.)
         $response->assertOk();
-        $response->assertSee('07:00–08:00: '.__('app.settings.working_hours.closed'), false);
+        $blocks = collect($response->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id)['blocks'];
+        $closed = collect($blocks)->first(fn ($b) => $b['start'] === '07:00' && $b['end'] === '08:00');
+        $this->assertNotNull($closed, 'Expected a 07:00–08:00 block.');
+        $this->assertTrue($closed['closed'] ?? false);
     }
 }

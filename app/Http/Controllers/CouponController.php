@@ -12,13 +12,14 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class CouponController extends Controller
 {
     public function __construct(private CouponService $coupons) {}
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $owner = TenantContext::user();
         $search = $request->query('search');
@@ -35,31 +36,27 @@ class CouponController extends Controller
         $staff = auth('staff')->user();
         $canCreate = ! $staff || $staff->hasPermission('coupons.create');
 
-        return view('coupons.index', [
-            'coupons' => $coupons,
+        return Inertia::render('Coupons/Index', [
+            'coupons' => $coupons->through(fn (Coupon $c) => $this->couponCard($c)),
             'search' => $search,
             'status' => $status,
             'canCreate' => $canCreate,
             'canEdit' => ! $staff || $staff->hasPermission('coupons.edit'),
             'canDelete' => ! $staff || $staff->hasPermission('coupons.delete'),
-            'newCoupon' => $canCreate ? new Coupon(['applies_to' => Coupon::SCOPE_BOTH, 'discount_type' => Coupon::TYPE_PERCENTAGE, 'is_active' => true]) : null,
-            'roomGroups' => $canCreate ? $this->ownerRoomsGrouped($owner) : collect(),
-            'productGroups' => $canCreate ? $this->ownerProductsGrouped($owner) : collect(),
-            'selectedRoomIds' => [],
-            'selectedProductIds' => [],
+            'newCoupon' => $canCreate ? $this->couponFormData(new Coupon(['applies_to' => Coupon::SCOPE_BOTH, 'discount_type' => Coupon::TYPE_PERCENTAGE, 'is_active' => true]), [], []) : null,
+            'roomGroups' => $canCreate ? $this->groupsForPicker($this->ownerRoomsGrouped($owner)) : [],
+            'productGroups' => $canCreate ? $this->groupsForPicker($this->ownerProductsGrouped($owner)) : [],
         ]);
     }
 
-    public function create(): View
+    public function create(): Response
     {
         $owner = TenantContext::user();
 
-        return view('coupons.create', [
-            'coupon' => new Coupon(['applies_to' => Coupon::SCOPE_BOTH, 'discount_type' => Coupon::TYPE_PERCENTAGE, 'is_active' => true]),
-            'roomGroups' => $this->ownerRoomsGrouped($owner),
-            'productGroups' => $this->ownerProductsGrouped($owner),
-            'selectedRoomIds' => [],
-            'selectedProductIds' => [],
+        return Inertia::render('Coupons/Form', [
+            'coupon' => $this->couponFormData(new Coupon(['applies_to' => Coupon::SCOPE_BOTH, 'discount_type' => Coupon::TYPE_PERCENTAGE, 'is_active' => true]), [], []),
+            'roomGroups' => $this->groupsForPicker($this->ownerRoomsGrouped($owner)),
+            'productGroups' => $this->groupsForPicker($this->ownerProductsGrouped($owner)),
         ]);
     }
 
@@ -74,18 +71,77 @@ class CouponController extends Controller
         return redirect()->route('coupons.index')->with('success', __('app.coupons.created'));
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $owner = TenantContext::user();
         $coupon = Coupon::where('owner_id', $owner->id)->with(['rooms', 'products'])->findOrFail($id);
 
-        return view('coupons.edit', [
-            'coupon' => $coupon,
-            'roomGroups' => $this->ownerRoomsGrouped($owner),
-            'productGroups' => $this->ownerProductsGrouped($owner),
-            'selectedRoomIds' => $coupon->rooms->pluck('id')->all(),
-            'selectedProductIds' => $coupon->products->pluck('id')->all(),
+        return Inertia::render('Coupons/Form', [
+            'coupon' => $this->couponFormData($coupon, $coupon->rooms->pluck('id')->all(), $coupon->products->pluck('id')->all()),
+            'roomGroups' => $this->groupsForPicker($this->ownerRoomsGrouped($owner)),
+            'productGroups' => $this->groupsForPicker($this->ownerProductsGrouped($owner)),
         ]);
+    }
+
+    /** One coupon card on the index (labels resolved here, never in the page). */
+    private function couponCard(Coupon $coupon): array
+    {
+        $scopeLabel = match ($coupon->applies_to) {
+            Coupon::SCOPE_BOTH => __('app.coupons.both'),
+            Coupon::SCOPE_ROOMS => $coupon->targetsAllRooms() ? __('app.coupons.all_rooms') : __('app.coupons.specific_rooms'),
+            default => $coupon->targetsAllProducts() ? __('app.coupons.all_products') : __('app.coupons.specific_products'),
+        };
+        $used = $coupon->usedCount();
+
+        return [
+            'id' => $coupon->id,
+            'code' => $coupon->code,
+            'discount_label' => $coupon->discountLabel(),
+            'status_key' => $coupon->statusKey(),
+            'status_label' => $coupon->statusLabel(),
+            'status_tone' => $coupon->statusTone(),
+            'applies_to' => $coupon->applies_to,
+            'scope_label' => $scopeLabel,
+            'usage_label' => $coupon->usage_limit !== null
+                ? __('app.coupons.used_of', ['used' => $used, 'limit' => $coupon->usage_limit])
+                : __('app.coupons.used_count', ['count' => $used]),
+            'usage_percent' => $coupon->usage_limit
+                ? min(100, (int) round($used / max(1, $coupon->usage_limit) * 100))
+                : null,
+            'expires' => $coupon->expires_at?->format('M d, Y'),
+            'is_active' => (bool) $coupon->is_active,
+        ];
+    }
+
+    /** Initial form state for the create/edit form and the quick-create modal. */
+    private function couponFormData(Coupon $coupon, array $roomIds, array $productIds): array
+    {
+        return [
+            'id' => $coupon->exists ? $coupon->id : null,
+            'code' => $coupon->code ?? '',
+            'discount_type' => $coupon->discount_type,
+            'discount_value' => $coupon->discount_value ?? '',
+            'applies_to' => $coupon->applies_to,
+            'room_scope' => empty($roomIds) ? 'all' : 'specific',
+            'product_scope' => empty($productIds) ? 'all' : 'specific',
+            'room_ids' => array_map('intval', $roomIds),
+            'product_ids' => array_map('intval', $productIds),
+            'starts_at' => $coupon->starts_at?->toDateString() ?? '',
+            'expires_at' => $coupon->expires_at?->toDateString() ?? '',
+            'usage_limit' => $coupon->usage_limit ?? '',
+            'per_customer_limit' => $coupon->per_customer_limit ?? '',
+            'minimum_spend' => $coupon->minimum_spend ?? '',
+            'is_active' => $coupon->exists ? (bool) $coupon->is_active : true,
+        ];
+    }
+
+    /** @param  Collection<string, Collection<int, Room|Product>>  $groups */
+    private function groupsForPicker(Collection $groups): array
+    {
+        return $groups->map(fn (Collection $items, $label) => [
+            'label' => (string) $label,
+            'items' => $items->map(fn ($item) => ['id' => $item->id, 'name' => $item->name])->values()->all(),
+        ])->values()->all();
     }
 
     public function update(Request $request, int $id): RedirectResponse

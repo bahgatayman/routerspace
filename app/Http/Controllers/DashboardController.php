@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Booking;
 use App\Models\HotspotUser;
 use App\Models\Notification;
 use App\Models\Owner;
@@ -19,7 +20,8 @@ use App\Support\TenantContext;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 use Throwable;
 
 class DashboardController extends Controller
@@ -34,7 +36,7 @@ class DashboardController extends Controller
         private ProductAnalyticsService $productAnalytics,
     ) {}
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $owner = TenantContext::user();
         $ownerId = $owner->id;
@@ -178,7 +180,176 @@ class DashboardController extends Controller
         // row (see dashboard/index.blade.php), ahead of the detailed charts.
         $viewData['smartInsights'] = $this->buildSmartInsights($owner, $period, $viewData);
 
-        return view('dashboard.index', $viewData);
+        return Inertia::render('Dashboard/Index', $this->props($owner, $viewData));
+    }
+
+    /**
+     * The view data above, shaped into explicit arrays for the React page —
+     * no Eloquent models, every label/format decided here. Sections stay
+     * absent (null) exactly when the Blade view skipped them, and values a
+     * section is not allowed to show (revenue for staff without reports.view)
+     * are never sent at all.
+     */
+    private function props(Owner $owner, array $d): array
+    {
+        $canViewRevenue = $d['canViewRevenue'];
+        $statusRow = function (string $status) {
+            $tmp = new Booking(['status' => $status]);
+
+            return ['label' => $tmp->statusLabel(), 'class' => $tmp->statusBadgeClass()];
+        };
+
+        $comparison = $d['revenueComparison'] ?? null;
+        $revenue = $d['showRevenue'] ? [
+            'today' => (float) $d['revenueToday'],
+            'thisMonth' => (float) $d['revenueThisMonth'],
+            'changePercent' => $comparison['changePercent'] ?? null,
+            'up' => $comparison ? $comparison['change'] >= 0 : true,
+            'changeSentence' => ($comparison && $comparison['changePercent'] !== null)
+                ? __('app.dashboard.insight_revenue_change', [
+                    'direction' => __($comparison['change'] >= 0 ? 'app.dashboard.change_up' : 'app.dashboard.change_down'),
+                    'percent' => number_format(abs($comparison['changePercent']), 1),
+                    'period' => $d['periodLabel'],
+                ])
+                : null,
+            'trend' => collect($d['revenueTrend'])->map(fn ($amount, $date) => [
+                'date' => $date,
+                'label' => Carbon::parse($date)->format('j M'),
+                'amount' => (float) $amount,
+            ])->values()->all(),
+        ] : null;
+
+        $products = null;
+        if ($d['showProducts']) {
+            $top = $d['topProducts'];
+            // Revenue-share donut: top 6 + "Other", grouped here, not in the browser.
+            $sorted = collect($top)->sortByDesc('revenue')->values();
+            $rest = $sorted->slice(6);
+            $slices = $sorted->take(6)->map(fn ($p) => ['name' => $p['name'], 'revenue' => $p['revenue'], 'units' => $p['units']])->all();
+            if ($rest->sum('revenue') > 0) {
+                $slices[] = ['name' => __('app.dashboard.metric_other'), 'revenue' => round($rest->sum('revenue'), 2), 'units' => $rest->sum('units')];
+            }
+
+            $products = [
+                'summary' => $d['productSummary'],
+                'hasSales' => collect($d['productSeries'])->sum('units') > 0,
+                'series' => collect($d['productSeries'])->map(fn ($row, $date) => [
+                    'label' => Carbon::parse($date)->format('M j'),
+                    'units' => $row['units'],
+                    'revenue' => $row['revenue'],
+                    'orders' => $row['orders'],
+                ])->values()->all(),
+                'top' => array_map(fn ($p) => ['name' => $p['name'], 'units' => $p['units'], 'revenue' => $p['revenue'], 'orders' => $p['orders']], $top),
+                'share' => $slices,
+                'lowStock' => $d['lowStockProducts']->map(fn ($p) => [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'stock_quantity' => $p->stock_quantity,
+                    'low_stock_threshold' => $p->low_stock_threshold,
+                ])->values()->all(),
+                'insights' => array_values(array_map(fn ($i) => $i['text'], $d['productInsights'])),
+            ];
+        }
+
+        $booking = null;
+        if ($owner->hasFeature('booking')) {
+            $booking = [
+                'todayBookings' => $d['todayBookings'],
+                'statusBreakdown' => collect($d['statusBreakdown'])
+                    ->filter(fn ($count) => $count !== 0)
+                    ->map(fn ($count, $status) => ['status' => $status, 'count' => $count] + $statusRow($status))
+                    ->values()->all(),
+                'peakHoursGrid' => $d['peakHoursGrid'],
+                'dayLabels' => collect(['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'])
+                    ->map(fn ($k) => __('app.day.'.$k))->all(),
+                'todaysSchedule' => $d['todaysSchedule']->map(fn (Booking $b) => [
+                    'id' => $b->id,
+                    'customer' => $b->hotspotUser?->name ?? '—',
+                    'room' => $b->room?->name,
+                    'time_range' => $b->timeRange(),
+                    'status_label' => $b->statusLabel(),
+                    'status_class' => $b->statusBadgeClass(),
+                ])->values()->all(),
+            ];
+        }
+
+        $rooms = isset($d['roomUtilization']) ? $d['roomUtilization']->map(fn (array $r) => [
+            'room_id' => $r['room_id'],
+            'room_name' => $r['room_name'],
+            'type_label' => $r['room']->typeLabel(),
+            'type_color' => $r['room']->typeColor(),
+            'utilization_percent' => $r['utilization_percent'],
+            'hours_booked' => $r['hours_booked'],
+            'bookings_count' => $r['bookings_count'],
+            // Revenue figures only reach viewers allowed to see revenue.
+            'revenue' => $canViewRevenue ? $r['revenue'] : null,
+            'revenue_change_percent' => $canViewRevenue ? $r['revenue_change_percent'] : null,
+            'revenue_per_open_hour' => $canViewRevenue ? $r['revenue_per_open_hour'] : null,
+        ])->values()->all() : null;
+
+        $customers = isset($d['newCustomers']) ? [
+            'newCustomers' => $d['newCustomers'],
+            'returningPercent' => $d['returningCustomerRate']['percent'] ?? null,
+            'averageSpend' => $d['averageSpendPerCustomer'],
+        ] : null;
+
+        return [
+            'businessName' => $owner->business_name,
+            'features' => [
+                'hotspot' => $owner->hasFeature('hotspot'),
+                'booking' => $owner->hasFeature('booking'),
+                'workspace' => $owner->hasFeature('workspace'),
+                'sales' => $owner->hasFeature('sales'),
+            ],
+            'hotspot' => $owner->hasFeature('hotspot') ? [
+                'totalUsers' => $d['totalUsers'],
+                'activeUsers' => $d['activeUsers'],
+                'totalProfiles' => $d['totalProfiles'],
+                'activeSessions' => $d['activeSessions'],
+                'mikrotikUnreachable' => $d['mikrotikError'] !== null,
+            ] : null,
+            'canViewRevenue' => $canViewRevenue,
+            'isStaff' => $d['isStaff'],
+            'periodKey' => $d['periodKey'],
+            'periodLabel' => $d['periodLabel'],
+            'customStart' => $d['customStart'],
+            'customEnd' => $d['customEnd'],
+            'workingHours' => ($d['hasConfiguredWorkingHours'] ?? false) ? ['isOpenNow' => (bool) $d['isOpenNow']] : null,
+            'showRevenue' => $d['showRevenue'],
+            'revenue' => $revenue,
+            'showProducts' => $d['showProducts'],
+            'products' => $products,
+            'booking' => $booking,
+            'showWorkspace' => $d['showWorkspace'],
+            'occupancy' => $d['showWorkspace'] ? [
+                'percent' => $d['occupancy']['percent'],
+                'occupied' => $d['occupancy']['occupied'],
+                'capacity' => $d['occupancy']['capacity'],
+                'availableRoomsNow' => $d['availableRoomsNow'],
+            ] : null,
+            'roomUtilization' => $rooms,
+            'customers' => $customers,
+            'needsAttention' => [
+                'count' => $d['needsAttentionCount'],
+                'items' => $d['needsAttentionItems']->map(fn (Notification $n) => [
+                    'id' => $n->id,
+                    'title' => $n->title,
+                    'body' => $n->body,
+                    'level' => $n->levelColor(),
+                    'icon_path' => $n->iconPath(),
+                    'ago' => $n->created_at?->diffForHumans(),
+                ])->values()->all(),
+            ],
+            'smartInsights' => array_values($d['smartInsights']),
+            // Billing-facing tenant info: Owner only, never sent to staff.
+            'ownerFeatures' => $d['isStaff'] ? null : $owner->features()->where('is_active', true)->get()
+                ->map(fn ($f) => [
+                    'id' => $f->id,
+                    'name' => $f->name,
+                    'description' => $f->description,
+                    'icon' => $f->icon,
+                ])->values()->all(),
+        ];
     }
 
     /**

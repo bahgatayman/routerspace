@@ -6,13 +6,14 @@ use App\Models\HotspotUser;
 use App\Services\HotspotSyncService;
 use App\Support\TenantContext;
 use Exception;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class SessionController extends Controller
 {
     public function __construct(private HotspotSyncService $sync) {}
 
-    public function index(): View
+    public function index(): Response
     {
         $owner = TenantContext::user();
         $sessions = [];
@@ -39,9 +40,18 @@ class SessionController extends Controller
             $error = $e->getMessage();
         }
 
-        return view('sessions.index', [
-            'sessions' => $sessions,
+        return Inertia::render('Sessions/Index', [
+            'sessions' => collect($sessions)->map(fn ($s) => [
+                'name' => $s['name'],
+                'login' => $s['phone'] ?? $s['username'] ?? null,
+                'ip' => $s['ip'] ?? null,
+                'uptime' => $s['uptime'] ?? null,
+                'downloaded' => ! empty($s['bytes_in']) ? number_format($s['bytes_in'] / 1048576, 2).' MB' : null,
+                'uploaded' => ! empty($s['bytes_out']) ? number_format($s['bytes_out'] / 1048576, 2).' MB' : null,
+                'user_id' => $s['user_id'],
+            ])->values(),
             'error' => $error,
+            'updatedAt' => now()->format('H:i:s'),
         ]);
     }
 }

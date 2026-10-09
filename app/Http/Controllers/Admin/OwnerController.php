@@ -2,21 +2,29 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Admin\Concerns\BusinessHeaderProps;
 use App\Http\Controllers\Controller;
 use App\Models\Feature;
+use App\Models\HotspotUser;
 use App\Models\Owner;
 use App\Models\Plan;
 use App\Models\Subscription;
 use App\Services\AdminAuditLogger;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class OwnerController extends Controller
 {
+    use BusinessHeaderProps;
+
     // The owners list moved to WorkspaceDirectoryController (/admin/workspaces).
 
-    public function create()
+    public function create(): Response
     {
-        return view('admin.owners.create');
+        return Inertia::render('Admin/Owners/Create', [
+            'plans' => $this->planOptions(),
+        ]);
     }
 
     public function store(Request $request)
@@ -73,7 +81,7 @@ class OwnerController extends Controller
             ->with('success', 'Owner created successfully with '.$validated['months'].'-month subscription.');
     }
 
-    public function show($id)
+    public function show($id): Response
     {
         $owner = Owner::with(['features', 'plan', 'workspaces'])->findOrFail($id);
         $subscriptions = Subscription::with('admin')
@@ -82,9 +90,45 @@ class OwnerController extends Controller
             ->get();
         $usersCount = $owner->hotspotUsers()->count();
         $features = Feature::all();
-        $plans = Plan::orderBy('sort_order')->get();
+        $renewBase = $owner->subscription_expires_at?->isFuture() ? $owner->subscription_expires_at : now();
 
-        return view('admin.owners.show', compact('owner', 'subscriptions', 'usersCount', 'features', 'plans'));
+        return Inertia::render('Admin/Owners/Show', [
+            'business' => $this->businessHeader($owner),
+            'owner' => [
+                'id' => $owner->id,
+                'name' => $owner->name,
+                'email' => $owner->email,
+                'business_name' => $owner->business_name,
+                'plan_id' => $owner->plan_id,
+                'has_hotspot' => $owner->hasFeature('hotspot'),
+                'mikrotik_host' => $owner->mikrotik_host ? $owner->mikrotik_host.':'.$owner->mikrotik_port : null,
+                'mikrotik_username' => $owner->mikrotik_username,
+                'status' => $owner->subscriptionStatus(),
+                'days_left' => $owner->daysUntilExpiry(),
+                'expires_at' => $owner->subscription_expires_at?->format('Y-m-d'),
+                'default_until' => $owner->subscription_expires_at?->copy()->addMonths(1)->format('Y-m-d'),
+                'renew_base' => $renewBase->format('Y-m-d'),
+            ],
+            'usersCount' => $usersCount,
+            'plans' => $this->planOptions(),
+            'subscriptions' => $subscriptions->map(fn (Subscription $sub) => [
+                'id' => $sub->id,
+                'months' => $sub->months,
+                'starts_at' => $sub->starts_at->format('Y-m-d'),
+                'expires_at' => $sub->expires_at->format('Y-m-d'),
+                'notes' => $sub->notes,
+                'admin' => $sub->admin?->name,
+                'date' => $sub->created_at->format('Y-m-d'),
+            ])->all(),
+            'features' => $features->map(fn (Feature $f) => [
+                'id' => $f->id,
+                'name' => $f->name,
+                'description' => $f->description,
+                'icon' => $f->icon,
+                'is_active' => (bool) $f->is_active,
+                'enabled' => $owner->features->contains('id', $f->id),
+            ])->all(),
+        ]);
     }
 
     /** Suspend or re-activate a business. The optional reason is kept in the admin audit log. */
@@ -107,11 +151,34 @@ class OwnerController extends Controller
         return back()->with('success', "Owner {$status} successfully.");
     }
 
-    public function users($id)
+    public function users($id): Response
     {
         $owner = Owner::with(['plan', 'workspaces'])->findOrFail($id);
         $users = $owner->hotspotUsers()->latest()->paginate(15);
 
-        return view('admin.owners.users', compact('owner', 'users'));
+        return Inertia::render('Admin/Owners/Users', [
+            'business' => $this->businessHeader($owner),
+            'users' => $users->through(fn (HotspotUser $user) => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'phone' => $user->phone,
+                'speed_download' => $user->speed_download,
+                'speed_upload' => $user->speed_upload,
+                'active' => $user->status === 'active',
+                'created' => $user->created_at->format('Y-m-d'),
+            ]),
+        ]);
+    }
+
+    /** Plan cards for the create / renew forms (price_per_month only drives the on-page total preview). */
+    private function planOptions(): array
+    {
+        return Plan::orderBy('sort_order')->get()->map(fn (Plan $plan) => [
+            'id' => $plan->id,
+            'name' => $plan->name,
+            'max_members' => $plan->max_members,
+            'price_label' => $plan->formattedPrice(),
+            'price_per_month' => (float) $plan->price_per_month,
+        ])->all();
     }
 }

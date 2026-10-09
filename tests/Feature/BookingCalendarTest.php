@@ -79,10 +79,10 @@ class BookingCalendarTest extends TestCase
         $response = $this->actingAs($owner, 'owner')->get('/bookings/calendar');
 
         $response->assertOk();
-        $response->assertViewIs('bookings.calendar');
-        $response->assertViewHas('view', 'day');
-        $response->assertViewHas('date', now()->format('Y-m-d'));
-        $response->assertViewHas('dayRooms');
+        $this->assertSame('Bookings/Calendar', $response->inertiaPage()['component']);
+        $this->assertSame('day', $response->inertiaProps('view'));
+        $this->assertSame(now()->format('Y-m-d'), $response->inertiaProps('date'));
+        $this->assertIsArray($response->inertiaProps('dayRooms'));
     }
 
     public function test_day_view_reports_booked_and_available_blocks_for_a_room(): void
@@ -102,18 +102,16 @@ class BookingCalendarTest extends TestCase
             ->get('/bookings/calendar?view=day&date='.today()->toDateString());
 
         $response->assertOk();
-        $response->assertViewHas('dayRooms', function ($dayRooms) use ($room) {
-            $entry = collect($dayRooms)->firstWhere('room.id', $room->id);
-            $blocks = $entry['blocks'];
+        $entry = collect($response->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id);
+        $blocks = $entry['blocks'];
 
-            $bookedBlock = collect($blocks)->firstWhere('start', '10:00');
-            $freeBlock = collect($blocks)->first(fn ($b) => $b['start'] < '10:00');
+        $bookedBlock = collect($blocks)->firstWhere('start', '10:00');
+        $freeBlock = collect($blocks)->first(fn ($b) => $b['start'] < '10:00');
 
-            return $bookedBlock['used'] === 1
-                && $bookedBlock['available'] === 0
-                && $freeBlock['used'] === 0
-                && $freeBlock['available'] === 1;
-        });
+        $this->assertSame(1, $bookedBlock['used']);
+        $this->assertSame(0, $bookedBlock['available']);
+        $this->assertSame(0, $freeBlock['used']);
+        $this->assertSame(1, $freeBlock['available']);
     }
 
     public function test_day_view_lists_the_booking_linking_to_its_detail_page(): void
@@ -133,8 +131,12 @@ class BookingCalendarTest extends TestCase
             ->get('/bookings/calendar?view=day&date='.today()->toDateString());
 
         $response->assertOk();
-        $response->assertSee('Jane Visitor');
-        $response->assertSee('href="/bookings/'.$booking->id.'"', false);
+        // Each listed booking carries its id; the React DayRooms links it to /bookings/{id}.
+        $entry = collect($response->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id);
+        $listed = collect($entry['bookings'])->firstWhere('id', $booking->id);
+        $this->assertNotNull($listed);
+        $this->assertSame('Jane Visitor', $listed['customer']);
+        $this->assertStringContainsString('href={`/bookings/${b.id}`}', file_get_contents(resource_path('js/Components/Bookings/DayRooms.jsx')));
     }
 
     public function test_room_filter_narrows_day_view_to_that_room(): void
@@ -148,11 +150,9 @@ class BookingCalendarTest extends TestCase
             ->get('/bookings/calendar?view=day&room_id='.$roomA->id);
 
         $response->assertOk();
-        $response->assertViewHas('dayRooms', function ($dayRooms) use ($roomA, $roomB) {
-            $ids = collect($dayRooms)->pluck('room.id');
-
-            return $ids->contains($roomA->id) && ! $ids->contains($roomB->id);
-        });
+        $ids = collect($response->inertiaProps('dayRooms'))->pluck('room.id');
+        $this->assertTrue($ids->contains($roomA->id));
+        $this->assertFalse($ids->contains($roomB->id));
     }
 
     public function test_workspace_filter_narrows_day_view_to_that_workspaces_rooms(): void
@@ -167,11 +167,9 @@ class BookingCalendarTest extends TestCase
             ->get('/bookings/calendar?view=day&workspace_id='.$workspaceA->id);
 
         $response->assertOk();
-        $response->assertViewHas('dayRooms', function ($dayRooms) use ($roomA, $roomB) {
-            $ids = collect($dayRooms)->pluck('room.id');
-
-            return $ids->contains($roomA->id) && ! $ids->contains($roomB->id);
-        });
+        $ids = collect($response->inertiaProps('dayRooms'))->pluck('room.id');
+        $this->assertTrue($ids->contains($roomA->id));
+        $this->assertFalse($ids->contains($roomB->id));
     }
 
     public function test_week_view_covers_seven_days_starting_monday(): void
@@ -186,14 +184,10 @@ class BookingCalendarTest extends TestCase
             ->get('/bookings/calendar?view=week&date='.$wednesday);
 
         $response->assertOk();
-        $response->assertViewHas('days', function ($days) {
-            if ($days->count() !== 7) {
-                return false;
-            }
-
-            return $days->first()['date']->format('Y-m-d') === '2026-08-17' // Monday
-                && $days->last()['date']->format('Y-m-d') === '2026-08-23'; // Sunday
-        });
+        $days = $response->inertiaProps('days');
+        $this->assertCount(7, $days);
+        $this->assertSame('2026-08-17', $days[0]['date']); // Monday
+        $this->assertSame('2026-08-23', $days[6]['date']); // Sunday
     }
 
     public function test_week_view_reflects_a_booking_on_its_specific_day(): void
@@ -214,15 +208,14 @@ class BookingCalendarTest extends TestCase
             ->get('/bookings/calendar?view=week&date=2026-08-19');
 
         $response->assertOk();
-        $response->assertViewHas('days', function ($days) use ($room, $tuesday) {
-            $tuesdayEntry = $days->first(fn ($d) => $d['date']->format('Y-m-d') === $tuesday);
-            $roomEntry = collect($tuesdayEntry['rooms'])->firstWhere('room.id', $room->id);
-            $otherDayEntry = $days->first(fn ($d) => $d['date']->format('Y-m-d') === '2026-08-17');
-            $roomOnOtherDay = collect($otherDayEntry['rooms'])->firstWhere('room.id', $room->id);
+        $days = collect($response->inertiaProps('days'));
+        $tuesdayEntry = $days->firstWhere('date', $tuesday);
+        $roomEntry = collect($tuesdayEntry['rooms'])->firstWhere('room.id', $room->id);
+        $otherDayEntry = $days->firstWhere('date', '2026-08-17');
+        $roomOnOtherDay = collect($otherDayEntry['rooms'])->firstWhere('room.id', $room->id);
 
-            return $roomEntry['bookings']->count() === 1
-                && $roomOnOtherDay['bookings']->count() === 0;
-        });
+        $this->assertCount(1, $roomEntry['bookings']);
+        $this->assertCount(0, $roomOnOtherDay['bookings']);
     }
 
     public function test_month_view_still_works_and_day_cells_link_into_day_view(): void
@@ -242,10 +235,11 @@ class BookingCalendarTest extends TestCase
             ->get('/bookings/calendar?view=month&date='.today()->toDateString());
 
         $response->assertOk();
-        $response->assertViewHas('bookings', function ($bookings) {
-            return isset($bookings[today()->format('Y-m-d')]);
-        });
-        $response->assertSee('view=day', false);
+        $this->assertArrayHasKey(today()->format('Y-m-d'), $response->inertiaProps('bookings'));
+        // Every month cell carries its date; the page links each to url({view: 'day', date}).
+        $cell = collect($response->inertiaProps('month.cells'))->firstWhere('date', today()->format('Y-m-d'));
+        $this->assertSame(1, $cell['count']);
+        $this->assertStringContainsString("url({ view: 'day', date: c.date })", file_get_contents(resource_path('js/Pages/Bookings/Calendar.jsx')));
     }
 
     public function test_shared_room_shows_live_occupancy_only_for_today(): void
@@ -263,18 +257,13 @@ class BookingCalendarTest extends TestCase
 
         $todayResponse = $this->actingAs($owner, 'owner')
             ->get('/bookings/calendar?view=day&date='.today()->toDateString());
-        $todayResponse->assertViewHas('dayRooms', function ($dayRooms) use ($room) {
-            $entry = collect($dayRooms)->firstWhere('room.id', $room->id);
-
-            return $entry['live']['occupied'] === 4 && $entry['live']['capacity'] === 10;
-        });
+        $entry = collect($todayResponse->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id);
+        $this->assertSame(4, $entry['live']['occupied']);
+        $this->assertSame(10, $entry['live']['capacity']);
 
         $futureResponse = $this->actingAs($owner, 'owner')
             ->get('/bookings/calendar?view=day&date='.today()->addDays(3)->toDateString());
-        $futureResponse->assertViewHas('dayRooms', function ($dayRooms) use ($room) {
-            $entry = collect($dayRooms)->firstWhere('room.id', $room->id);
-
-            return $entry['live'] === null;
-        });
+        $entry = collect($futureResponse->inertiaProps('dayRooms'))->firstWhere('room.id', $room->id);
+        $this->assertNull($entry['live']);
     }
 }

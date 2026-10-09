@@ -12,8 +12,10 @@ use App\Models\Subscription;
 use App\Models\SubscriptionRequest;
 use App\Services\Admin\PlatformAnalyticsService;
 use App\Services\Admin\PlatformInsightsService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * Super Admin → platform analytics center. Every number comes from
@@ -24,7 +26,7 @@ class DashboardController extends Controller
 {
     use ResolvesPeriod;
 
-    public function index(Request $request, PlatformAnalyticsService $analytics, PlatformInsightsService $insights): View
+    public function index(Request $request, PlatformAnalyticsService $analytics, PlatformInsightsService $insights): Response
     {
         [$period, $range] = $this->resolvePeriod($request);
         $planId = Plan::whereKey($request->integer('plan'))->value('id');
@@ -96,26 +98,71 @@ class DashboardController extends Controller
             ],
         ];
 
-        return view('admin.dashboard.index', [
-            'range' => $range,
-            'period' => $period,
+        $noPlan = __('app.admin_biz.no_plan');
+
+        return Inertia::render('Admin/Dashboard/Index', [
+            'range' => $range + [
+                'from_label' => Carbon::parse($range['from'])->translatedFormat('M j, Y'),
+                'to_label' => Carbon::parse($range['to'])->translatedFormat('M j, Y'),
+            ],
             'planId' => $planId,
-            'plans' => Plan::orderBy('sort_order')->get(['id', 'name']),
+            'plans' => Plan::orderBy('sort_order')->get(['id', 'name'])->map->only(['id', 'name'])->all(),
             'kpis' => $analytics->kpis($period, $filters),
             'charts' => $charts,
-            'byPlan' => $byPlan,
+            'topChartHeight' => max(180, 34 * count($charts['top']['labels']) + 40),
+            'byPlan' => $byPlan->all(),
             'insights' => $insights->forPeriod($period, $filters),
-            'recentOwners' => $analytics->owners($filters)->with('plan:id,name')->latest()->take(6)->get(),
+            'recentOwners' => $analytics->owners($filters)->with('plan:id,name')->latest()->take(6)->get()
+                ->map(fn (Owner $o) => [
+                    'id' => $o->id,
+                    'name' => $o->business_name ?: $o->name,
+                    'plan' => $o->plan?->name ?? $noPlan,
+                    'at_iso' => $o->created_at?->toIso8601String(),
+                    'ago' => $o->created_at?->diffForHumans(),
+                ])->all(),
             'recentBookings' => Booking::with(['owner:id,business_name,name', 'room:id,name', 'hotspotUser:id,name'])
                 ->when($planId, fn ($q) => $q->whereIn('owner_id', Owner::where('plan_id', $planId)->select('id')))
-                ->latest()->take(6)->get(),
+                ->latest()->take(6)->get()
+                ->map(fn (Booking $b) => [
+                    'id' => $b->id,
+                    'room' => $b->room?->name ?? '—',
+                    'business' => $b->owner?->business_name,
+                    'customer' => $b->hotspotUser?->name ?? __('app.admin_biz.deleted_member'),
+                    'net' => (float) $b->total_price - (float) $b->discount_total,
+                    'status' => $b->status,
+                ])->all(),
             'recentPayments' => Subscription::with(['owner:id,business_name,name', 'plan:id,name', 'admin:id,name'])
                 ->when($planId, fn ($q) => $q->where('plan_id', $planId))
-                ->latest()->take(6)->get(),
-            'adminActions' => AdminAuditLog::latest('created_at')->take(6)->get(),
+                ->latest()->take(6)->get()
+                ->map(fn (Subscription $s) => [
+                    'id' => $s->id,
+                    'owner_id' => $s->owner_id,
+                    'business' => $s->owner?->business_name ?? '—',
+                    'plan' => $s->plan?->name,
+                    'months' => (int) $s->months,
+                    'amount' => (float) $s->amount_paid,
+                    'ago' => $s->created_at?->diffForHumans(),
+                ])->all(),
+            'adminActions' => AdminAuditLog::latest('created_at')->take(6)->get()
+                ->map(fn (AdminAuditLog $a) => [
+                    'id' => $a->id,
+                    'text' => $a->description ?: $a->action,
+                    'admin' => $a->admin_name ?? 'Admin',
+                    'owner_id' => $a->owner_id,
+                    'owner' => $a->owner_name ?? ($a->owner_id ? '#'.$a->owner_id : null),
+                    'at_iso' => $a->created_at?->toIso8601String(),
+                    'ago' => $a->created_at?->diffForHumans(),
+                ])->all(),
             'expiring' => $analytics->owners($filters)->with('plan:id,name')->where('is_active', true)
                 ->whereBetween('subscription_expires_at', [now(), now()->addDays(14)])
-                ->orderBy('subscription_expires_at')->take(6)->get(),
+                ->orderBy('subscription_expires_at')->take(6)->get()
+                ->map(fn (Owner $o) => [
+                    'id' => $o->id,
+                    'business_name' => $o->business_name,
+                    'name' => $o->business_name ?: $o->name,
+                    'plan' => $o->plan?->name ?? $noPlan,
+                    'days' => $o->daysUntilExpiry(),
+                ])->all(),
             'pendingRenewals' => SubscriptionRequest::pending()->count(),
         ]);
     }

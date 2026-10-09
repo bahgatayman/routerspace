@@ -7,6 +7,7 @@ use App\Models\Plan;
 use App\Models\WorkingHour;
 use Database\Seeders\FeatureSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -175,20 +176,32 @@ class SettingsWorkingHoursTest extends TestCase
             'is_open' => true, 'open_time' => '09:00:00', 'close_time' => '17:00:00',
         ]);
 
+        // The page renders the working-hours card when workspace or booking is on.
         $this->actingAs($owner, 'owner')
             ->get('/settings')
             ->assertOk()
-            ->assertSee(__('app.settings.working_hours.title'));
+            ->assertInertia(fn (Assert $p) => $p->component('Settings/Index')
+                ->where('features.booking', true)
+                ->has('workingHours', 7)
+                ->where('hasConfiguredWorkingHours', true)
+                ->where('workingHours.2.day_of_week', 1)
+                ->where('workingHours.2.is_open', true)
+                ->where('workingHours.2.open_time', '09:00')
+                ->where('workingHours.2.close_time', '17:00'));
     }
 
     public function test_settings_page_hides_working_hours_section_for_hotspot_only_owner(): void
     {
         $owner = $this->owner(['hotspot']);
 
+        // The working-hours card is only rendered when workspace or booking is on.
         $this->actingAs($owner, 'owner')
             ->get('/settings')
             ->assertOk()
-            ->assertDontSee(__('app.settings.working_hours.title'));
+            ->assertInertia(fn (Assert $p) => $p->component('Settings/Index')
+                ->where('features.hotspot', true)
+                ->where('features.workspace', false)
+                ->where('features.booking', false));
     }
 
     /**
@@ -206,10 +219,16 @@ class SettingsWorkingHoursTest extends TestCase
             ->get('/settings');
 
         $response->assertOk();
-        $response->assertSee(__('app.section.settings', [], 'ar'));
-        $response->assertSee(__('app.day.saturday', [], 'ar'));
-        $response->assertSee(__('app.day.sunday', [], 'ar'));
-        $response->assertDontSee('Settings', false);
-        $response->assertDontSee('Saturday', false);
+        // Page strings come from the Arabic lang table (window.LS_LANG, JSON-escaped); the h1 is t('section.settings'),
+        // so the Arabic 'section' array must exist.
+        $this->assertNotSame('app.section.settings', __('app.section.settings', [], 'ar'));
+        $this->assertNotSame('Settings', __('app.section.settings', [], 'ar'));
+        $response->assertInertia(fn (Assert $p) => $p->component('Settings/Index')
+            ->where('locale', 'ar')
+            ->where('workingHours.0.day_name', __('app.day.saturday', [], 'ar'))
+            ->where('workingHours.1.day_name', __('app.day.sunday', [], 'ar')));
+        $props = json_encode($response->inertiaProps(), JSON_UNESCAPED_UNICODE);
+        $this->assertStringNotContainsString('Settings', $props);
+        $this->assertStringNotContainsString('Saturday', $props);
     }
 }

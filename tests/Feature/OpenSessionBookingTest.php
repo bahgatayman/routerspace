@@ -451,9 +451,10 @@ class OpenSessionBookingTest extends TestCase
         $member = $this->member($owner);
         $booking = $this->openSession($owner, $room, $member);
 
-        $this->actingAs($owner, 'owner')->get("/bookings/{$booking->id}")
-            ->assertOk()
-            ->assertSee(__('app.booking.duration_type.badge'))
-            ->assertSee(__('app.booking.duration_type.checkout'));
+        $response = $this->actingAs($owner, 'owner')->get("/bookings/{$booking->id}")->assertOk();
+        $this->assertSame(__('app.booking.duration_type.badge'), $response->inertiaProps('booking.status_label'));
+        // is_open drives the checkout button + close-preview/close modal.
+        $this->assertTrue($response->inertiaProps('booking.is_open'));
+        $this->assertNotNull($response->inertiaProps('booking.current_amount'));
     }
 }

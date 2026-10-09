@@ -11,7 +11,8 @@ use App\Support\TenantContext;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 use Throwable;
 
 class ExpenseController extends Controller
@@ -21,7 +22,7 @@ class ExpenseController extends Controller
         private RevenueAnalyticsService $revenueAnalytics,
     ) {}
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $owner = TenantContext::user();
         [$period, $periodKey, $customStart, $customEnd] = $this->resolvePeriod($request);
@@ -45,14 +46,24 @@ class ExpenseController extends Controller
 
         $staff = auth('staff')->user();
 
-        return view('expenses.index', [
+        return Inertia::render('Expenses/Index', [
             'canCreate' => ! $staff || $staff->hasPermission('expenses.create'),
             'canEdit' => ! $staff || $staff->hasPermission('expenses.edit'),
             'canDelete' => ! $staff || $staff->hasPermission('expenses.delete'),
             'canManageCategories' => ! $staff || $staff->hasPermission('expenses.manage_categories'),
-            'expenses' => $expenses,
-            'categories' => $categories,
-            'period' => $period,
+            'expenses' => $expenses->through(fn (Expense $e) => [
+                'id' => $e->id,
+                'date' => $e->expense_date->format('M d, Y'),
+                'category' => $e->category?->name,
+                'note' => $e->note,
+                'amount' => (float) $e->amount,
+            ]),
+            'categories' => $categories->map(fn (ExpenseCategory $c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'expenses_count' => (int) $c->expenses_count,
+            ])->values()->all(),
+            'today' => now()->toDateString(),
             'periodKey' => $periodKey,
             'customStart' => $customStart,
             'customEnd' => $customEnd,
@@ -79,7 +90,7 @@ class ExpenseController extends Controller
         return redirect()->back()->with('success', __('app.expenses.created'));
     }
 
-    public function edit(int $id): View
+    public function edit(int $id): Response
     {
         $expense = Expense::where('owner_id', TenantContext::id())->findOrFail($id);
 
@@ -87,9 +98,15 @@ class ExpenseController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('expenses.edit', [
-            'expense' => $expense,
-            'categories' => $categories,
+        return Inertia::render('Expenses/Edit', [
+            'expense' => [
+                'id' => $expense->id,
+                'amount' => $expense->amount,
+                'expense_category_id' => $expense->expense_category_id,
+                'expense_date' => $expense->expense_date->toDateString(),
+                'note' => $expense->note,
+            ],
+            'categories' => $categories->map(fn (ExpenseCategory $c) => ['id' => $c->id, 'name' => $c->name])->values()->all(),
         ]);
     }
 

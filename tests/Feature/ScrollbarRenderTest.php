@@ -28,8 +28,10 @@ class ScrollbarRenderTest extends TestCase
         }
 
         // Dark sidebars opt into the inverted thumb.
-        $this->assertStringContainsString('class="nav-scroll ', $owner_html);
-        $this->assertStringContainsString('class="nav-scroll ', $admin_html);
+        // The owner sidebar is rendered by the React OwnerLayout (/dashboard is an Inertia page).
+        $this->assertStringContainsString('className="nav-scroll ', file_get_contents(resource_path('js/Layouts/OwnerLayout.jsx')));
+        // The admin sidebar is rendered by the React AdminLayout (/admin/dashboard is an Inertia page).
+        $this->assertStringContainsString('className="nav-scroll ', file_get_contents(resource_path('js/Layouts/AdminLayout.jsx')));
         $this->assertStringNotContainsString('class="nav-scroll ', $auth_html);
     }
 }

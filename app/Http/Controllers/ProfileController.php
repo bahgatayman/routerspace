@@ -6,16 +6,46 @@ use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ProfileController extends Controller
 {
-    public function index(): View
+    public function index(): Response
     {
         $owner = TenantContext::user()->load('plan');
         $usageCount = $owner->hotspotUsers()->count();
 
-        return view('profile.index', compact('owner', 'usageCount'));
+        $status = $owner->subscriptionStatus();
+        $pct = $owner->plan ? ($usageCount / $owner->plan->max_members) * 100 : 0;
+
+        // Explicit fields only — never the MikroTik password or other credentials.
+        return Inertia::render('Profile/Index', [
+            'owner' => [
+                'name' => $owner->name,
+                'email' => $owner->email,
+                'business_name' => $owner->business_name,
+                'logo_url' => $owner->logoUrl(),
+                'initials' => $owner->initials(),
+                'has_hotspot' => $owner->hasFeature('hotspot'),
+                'mikrotik_host' => $owner->mikrotik_host,
+                'mikrotik_port' => $owner->mikrotik_port,
+                'mikrotik_username' => $owner->mikrotik_username,
+            ],
+            'plan' => [
+                'name' => $owner->plan->name ?? __('app.profile.no_plan'),
+                'price' => $owner->plan?->formattedPrice(),
+                'max_members' => $owner->plan?->max_members ?? 0,
+            ],
+            'usageCount' => $usageCount,
+            'usagePct' => min(100, $pct),
+            'subscription' => [
+                'status' => $status,
+                'label' => ucfirst(str_replace('_', ' ', $status)),
+                'expires' => $owner->subscription_expires_at?->format('Y-m-d'),
+                'days_remaining' => $owner->subscription_expires_at ? $owner->daysUntilExpiry() : null,
+            ],
+        ]);
     }
 
     /**

@@ -37,23 +37,27 @@ class ClickableRowsTest extends TestCase
             'booking_date'=>now()->subDay()->toDateString(),'start_time'=>'10:00','end_time'=>'11:00',
             'price_per_hour'=>100,'total_hours'=>1,'total_price'=>100,'status'=>'completed']);
 
-        $html = $this->actingAs($o,'owner')->get('/bookings')->assertOk()->getContent();
+        // The bookings list is a React page: one row per booking, each knowing its id
+        // (the row links to /bookings/{id}), with Edit only where still editable.
+        $res = $this->actingAs($o,'owner')->get('/bookings')->assertOk();
+        $this->assertSame('Bookings/Index', $res->inertiaPage()['component']);
+        $rows = collect($res->inertiaProps('bookings.data'))->keyBy('id');
+        $this->assertCount(2, $rows, 'one row-link per booking');
+        $this->assertTrue($rows[$pending->id]['can_edit']);
+        $this->assertFalse($rows[$done->id]['can_edit']);
+        // The member link inside the row is kept.
+        $this->assertSame($member->id, $rows[$pending->id]['customer_id']);
 
+        $jsx = file_get_contents(resource_path('js/Pages/Bookings/Index.jsx'));
         // Rows carry the click target, and the date cell is still a real link.
-        $this->assertStringContainsString('data-href="/bookings/'.$pending->id.'"', $html);
-        $this->assertStringContainsString('data-href="/bookings/'.$done->id.'"', $html);
-        $this->assertSame(2, substr_count($html, 'data-href="/bookings/'), 'one row-link per booking');
-
-        // The redundant "View" action is gone; Edit survives only where editable.
-        $this->assertStringNotContainsString('>View</a>', $html);
-        $this->assertStringContainsString('/bookings/'.$pending->id.'/edit', $html);
-        $this->assertStringNotContainsString('/bookings/'.$done->id.'/edit', $html);
-
-        // The member link inside the row is untouched (handler must not swallow it).
-        $this->assertStringContainsString('href="/users/'.$member->id.'"', $html);
-
-        // Handler now lives in the layout, available to every page.
-        $this->assertStringContainsString("querySelectorAll('tr.row-link')", $html);
+        $this->assertStringContainsString('data-href={`/bookings/${b.id}`}', $jsx);
+        $this->assertStringContainsString('className={`row-link', $jsx);
+        $this->assertStringContainsString('<Link href={`/bookings/${b.id}`}', $jsx);
+        // The redundant "View" action is gone; Edit is a plain link to the Blade form.
+        $this->assertStringNotContainsString("t('common.view')", $jsx);
+        $this->assertStringContainsString('href={`/bookings/${b.id}/edit`}', $jsx);
+        // The row handler must not swallow the links inside the row.
+        $this->assertStringContainsString("e.target.closest('a, button", $jsx);
     }
 
     public function test_users_page_still_gets_the_shared_handler(): void
@@ -65,11 +69,18 @@ class ClickableRowsTest extends TestCase
             'subscription_expires_at'=>now()->addMonth()])->fresh();
         $o->enableFeature('booking');
         $o = $o->fresh();
-        HotspotUser::create(['owner_id'=>$o->id,'name'=>'Sara','phone'=>'0101','password'=>'0101',
+        $member = HotspotUser::create(['owner_id'=>$o->id,'name'=>'Sara','phone'=>'0101','password'=>'0101',
             'speed_download'=>'10M','speed_upload'=>'5M','status'=>'active']);
 
-        $html = $this->actingAs($o,'owner')->get('/users')->assertOk()->getContent();
-        $this->assertStringContainsString('class="row-link', $html);
-        $this->assertSame(1, substr_count($html, "querySelectorAll('tr.row-link')"), 'handler defined once');
+        // The members list is a React page now: each row carries its id (the
+        // row links to /users/{id}) and the page wires whole-row navigation itself.
+        $this->actingAs($o,'owner')->get('/users')->assertOk()
+            ->assertInertia(fn (\Inertia\Testing\AssertableInertia $p) => $p
+                ->component('Users/Index')
+                ->where('users.data.0.id', $member->id));
+
+        $jsx = file_get_contents(resource_path('js/Pages/Users/Index.jsx'));
+        $this->assertStringContainsString('className="row-link', $jsx);
+        $this->assertStringContainsString('onClick={(e) => rowClick(e, href)}', $jsx);
     }
 }

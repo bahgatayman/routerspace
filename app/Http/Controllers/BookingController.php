@@ -41,6 +41,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class BookingController extends Controller
 {
@@ -48,7 +50,7 @@ class BookingController extends Controller
 
     public function __construct(private ActivityLogger $activityLogger) {}
 
-    public function index(Request $request): View
+    public function index(Request $request): Response
     {
         $ownerId = TenantContext::id();
         $status = $request->get('status');
@@ -66,7 +68,45 @@ class BookingController extends Controller
 
         $rooms = Room::where('owner_id', $ownerId)->get();
 
-        return view('bookings.index', compact('bookings', 'rooms', 'status', 'date', 'roomId'));
+        return Inertia::render('Bookings/Index', [
+            'bookings' => $bookings->withQueryString()->through(fn (Booking $b) => [
+                'id' => $b->id,
+                'date_label' => $b->booking_date->format('M d, Y'),
+                'time_range' => $b->timeRange(),
+                'customer_id' => $b->hotspotUser?->id,
+                'customer_name' => $b->hotspotUser?->name,
+                'party_size' => (int) $b->party_size,
+                'workspace' => $b->room?->workspace?->name,
+                'room' => $b->room?->name,
+                'total_hours' => $b->total_hours,
+                'total_price' => (float) $b->total_price,
+                'status' => $b->status,
+                'status_label' => $b->statusLabel(),
+                'status_class' => $b->statusBadgeClass(),
+                'can_edit' => in_array($b->status, ['pending', 'confirmed'], true),
+            ]),
+            'rooms' => $rooms->map(fn (Room $r) => [
+                'id' => $r->id,
+                'label' => $r->workspace?->name.' - '.$r->name,
+            ])->values()->all(),
+            'filters' => ['status' => $status ?? '', 'date' => $date ?? '', 'room_id' => (string) ($roomId ?? '')],
+        ]);
+    }
+
+    /** One booking row for the calendar lists (day/week/month). */
+    private function calendarBookingRow(Booking $b): array
+    {
+        return [
+            'id' => $b->id,
+            'time_range' => $b->timeRange(),
+            'start_time' => $b->start_time,
+            'customer' => $b->hotspotUser?->name,
+            'party_size' => (int) $b->party_size,
+            'room' => trim(($b->room?->workspace?->name ? $b->room->workspace->name.' / ' : '').$b->room?->name),
+            'total_price' => (float) $b->total_price,
+            'status_label' => $b->statusLabel(),
+            'status_class' => $b->statusBadgeClass(),
+        ];
     }
 
     public function create(Request $request): View
@@ -532,7 +572,7 @@ class BookingController extends Controller
         })->values()->all();
     }
 
-    public function show($id): View
+    public function show($id, RoomPricingService $pricing): Response
     {
         $owner = TenantContext::user();
 
@@ -545,7 +585,76 @@ class BookingController extends Controller
             ? Product::where('owner_id', $owner->id)->where('is_active', true)->orderBy('name')->get()
             : collect();
 
-        return view('bookings.show', compact('booking', 'products'));
+        $staff = auth('staff')->user();
+        $canDelete = ! $staff || $staff->hasPermission('bookings.delete');
+
+        // On-load snapshot, not a live ticker — the authoritative amount is
+        // always recomputed server-side at checkout (closePreview/close).
+        $openQuote = $booking->isOpenSession() ? $pricing->quoteOpenBooking($booking, now()) : null;
+
+        $isPackage = $booking->payment_method === Booking::METHOD_PACKAGE;
+        $user = $booking->hotspotUser;
+        $sale = $booking->sale;
+
+        return Inertia::render('Bookings/Show', [
+            'booking' => [
+                'id' => $booking->id,
+                'number' => str_pad((string) $booking->id, 4, '0', STR_PAD_LEFT),
+                'created_label' => $booking->created_at?->format('M d, Y h:i A'),
+                'status' => $booking->status,
+                'status_label' => $booking->statusLabel(),
+                'status_class' => $booking->statusBadgeClass(),
+                'is_open' => $booking->isOpenSession(),
+                'can_edit_link' => in_array($booking->status, ['pending', 'confirmed'], true),
+                'workspace_id' => $booking->room?->workspace?->id,
+                'workspace_name' => $booking->room?->workspace?->name,
+                'room_name' => $booking->room?->name,
+                'customer' => $user ? ['id' => $user->id, 'name' => $user->name, 'phone' => $user->phone, 'email' => $user->email] : null,
+                'party_size' => (int) $booking->party_size,
+                'date_label' => $booking->booking_date->format('l, M d, Y'),
+                'time_range' => $booking->timeRange(),
+                'duration_label' => $openQuote
+                    ? __('app.booking.duration_type.duration_so_far').': '.Duration::label((int) round($openQuote->totalMinutes))
+                    : $booking->total_hours.' '.__('app.common.hours'),
+                'pricing_note' => $booking->pricing_note,
+                'has_plan' => (bool) $booking->room_plan_id,
+                'price_per_hour' => (float) $booking->price_per_hour,
+                'current_amount' => $openQuote ? (float) $openQuote->totalPrice : null,
+                'net_room_charge' => $booking->netRoomCharge(),
+                'original_amount_label' => ($booking->coupon_id && $booking->discount_total > 0)
+                    ? __('app.coupons.checkout.original_amount', ['amount' => number_format($booking->total_price, 2)])
+                    : null,
+                'package' => $isPackage ? [
+                    'name' => $booking->memberPackage?->name ?? '—',
+                    'hours_label' => Duration::label((int) round($booking->total_hours * 60)),
+                    'worth_label' => __('app.packages.worth', ['amount' => Money::format($booking->total_price)]),
+                ] : null,
+                'amount_paid' => (float) $booking->amount_paid,
+                'balance_due' => $booking->balanceDue(),
+                'payment_status' => $booking->payment_status,
+                'payment_status_label' => $booking->paymentStatusLabel(),
+                'can_record_payment' => $booking->balanceDue() > 0 && ! in_array($booking->status, ['cancelled', 'no_show'], true),
+                'notes' => $booking->notes,
+            ],
+            'sales' => $owner->hasFeature('sales') ? [
+                'editable' => $booking->invoiceIsEditable(),
+                'items' => $sale ? $sale->items->map(fn (SaleItem $item) => [
+                    'id' => $item->id,
+                    'name' => $item->name,
+                    'quantity' => (int) $item->quantity,
+                    'line_total' => (float) $item->line_total,
+                ])->values()->all() : [],
+                'items_total' => (float) ($sale->total ?? 0),
+                'room_charge' => $booking->netRoomCharge(),
+                'grand_total' => $booking->grandTotal(),
+                'products' => $products->map(fn (Product $p) => [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'price' => (float) $p->price,
+                ])->values()->all(),
+            ] : null,
+            'canDelete' => $canDelete,
+        ]);
     }
 
     public function edit($id): View
@@ -1281,7 +1390,7 @@ class BookingController extends Controller
      * of booked/available data for day and week — this method only shapes
      * its output per room/day for the view, no capacity math of its own.
      */
-    public function calendar(Request $request, AvailabilityService $availability): View
+    public function calendar(Request $request, AvailabilityService $availability): Response
     {
         $ownerId = TenantContext::id();
 
@@ -1310,10 +1419,26 @@ class BookingController extends Controller
             ->when($roomId, fn ($c) => $c->where('id', (int) $roomId))
             ->values();
 
-        $data = compact('carbon', 'date', 'view', 'rooms', 'allRooms', 'workspaces', 'roomId', 'workspaceId');
+        $today = now()->format('Y-m-d');
+        $data = [
+            'view' => $view,
+            'date' => $date,
+            'roomId' => (string) ($roomId ?? ''),
+            'workspaceId' => (string) ($workspaceId ?? ''),
+            'today' => $today,
+            'workspaces' => $workspaces->map(fn (Workspace $ws) => ['id' => $ws->id, 'name' => $ws->name])->values()->all(),
+            'allRooms' => $allRooms->map(fn (Room $r) => ['id' => $r->id, 'label' => $r->workspace?->name.' - '.$r->name])->values()->all(),
+            // Legend status pills — the same model helpers every status badge uses.
+            'statusLegend' => collect(['pending', 'confirmed', 'checked_in', 'completed', 'cancelled', 'no_show'])
+                ->map(function (string $status) {
+                    $preview = new Booking(['status' => $status]);
+
+                    return ['label' => $preview->statusLabel(), 'class' => $preview->statusBadgeClass()];
+                })->all(),
+        ];
 
         if ($view === 'month') {
-            $data['bookings'] = Booking::where('owner_id', $ownerId)
+            $bookings = Booking::where('owner_id', $ownerId)
                 ->with(['room.workspace', 'hotspotUser'])
                 ->whereMonth('booking_date', $carbon->month)
                 ->whereYear('booking_date', $carbon->year)
@@ -1322,21 +1447,59 @@ class BookingController extends Controller
                 ->when($workspaceId, fn ($q) => $q->whereHas('room', fn ($rq) => $rq->where('workspace_id', $workspaceId)))
                 ->get()
                 ->groupBy(fn ($b) => $b->booking_date->format('Y-m-d'));
+
+            $data['bookings'] = $bookings
+                ->map(fn ($dayBookings) => $dayBookings->sortBy('start_time')->map(fn (Booking $b) => $this->calendarBookingRow($b))->values()->all())
+                ->all();
+
+            $startOfGrid = $carbon->copy()->startOfMonth()->startOfWeek(Carbon::MONDAY);
+            $endOfGrid = $carbon->copy()->endOfMonth()->endOfWeek(Carbon::SUNDAY);
+            $cells = [];
+            for ($d = $startOfGrid->copy(); $d->lte($endOfGrid); $d->addDay()) {
+                $dateStr = $d->format('Y-m-d');
+                $cells[] = [
+                    'date' => $dateStr,
+                    'day' => $d->format('j'),
+                    'in_month' => $d->month === $carbon->month,
+                    'is_today' => $dateStr === $today,
+                    'is_selected' => $dateStr === $date,
+                    'count' => isset($bookings[$dateStr]) ? $bookings[$dateStr]->count() : 0,
+                ];
+            }
+            $data['month'] = [
+                'title' => $carbon->format('F Y'),
+                'prev' => $carbon->copy()->subMonth()->format('Y-m-d'),
+                'next' => $carbon->copy()->addMonth()->format('Y-m-d'),
+                'cells' => $cells,
+                'selectedLabel' => Carbon::parse($date)->format('l, M d, Y'),
+            ];
         } elseif ($view === 'week') {
             $startOfWeek = $carbon->copy()->startOfWeek(Carbon::MONDAY);
-            $data['days'] = collect(range(0, 6))->map(function (int $i) use ($startOfWeek, $rooms, $availability) {
+            $data['days'] = collect(range(0, 6))->map(function (int $i) use ($startOfWeek, $rooms, $availability, $today) {
                 $day = $startOfWeek->copy()->addDays($i);
 
                 return [
-                    'date' => $day,
+                    'date' => $day->format('Y-m-d'),
+                    'label' => $day->format('l, M d'),
+                    'is_today' => $day->format('Y-m-d') === $today,
                     'rooms' => $this->roomDayAvailability($rooms, $day->format('Y-m-d'), $availability),
                 ];
-            });
+            })->all();
+            $data['week'] = [
+                'title' => $startOfWeek->format('M d').' – '.$startOfWeek->copy()->addDays(6)->format('M d, Y'),
+                'prev' => $startOfWeek->copy()->subWeek()->format('Y-m-d'),
+                'next' => $startOfWeek->copy()->addWeek()->format('Y-m-d'),
+            ];
         } else {
             $data['dayRooms'] = $this->roomDayAvailability($rooms, $carbon->format('Y-m-d'), $availability);
+            $data['day'] = [
+                'title' => $carbon->format('l, M d, Y'),
+                'prev' => $carbon->copy()->subDay()->format('Y-m-d'),
+                'next' => $carbon->copy()->addDay()->format('Y-m-d'),
+            ];
         }
 
-        return view('bookings.calendar', $data);
+        return Inertia::render('Bookings/Calendar', $data);
     }
 
     /**
@@ -1349,16 +1512,36 @@ class BookingController extends Controller
         $isToday = $dateStr === now()->format('Y-m-d');
 
         return $rooms->map(fn (Room $room) => [
-            'room' => $room,
+            'room' => [
+                'id' => $room->id,
+                'name' => $room->name,
+                'workspace' => $room->workspace?->name,
+                'type_label' => $room->typeLabel(),
+                'type_color' => $room->typeColor(),
+            ],
             'date' => $dateStr,
             'blocks' => $availability->freeBusyForDay($room, $dateStr),
-            'slots' => $availability->bookableSlots($room, $dateStr),
+            // Click-to-book pills: label + prefilled /bookings/create link decided here.
+            'slots' => array_map(fn (array $slot) => $slot + [
+                'label' => Carbon::createFromFormat('H:i', $slot['start'])->format('h:i A'),
+                'create_url' => $slot['available']
+                    ? '/bookings/create?'.http_build_query(['room_id' => $room->id, 'booking_date' => $dateStr, 'start_time' => $slot['start'], 'end_time' => $slot['end']])
+                    : null,
+            ], $availability->bookableSlots($room, $dateStr)),
             'bookings' => $room->bookings()
                 ->whereDate('booking_date', $dateStr)
                 ->where('status', '!=', 'cancelled')
                 ->with('hotspotUser')
                 ->orderBy('start_time')
-                ->get(),
+                ->get()
+                ->map(fn (Booking $b) => [
+                    'id' => $b->id,
+                    'time_range' => $b->timeRange(),
+                    'customer' => $b->hotspotUser?->name,
+                    'party_size' => (int) $b->party_size,
+                    'status_label' => $b->statusLabel(),
+                    'status_class' => $b->statusBadgeClass(),
+                ])->values()->all(),
             'live' => ($isToday && $room->isShared()) ? $availability->liveOccupancy($room) : null,
         ])->all();
     }
@@ -1370,7 +1553,7 @@ class BookingController extends Controller
      * JSON endpoint the create/edit forms already call, so there is exactly
      * one place that decides availability, not a second copy for this page.
      */
-    public function availabilityLookup(Request $request): View
+    public function availabilityLookup(Request $request): Response
     {
         $ownerId = TenantContext::id();
 
@@ -1382,7 +1565,17 @@ class BookingController extends Controller
 
         $timeSlots = $this->generateTimeSlots();
 
-        return view('bookings.availability', compact('rooms', 'timeSlots'));
+        return Inertia::render('Bookings/Availability', [
+            'roomGroups' => $rooms->groupBy(fn ($r) => $r->workspace?->name ?? '')
+                ->map(fn ($group, $workspace) => [
+                    'workspace' => (string) $workspace,
+                    'rooms' => $group->map(fn (Room $r) => ['id' => $r->id, 'label' => $r->name.' — '.$r->typeLabel()])->values()->all(),
+                ])->values()->all(),
+            'hasRooms' => $rooms->isNotEmpty(),
+            'timeSlots' => $timeSlots,
+            'prefRoom' => (string) $request->query('room_id', ''),
+            'prefDate' => (string) $request->query('date', now()->format('Y-m-d')),
+        ]);
     }
 
     /**

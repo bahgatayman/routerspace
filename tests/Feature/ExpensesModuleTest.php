@@ -201,7 +201,7 @@ class ExpensesModuleTest extends TestCase
             ->get('/expenses?period=custom&start=2026-08-01&end=2026-08-31');
 
         $response->assertOk();
-        $ids = $response->viewData('expenses')->pluck('id');
+        $ids = collect($response->inertiaProps('expenses.data'))->pluck('id');
         $this->assertTrue($ids->contains($inRange->id));
         $this->assertFalse($ids->contains($outOfRange->id));
     }
@@ -221,8 +221,8 @@ class ExpensesModuleTest extends TestCase
         $response = $this->asGuard($owner, 'owner')->get('/financials?period=today');
 
         $response->assertOk();
-        $this->assertSame(25000.0, $response->viewData('comparison')['current']);
-        $this->assertSame(7500.0, $response->viewData('totalExpenses'));
-        $this->assertSame(17500.0, $response->viewData('netTotal'));
+        $this->assertEquals(25000.0, $response->inertiaProps('comparison.current'));
+        $this->assertEquals(7500.0, $response->inertiaProps('totalExpenses'));
+        $this->assertEquals(17500.0, $response->inertiaProps('netTotal'));
     }
 }

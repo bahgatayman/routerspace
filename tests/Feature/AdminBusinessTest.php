@@ -22,6 +22,7 @@ use Database\Seeders\FeatureSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -132,8 +133,8 @@ class AdminBusinessTest extends TestCase
     {
         [$a, , , $b] = $this->seedTwoBusinesses();
 
-        $res = $this->overview($a)->assertOk();
-        $summary = $res->viewData('summary');
+        $res = $this->overview($a)->assertOk()->assertInertia(fn (Assert $p) => $p->component('Admin/Business/Overview'));
+        $summary = $res->inertiaProps('summary');
 
         $this->assertSame(2, $summary['locations']);
         $this->assertSame(2, $summary['rooms']);
@@ -144,24 +145,32 @@ class AdminBusinessTest extends TestCase
         $this->assertEquals(150, $summary['outstanding']);
         $this->assertSame(HotspotUser::where('owner_id', $a->id)->count(), $summary['members']);
 
+        // Amounts are formatted client-side now, so the raw figures are checked too.
         $html = $res->getContent();
+        $props = json_encode($res->inertiaProps(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         foreach (['Bravo', 'Bravo Secret Room', 'Bravo Secret Member', '7,777', '5,555', 'Bravo HQ'] as $leak) {
             $this->assertStringNotContainsString($leak, $html, "Business B data leaked: {$leak}");
+            $this->assertStringNotContainsString($leak, $props, "Business B data leaked: {$leak}");
         }
-        $res->assertSee('Alpha')->assertSee('Cairo')->assertSee('Giza');
+        foreach (['7777', '5555'] as $leak) {
+            $this->assertStringNotContainsString($leak, $props, "Business B amount leaked: {$leak}");
+        }
+        foreach (['Alpha', 'Cairo', 'Giza'] as $mine) {
+            $this->assertStringContainsString($mine, $props);
+        }
     }
 
     public function test_location_filter_narrows_room_figures_and_rejects_foreign_locations(): void
     {
         [$a, $cairo, $giza, $b] = $this->seedTwoBusinesses();
 
-        $s = $this->overview($a, ['workspace' => $giza->id])->assertOk()->viewData('summary');
+        $s = $this->overview($a, ['workspace' => $giza->id])->assertOk()->inertiaProps('summary');
         $this->assertSame(1, $s['rooms']);
         $this->assertSame(1, $s['bookings_today']);
         $this->assertEquals(0, $s['revenue_today'], 'Giza has no paid completed booking today; product sales are business-wide and not location-bound.');
         $this->assertEquals(150, $s['outstanding']);
 
-        $s = $this->overview($a, ['workspace' => $cairo->id])->viewData('summary');
+        $s = $this->overview($a, ['workspace' => $cairo->id])->inertiaProps('summary');
         $this->assertEquals(300, $s['revenue_today']);
         $this->assertEquals(700, $s['revenue_month']);
 
@@ -178,7 +187,7 @@ class AdminBusinessTest extends TestCase
             'session_date' => '2026-10-15', 'start_time' => '11:00', 'opened_at' => now()->subHour(), 'status' => 'open', 'billing_unit' => 'hour', 'billed_price_per_hour' => 50]);
         $this->booking($this->room($ws, 'Meeting'), '2026-10-15', 'confirmed', 100, 0, '11:30', '13:00'); // in progress now
 
-        $this->assertSame(2, $this->overview($a)->viewData('summary')['active_sessions']);
+        $this->assertSame(2, $this->overview($a)->inertiaProps('summary')['active_sessions']);
     }
 
     public function test_health_flags_real_problems_with_links(): void
@@ -193,26 +202,28 @@ class AdminBusinessTest extends TestCase
             $this->member($a, "M{$i}");
         }
 
-        $keys = collect($this->overview($a)->assertOk()->viewData('health'))->pluck('key')->all();
+        $keys = collect($this->overview($a)->assertOk()->inertiaProps('health'))->pluck('key')->all();
         foreach (['sub_expiring', 'rooms_unpriced', 'router_missing', 'out_of_stock', 'low_stock', 'unpaid_bookings', 'over_member_limit', 'no_staff'] as $k) {
             $this->assertContains($k, $keys);
         }
-        $this->assertSame('danger', collect($this->overview($a)->viewData('health'))->first()['level'], 'Most severe first.');
+        $this->assertSame('danger', collect($this->overview($a)->inertiaProps('health'))->first()['level'], 'Most severe first.');
 
         // A healthy business shows the all-clear.
         $ok = $this->business('Okay');
         $this->room($this->location($ok, 'Main'), 'Priced');
         Staff::create(['owner_id' => $ok->id, 'name' => 'S', 'email' => 's'.uniqid().'@t.local', 'password' => 'secret123', 'is_active' => true]);
-        $this->overview($ok)->assertOk()->assertSee(__('app.admin_biz.healthy'));
+        // No health items → the page renders the "healthy" all-clear (admin_biz.healthy).
+        $this->overview($ok)->assertOk()->assertInertia(fn (Assert $p) => $p->component('Admin/Business/Overview')->where('health', []));
     }
 
     public function test_empty_business_renders_cleanly(): void
     {
         $empty = $this->business('Empty');
         $res = $this->overview($empty)->assertOk();
-        $res->assertSee(__('app.admin_biz.no_activity'));
-        $this->assertContains('no_locations', collect($res->viewData('health'))->pluck('key')->all());
-        $this->assertEquals(0, $res->viewData('summary')['revenue_month']);
+        // Empty feed → the page renders admin_biz.no_activity.
+        $res->assertInertia(fn (Assert $p) => $p->where('activity', [])->where('locations', []));
+        $this->assertContains('no_locations', collect($res->inertiaProps('health'))->pluck('key')->all());
+        $this->assertEquals(0, $res->inertiaProps('summary')['revenue_month']);
     }
 
     // ------------------------------------------------------------------ authorization
@@ -272,8 +283,8 @@ class AdminBusinessTest extends TestCase
 
         // Rebuilt dashboard: the expiring list (≤ 14 days) has only "Soon"; this month's earnings = what was paid + sales.
         $res = $this->actingAs($this->admin, 'admin')->get('/admin/dashboard?preset=this_month')->assertOk();
-        $this->assertSame(['Soon'], $res->viewData('expiring')->pluck('business_name')->all());
-        $this->assertEquals(230, $res->viewData('kpis')['earnings']['value']);
+        $this->assertSame(['Soon'], collect($res->inertiaProps('expiring'))->pluck('business_name')->all());
+        $this->assertEquals(230, $res->inertiaProps('kpis')['earnings']['value']);
     }
 
     public function test_financial_monthly_breakdown_includes_january_to_september(): void
@@ -287,7 +298,7 @@ class AdminBusinessTest extends TestCase
 
         // Rebuilt financials: platform revenue for any month (January included) comes from the recorded payments.
         $revenue = fn (string $from, string $to) => $this->actingAs($this->admin, 'admin')
-            ->get("/admin/financial?preset=custom&from={$from}&to={$to}")->assertOk()->viewData('cards')['platform_revenue']['value'];
+            ->get("/admin/financial?preset=custom&from={$from}&to={$to}")->assertOk()->inertiaProps('cards.platform_revenue.value');
         $this->assertEquals(100, $revenue('2026-01-01', '2026-01-31'));
         $this->assertEquals(200, $revenue('2026-05-01', '2026-05-31'));
         $this->assertEquals(300, $revenue('2026-11-01', '2026-11-30'));
@@ -300,8 +311,11 @@ class AdminBusinessTest extends TestCase
         $b = $this->booking($this->room($this->location($a, 'Main'), 'R'), '2026-10-15', 'confirmed', 100, 0);
         $b->hotspotUser->delete();
 
-        $this->actingAs($this->admin, 'admin')->get('/admin/bookings')->assertOk()->assertSee(__('app.admin_biz.deleted_member'));
-        $this->actingAs($this->admin, 'admin')->get('/admin/bookings/'.$b->id)->assertOk();
+        // A missing member arrives as null and the table shows __('app.admin_biz.deleted_member') for it.
+        $this->actingAs($this->admin, 'admin')->get('/admin/bookings')->assertOk()
+            ->assertInertia(fn (Assert $p) => $p->component('Admin/Bookings/Index')->where('bookings.data.0.id', $b->id)->where('bookings.data.0.customer', null));
+        $this->actingAs($this->admin, 'admin')->get('/admin/bookings/'.$b->id)->assertOk()
+            ->assertInertia(fn (Assert $p) => $p->component('Admin/Bookings/Show')->where('booking.customer', null));
 
         $this->actingAs($this->admin, 'admin')->from("/admin/owners/{$a->id}/subscription")
             ->post("/admin/owners/{$a->id}/renew", ['plan_id' => $a->plan_id])
@@ -315,7 +329,8 @@ class AdminBusinessTest extends TestCase
         $ws = $this->location($a, 'Main');
         // Location pages moved to /admin/locations; the old /admin/workspaces/{id} URL redirects there.
         $this->actingAs($this->admin, 'admin')->get('/admin/workspaces/'.$ws->id)->assertRedirect('/admin/locations/'.$ws->id);
+        // The page links to /admin/owners/{owner_id}?workspace={id}.
         $this->actingAs($this->admin, 'admin')->get('/admin/locations/'.$ws->id)->assertOk()
-            ->assertSee('/admin/owners/'.$a->id.'?workspace='.$ws->id, false);
+            ->assertInertia(fn (Assert $p) => $p->component('Admin/Locations/Show')->where('location.owner_id', $a->id)->where('location.id', $ws->id));
     }
 }
