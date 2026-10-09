@@ -122,13 +122,22 @@
             <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6">
                 <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                     <h3 class="font-semibold text-gray-900">{{ __('app.dashboard.top_selling_products') }}</h3>
-                    <div class="inline-flex items-center gap-1 bg-gray-50 border border-gray-100 rounded-lg p-1" role="group">
-                        <button type="button" data-ls-rank-by="revenue" class="is-active px-3 py-1 rounded-md text-xs font-medium transition">{{ __('app.dashboard.metric_revenue') }}</button>
-                        <button type="button" data-ls-rank-by="units" class="px-3 py-1 rounded-md text-xs font-medium transition">{{ __('app.dashboard.metric_units') }}</button>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="inline-flex items-center gap-1 bg-gray-50 border border-gray-100 rounded-lg p-1" role="group">
+                            <button type="button" data-ls-product-view="ranking" class="is-active px-3 py-1 rounded-md text-xs font-medium transition">{{ __('app.dashboard.view_ranking') }}</button>
+                            <button type="button" data-ls-product-view="share" class="px-3 py-1 rounded-md text-xs font-medium transition">{{ __('app.dashboard.view_share') }}</button>
+                        </div>
+                        <div class="inline-flex items-center gap-1 bg-gray-50 border border-gray-100 rounded-lg p-1" role="group" data-ls-rank-group>
+                            <button type="button" data-ls-rank-by="revenue" class="is-active px-3 py-1 rounded-md text-xs font-medium transition">{{ __('app.dashboard.metric_revenue') }}</button>
+                            <button type="button" data-ls-rank-by="units" class="px-3 py-1 rounded-md text-xs font-medium transition">{{ __('app.dashboard.metric_units') }}</button>
+                        </div>
                     </div>
                 </div>
-                <div style="height: 280px;">
+                <div style="height: 280px;" data-ls-product-view-panel="ranking">
                     <canvas id="ls-top-products-chart" role="img" aria-label="{{ __('app.dashboard.top_selling_products') }}"></canvas>
+                </div>
+                <div style="height: 280px; display: none;" data-ls-product-view-panel="share">
+                    <canvas id="ls-product-share-chart" role="img" aria-label="{{ __('app.dashboard.product_revenue_share') }}"></canvas>
                 </div>
             </div>
 
@@ -191,7 +200,14 @@ window.LS_PRODUCT_ANALYTICS = @json([
         revenue: (d) => data.series[d].revenue,
         orders: (d) => data.series[d].orders,
     };
-    const metricLabels = @json(['units' => __('app.dashboard.metric_units'), 'revenue' => __('app.dashboard.metric_revenue'), 'orders' => __('app.dashboard.metric_orders')]);
+    {{--
+        @json() splits its expression on every top-level comma to look for
+        an optional (options, depth) pair, so an inline array literal with
+        more than 2 commas silently gets truncated — hence building the
+        array in PHP first and passing a single variable instead.
+    --}}
+    @php($metricLabels = ['units' => __('app.dashboard.metric_units'), 'revenue' => __('app.dashboard.metric_revenue'), 'orders' => __('app.dashboard.metric_orders'), 'other' => __('app.dashboard.metric_other')])
+    const metricLabels = @json($metricLabels);
     const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
 
     function tooltipMode() {
@@ -250,6 +266,68 @@ window.LS_PRODUCT_ANALYTICS = @json([
         });
     });
 
+    const shareCanvas = document.getElementById('ls-product-share-chart');
+    let shareChart = null;
+    const shareColors = ['#2e4f8f', '#5a82c6', '#8fb2f0', '#c6511f', '#d98c3f', '#9ca3af'];
+
+    function ensureShareChart() {
+        if (shareChart || !shareCanvas) return;
+
+        const sorted = [...data.topProducts].sort((a, b) => b.revenue - a.revenue);
+        const top = sorted.slice(0, 6);
+        const rest = sorted.slice(6);
+        const otherRevenue = rest.reduce((sum, p) => sum + p.revenue, 0);
+        const otherUnits = rest.reduce((sum, p) => sum + p.units, 0);
+        const otherOrders = rest.reduce((sum, p) => sum + p.orders, 0);
+
+        const slices = otherRevenue > 0
+            ? [...top, { name: metricLabels.other || 'Other', revenue: otherRevenue, units: otherUnits, orders: otherOrders }]
+            : top;
+        const total = slices.reduce((sum, p) => sum + p.revenue, 0) || 1;
+
+        shareChart = new Chart(shareCanvas, {
+            type: 'doughnut',
+            data: {
+                labels: slices.map((p) => p.name),
+                datasets: [{ data: slices.map((p) => p.revenue), backgroundColor: shareColors }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 250 },
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+                    tooltip: Object.assign({
+                        callbacks: {
+                            label: (ctx) => {
+                                const p = slices[ctx.dataIndex];
+                                const money = window.LS ? window.LS.money(p.revenue) : p.revenue;
+                                const pct = ((p.revenue / total) * 100).toFixed(1);
+                                return `${p.name} · ${pct}% · ${money} · ${p.units} ${metricLabels.units}`;
+                            },
+                        },
+                    }, tooltipMode()),
+                },
+            },
+        });
+    }
+
+    const rankGroup = document.querySelector('[data-ls-rank-group]');
+    document.querySelectorAll('[data-ls-product-view]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-ls-product-view]').forEach((b) => b.classList.toggle('is-active', b === btn));
+            const view = btn.dataset.lsProductView;
+            document.querySelectorAll('[data-ls-product-view-panel]').forEach((panel) => {
+                panel.style.display = panel.dataset.lsProductViewPanel === view ? 'block' : 'none';
+            });
+            if (rankGroup) rankGroup.style.display = view === 'ranking' ? 'inline-flex' : 'none';
+            if (view === 'share') {
+                ensureShareChart();
+                shareChart?.resize();
+            }
+        });
+    });
+
     const topCanvas = document.getElementById('ls-top-products-chart');
     let topChart = null;
     function renderTopProducts(rankBy) {
@@ -294,6 +372,6 @@ window.LS_PRODUCT_ANALYTICS = @json([
 })();
 </script>
 <style>
-    [data-ls-product-metric], [data-ls-rank-by] { color: var(--color-text-secondary, #6b7280); }
-    [data-ls-product-metric].is-active, [data-ls-rank-by].is-active { background: #2e4f8f; color: #fff; }
+    [data-ls-product-metric], [data-ls-rank-by], [data-ls-product-view] { color: var(--color-text-secondary, #6b7280); }
+    [data-ls-product-metric].is-active, [data-ls-rank-by].is-active, [data-ls-product-view].is-active { background: #2e4f8f; color: #fff; }
 </style>

@@ -9,8 +9,11 @@ use Illuminate\Support\Collection;
 
 class BookingAnalyticsService
 {
-    /** Mirrors the match arms in Booking::statusLabel()/statusColor(). */
-    private const STATUSES = ['pending', 'confirmed', 'checked_in', 'completed', 'cancelled', 'no_show'];
+    /** Mirrors the match arms in Booking::statusLabel()/statusColor() — 'open' (Open Session) included, previously missing here, which silently dropped those bookings from statusBreakdown(). */
+    private const STATUSES = ['pending', 'confirmed', 'checked_in', 'open', 'completed', 'cancelled', 'no_show'];
+
+    /** A single day+hour cell needs at least this many bookings before it's confident enough to call "your busiest time." */
+    public const MIN_BUSIEST_CELL_COUNT = 3;
 
     /** Total bookings in the period, optionally excluding cancelled — matches the existing "today's bookings" definition. */
     public function bookingsCount(Owner $owner, AnalyticsPeriod $period, bool $excludeCancelled = false): int
@@ -120,8 +123,13 @@ class BookingAnalyticsService
             ->values();
     }
 
-    /** Total open hours across every date in the period, from configured working hours. */
-    private function openHoursAcrossPeriod(Owner $owner, AnalyticsPeriod $period, BusinessHoursService $businessHours): float
+    /**
+     * Total open hours across every date in the period, from configured
+     * working hours. Public so callers other than roomUtilization() (e.g.
+     * a "revenue per available hour" figure) can share this one
+     * owner-wide total instead of recomputing it.
+     */
+    public function openHoursAcrossPeriod(Owner $owner, AnalyticsPeriod $period, BusinessHoursService $businessHours): float
     {
         $minutes = 0;
         $cursor = $period->start->copy()->startOfDay();
@@ -171,6 +179,35 @@ class BookingAnalyticsService
             ->map(fn ($c) => (int) $c)
             ->sortKeys()
             ->all();
+    }
+
+    /**
+     * Booking count grouped by day-of-week (0=Sunday..6=Saturday) and start
+     * hour (0-23), excluding cancelled AND no-show bookings — unlike
+     * peakHours() above (kept as-is for its existing single-dimension
+     * callers), this also excludes no_show since a booking nobody showed up
+     * for isn't evidence the business was actually busy then. Zero-filled
+     * for every one of the 168 cells so the heatmap view never has to guess
+     * a missing key.
+     *
+     * @return array<int, array<int, int>> dayOfWeek => [hour => count]
+     */
+    public function peakHoursByDayOfWeek(Owner $owner, AnalyticsPeriod $period): array
+    {
+        $grid = array_fill(0, 7, array_fill(0, 24, 0));
+
+        return Booking::where('owner_id', $owner->id)
+            ->whereNotIn('status', ['cancelled', 'no_show'])
+            ->whereDate('booking_date', '>=', $period->startDate())
+            ->whereDate('booking_date', '<=', $period->endDate())
+            ->selectRaw("CAST(strftime('%w', booking_date) AS INTEGER) as dow, CAST(substr(start_time, 1, 2) AS INTEGER) as hour, COUNT(*) as c")
+            ->groupBy('dow', 'hour')
+            ->get()
+            ->reduce(function (array $grid, $row) {
+                $grid[(int) $row->dow][(int) $row->hour] = (int) $row->c;
+
+                return $grid;
+            }, $grid);
     }
 
     /**

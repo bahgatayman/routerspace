@@ -37,6 +37,9 @@
                             <p class="text-xs mt-1 font-medium {{ $up ? 'text-green-600' : 'text-red-600' }}">
                                 {{ $up ? '▲' : '▼' }} {{ number_format(abs($revenueComparison['changePercent']), 1) }}% {{ __('app.dashboard.vs_previous_period') }}
                             </p>
+                            <p class="text-[11px] text-gray-400 mt-1">
+                                {{ __('app.dashboard.insight_revenue_change', ['direction' => __($up ? 'app.dashboard.change_up' : 'app.dashboard.change_down'), 'percent' => number_format(abs($revenueComparison['changePercent']), 1), 'period' => $periodLabel]) }}
+                            </p>
                         @endif
                     </div>
                     <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
@@ -110,6 +113,10 @@
         </a>
     </div></div>
 
+    @if (! empty($smartInsights))
+        @include('dashboard._smart-insights')
+    @endif
+
     {{-- ================= Period selector — drives trend/utilization/peak-hours/status/new-customers/products ================= --}}
     @if ($showRevenue || $owner->hasFeature('booking') || $showProducts)
         <div class="flex flex-wrap items-center gap-3 mb-6">
@@ -157,52 +164,87 @@
         @include('dashboard._products-section')
     @endif
 
-    @if ($showWorkspace || $owner->hasFeature('booking'))
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6">
-        @if ($showWorkspace && $owner->hasFeature('booking'))
-            @php
-                $barColors = ['blue' => 'bg-blue-500', 'purple' => 'bg-purple-500', 'green' => 'bg-green-500', 'orange' => 'bg-orange-500', 'gray' => 'bg-gray-400'];
-                $maxUtil = max(1, $roomUtilization->max(fn ($r) => $r['utilization_percent'] ?? $r['hours_booked']));
-            @endphp
-            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6">
-                <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.room_utilization') }}</h3>
+    @if ($showWorkspace && $owner->hasFeature('booking') && isset($roomUtilization))
+        @php
+            $barColors = ['blue' => 'bg-blue-500', 'purple' => 'bg-purple-500', 'green' => 'bg-green-500', 'orange' => 'bg-orange-500', 'gray' => 'bg-gray-400'];
+            $maxUtil = max(1, $roomUtilization->max(fn ($r) => $r['utilization_percent'] ?? $r['hours_booked']));
+        @endphp
+        <div class="mb-6">
+            <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.room_performance') }}</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 @forelse ($roomUtilization as $row)
                     @php $value = $row['utilization_percent'] ?? $row['hours_booked']; @endphp
-                    <div class="mb-3 last:mb-0">
+                    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <span class="font-medium text-gray-900 truncate">{{ $row['room_name'] }}</span>
+                            <span class="text-[11px] text-gray-400 shrink-0">{{ $row['room']->typeLabel() }}</span>
+                        </div>
                         <div class="flex items-center justify-between text-xs mb-1 gap-2">
-                            <span class="font-medium text-gray-700 truncate">{{ $row['room_name'] }}</span>
+                            <span class="text-gray-500">{{ __('app.dashboard.room_utilization') }}</span>
                             <span class="text-gray-400 shrink-0">
-                                {{ $row['utilization_percent'] !== null ? $row['utilization_percent'].'%' : $row['hours_booked'].'h' }}
+                                {{ $row['utilization_percent'] !== null ? $row['utilization_percent'].'%' : $row['hours_booked'].__('app.ui.unit_h') }}
                             </span>
                         </div>
-                        <div class="w-full bg-gray-100 rounded-full h-2">
+                        <div class="w-full bg-gray-100 rounded-full h-2 mb-3">
                             <div class="h-2 rounded-full {{ $barColors[$row['room']->typeColor()] ?? 'bg-gray-400' }}" style="width: {{ ($value / $maxUtil) * 100 }}%"></div>
                         </div>
+                        @if ($canViewRevenue)
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="text-sm font-semibold text-gray-900 whitespace-nowrap">ج.م {{ number_format($row['revenue'], 2) }}</span>
+                                @if ($row['revenue_change_percent'] !== null)
+                                    @php $rup = $row['revenue_change_percent'] >= 0; @endphp
+                                    <span class="text-[11px] font-medium shrink-0 {{ $rup ? 'text-green-600' : 'text-red-600' }}">
+                                        {{ $rup ? '▲' : '▼' }} {{ number_format(abs($row['revenue_change_percent']), 1) }}%
+                                    </span>
+                                @endif
+                            </div>
+                            @if ($row['revenue_per_open_hour'] !== null)
+                                <p class="text-[11px] text-gray-400 mt-1">ج.م {{ number_format($row['revenue_per_open_hour'], 2) }} {{ __('app.dashboard.revenue_per_open_hour') }}</p>
+                            @endif
+                        @endif
                     </div>
                 @empty
                     <p class="text-sm text-gray-400">{{ __('app.dashboard.no_room_data') }}</p>
                 @endforelse
-                @if ($roomUtilization->isNotEmpty() && ! $roomUtilization->first()['utilization_percent'])
-                    <p class="text-[11px] text-gray-400 mt-3">{{ __('app.dashboard.working_hours_not_configured') }}</p>
-                @endif
             </div>
-        @endif
+            @if ($roomUtilization->isNotEmpty() && ! $roomUtilization->first()['utilization_percent'])
+                <p class="text-[11px] text-gray-400 mt-3">{{ __('app.dashboard.working_hours_not_configured') }}</p>
+            @endif
+        </div>
+    @endif
 
-        @if ($owner->hasFeature('booking'))
-            @php $maxPeak = max(1, ...array_values(array_merge([0], $peakHours))); @endphp
-            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6">
-                <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.peak_hours') }}</h3>
-                @if (empty($peakHours))
-                    <p class="text-sm text-gray-400">{{ __('app.dashboard.no_data_for_period') }}</p>
+    @if ($owner->hasFeature('booking'))
+        @php
+            $heatmapDayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            $heatmapMax = collect($peakHoursGrid)->flatten()->max() ?? 0;
+        @endphp
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6">
+            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6 lg:col-span-2">
+                <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.peak_hours_heatmap') }}</h3>
+                @if ($heatmapMax === 0)
+                    <p class="text-sm text-gray-400">{{ __('app.dashboard.no_heatmap_data') }}</p>
                 @else
-                    <div class="flex items-end gap-0.5 h-32">
+                    <div class="ls-heatmap" role="img" aria-label="{{ __('app.dashboard.peak_hours_heatmap') }}">
+                        <div class="ls-heatmap-row ls-heatmap-row--header">
+                            <div class="ls-heatmap-cell ls-heatmap-cell--label"></div>
+                            @foreach ($heatmapDayKeys as $dayKey)
+                                <div class="ls-heatmap-cell ls-heatmap-cell--header">{{ mb_substr(__('app.day.'.$dayKey), 0, 3) }}</div>
+                            @endforeach
+                        </div>
                         @for ($hour = 0; $hour < 24; $hour++)
-                            @php $count = $peakHours[$hour] ?? 0; @endphp
-                            <div class="flex-1 flex flex-col items-center justify-end h-full gap-1" title="{{ sprintf('%02d:00', $hour) }} — {{ $count }}">
-                                <div class="w-full rounded-t bg-brand-400" style="height: {{ ($count / $maxPeak) * 100 }}px; min-height: {{ $count > 0 ? 2 : 0 }}px;"></div>
-                                @if ($hour % 4 === 0)
-                                    <span class="text-[9px] text-gray-400">{{ $hour }}</span>
-                                @endif
+                            <div class="ls-heatmap-row">
+                                <div class="ls-heatmap-cell ls-heatmap-cell--label">{{ sprintf('%02d', $hour) }}</div>
+                                @foreach ($heatmapDayKeys as $dow => $dayKey)
+                                    @php
+                                        $count = $peakHoursGrid[$dow][$hour] ?? 0;
+                                        $intensity = $heatmapMax > 0 ? round(($count / $heatmapMax) * 100) : 0;
+                                    @endphp
+                                    <div
+                                        class="ls-heatmap-cell"
+                                        @if ($count > 0) style="background: color-mix(in srgb, var(--color-chart) {{ $intensity }}%, transparent);" @endif
+                                        title="{{ __('app.day.'.$dayKey) }} {{ sprintf('%02d:00', $hour) }} — {{ $count }}"
+                                    ></div>
+                                @endforeach
                             </div>
                         @endfor
                     </div>
@@ -229,8 +271,7 @@
                     </div>
                 @endif
             </div>
-        @endif
-    </div>
+        </div>
     @endif
 
     @if ($owner->hasFeature('hotspot'))
@@ -334,6 +375,21 @@
                 <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.dashboard.new_customers') }}</p>
                 <p class="text-2xl lg:text-3xl font-bold text-gray-900 mt-1">{{ $newCustomers }}</p>
                 <p class="text-[11px] text-gray-400 mt-1">{{ __('app.dashboard.period_'.$periodKey) }}</p>
+
+                <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-gray-50">
+                    <div>
+                        <p class="text-[11px] text-gray-500">{{ __('app.dashboard.returning_customers') }}</p>
+                        <p class="text-lg font-semibold text-gray-900 mt-0.5">
+                            {{ $returningCustomerRate ? $returningCustomerRate['percent'].'%' : __('app.dashboard.not_enough_data') }}
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-[11px] text-gray-500">{{ __('app.dashboard.avg_spend_per_customer') }}</p>
+                        <p class="text-lg font-semibold text-gray-900 mt-0.5 whitespace-nowrap">
+                            {{ $averageSpendPerCustomer !== null ? 'ج.م '.number_format($averageSpendPerCustomer, 2) : __('app.dashboard.not_enough_data') }}
+                        </p>
+                    </div>
+                </div>
             </div>
         @endif
     </div>
@@ -351,6 +407,7 @@
                             <th class="pb-3 hidden sm:table-cell">{{ __('app.dashboard.bookings') }}</th>
                             @if ($canViewRevenue)
                                 <th class="pb-3">{{ __('app.financial.revenue') }}</th>
+                                <th class="pb-3 hidden sm:table-cell">{{ __('app.dashboard.revenue_per_open_hour') }}</th>
                             @endif
                             <th class="pb-3">{{ __('app.dashboard.room_utilization') }}</th>
                         </tr>
@@ -366,11 +423,12 @@
                                 <td class="py-3 hidden sm:table-cell">{{ $row['bookings_count'] }}</td>
                                 @if ($canViewRevenue)
                                     <td class="py-3 pe-3 whitespace-nowrap">ج.م {{ number_format($row['revenue'], 2) }}</td>
+                                    <td class="py-3 hidden sm:table-cell whitespace-nowrap">{{ $row['revenue_per_open_hour'] !== null ? 'ج.م '.number_format($row['revenue_per_open_hour'], 2) : '—' }}</td>
                                 @endif
                                 <td class="py-3">{{ $row['utilization_percent'] !== null ? $row['utilization_percent'].'%' : '—' }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="{{ $canViewRevenue ? 5 : 4 }}" class="py-6 text-center text-gray-400">{{ __('app.dashboard.no_room_data') }}</td></tr>
+                            <tr><td colspan="{{ $canViewRevenue ? 6 : 4 }}" class="py-6 text-center text-gray-400">{{ __('app.dashboard.no_room_data') }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>

@@ -652,6 +652,10 @@ return [
         'metric_units' => 'الوحدات المباعة',
         'metric_revenue' => 'الإيرادات',
         'metric_orders' => 'الطلبات',
+        'metric_other' => 'أخرى',
+        'view_ranking' => 'ترتيب',
+        'view_share' => 'نسبة',
+        'product_revenue_share' => 'توزيع الإيرادات حسب المنتج',
         'product_insights' => 'رؤى المنتجات',
         'no_product_sales_for_period' => 'لا توجد مبيعات منتجات في هذه الفترة.',
         'no_products_no_sales' => 'لا توجد مبيعات منتجات لعرضها بعد.',
@@ -662,6 +666,32 @@ return [
         'insight_no_sales' => ':name لم يحقق أي مبيعات هذه الفترة.',
         'no_low_stock_products' => 'لا توجد منتجات منخفضة المخزون حالياً.',
         'no_insights_yet' => 'ستظهر الرؤى عند توفر بيانات مبيعات كافية.',
+        'insight_fastest_selling' => ':name هو منتجك الأسرع مبيعاً، بمعدل :perDay تقريباً يومياً.',
+        'insight_declining_sales' => ':name تراجع بـ ج.م :amount مقارنة بالفترة السابقة.',
+
+        // رؤى ذكية (مجمّعة من كل مصادر التحليلات أدناه)
+        'smart_insights' => 'ما يجب أن تعرفه',
+        'no_smart_insights_yet' => 'تابع لاحقاً عند زيادة النشاط في هذه الفترة — سنعرض هنا ما يهمك.',
+        'change_up' => 'ارتفعت',
+        'change_down' => 'انخفضت',
+        'insight_revenue_change' => 'الإيرادات :direction بنسبة :percent% مقارنة بالفترة السابقة :period.',
+        'insight_busiest_time' => 'أكثر أوقاتك ازدحاماً هو عادة يوم :day من الساعة :start إلى :end.',
+        'insight_room_disagreement' => ':utilizationRoom لديها أعلى نسبة استخدام، لكن :revenueRoom تحقق أعلى إيراد لكل ساعة متاحة.',
+        'insight_returning_customers' => ':percent% من عملائك عادوا خلال هذه الفترة.',
+        'insight_room_type_product_spend' => 'عملاء حجز :topType ينفقون :percent% أكثر على المنتجات من عملاء :otherType.',
+
+        // أداء الغرف (يحل محل بطاقة استخدام الغرف القديمة)
+        'room_performance' => 'أداء الغرف',
+        'revenue_per_open_hour' => 'ج.م / ساعة متاحة',
+
+        // خريطة ساعات الذروة الحرارية (تحل محل شريط ساعات الذروة المسطح القديم)
+        'peak_hours_heatmap' => 'ساعات الذروة',
+        'no_heatmap_data' => 'لا يوجد نشاط حجوزات بعد لهذه الفترة.',
+
+        // رؤى العملاء
+        'returning_customers' => 'العملاء العائدون',
+        'avg_spend_per_customer' => 'متوسط الإنفاق / عميل',
+        'not_enough_data' => 'لا توجد بيانات كافية بعد',
     ],
 
     'financials' => [

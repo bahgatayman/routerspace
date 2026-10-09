@@ -30,6 +30,8 @@
     pref() { const p = store.get('ls-theme'); return p === 'light' || p === 'dark' ? p : 'system'; },
     resolved(pref = this.pref()) { return pref === 'system' ? (media && media.matches ? 'dark' : 'light') : pref; },
     apply() {
+      // A page can pin its theme (the Super Admin shell is light-only): <html data-theme-lock="light">.
+      if (root.dataset.themeLock) { root.dataset.theme = root.dataset.themeLock; return; }
       const pref = this.pref();
       root.classList.add('ls-theme-switching');
       root.dataset.theme = this.resolved(pref);

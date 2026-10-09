@@ -30,6 +30,8 @@
         @include('admin.partials.stat', ['label' => $t('kpi.outstanding'), 'value' => Money::format($stats['outstanding']), 'tone' => $stats['outstanding'] > 0 ? 'warn' : null])
     </div>
 
+    @include('admin.partials.chart', ['id' => 'biz-status', 'title' => $t('chart.status_title'), 'note' => $t('chart.click_slice'), 'spec' => $statusChart, 'height' => 220])
+
     <nav class="ls-chips" aria-label="{{ __('app.common.status') }}">
         <a href="{{ $chip(null) }}" class="ls-chip {{ $status ? '' : 'is-active' }}">{{ __('app.common.all') }} <span class="ls-chip-count">{{ $stats['total'] }}</span></a>
         @foreach (\App\Http\Controllers\Admin\BookingController::STATUSES as $s)

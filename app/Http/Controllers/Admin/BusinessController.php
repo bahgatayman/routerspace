@@ -15,7 +15,9 @@ use App\Models\Workspace;
 use App\Services\Admin\BusinessOverviewService;
 use App\Services\Admin\PlatformAnalyticsService;
 use App\Services\ExpenseAnalyticsService;
+use App\Services\ProductAnalyticsService;
 use App\Services\RevenueAnalyticsService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
@@ -43,7 +45,7 @@ class BusinessController extends Controller
         ]);
     }
 
-    public function products(Request $request, int $owner): View
+    public function products(Request $request, int $owner, ProductAnalyticsService $productAnalytics): View
     {
         $owner = $this->owner($owner);
         [$period, $range] = $this->resolvePeriod($request);
@@ -76,7 +78,40 @@ class BusinessController extends Controller
             'sales' => app(RevenueAnalyticsService::class)->saleRevenue($owner, $period),
         ];
 
-        return view('admin.business.products', compact('owner', 'products', 'stats', 'range') + [
+        // Reuses the same ProductAnalyticsService built for the Owner
+        // Dashboard, read-only, scoped to this one owner — not a 2nd
+        // implementation of product analytics for the admin side.
+        $productSummary = $productAnalytics->summary($owner, $period);
+        $productSeries = $productAnalytics->dailySeries($owner, $period);
+        $topProducts = array_slice($productAnalytics->topProducts($owner, $period), 0, 10);
+        $productInsights = $productAnalytics->insights($owner, $period);
+
+        $trendDates = array_keys($productSeries);
+        $productTrendChart = [
+            'type' => 'line', 'money' => true, 'axis' => __('app.dashboard.metric_revenue'),
+            'labels' => array_map(fn ($d) => Carbon::parse($d)->format('j M'), $trendDates),
+            'datasets' => [[
+                'label' => __('app.dashboard.metric_revenue'),
+                'data' => array_map(fn ($d) => $productSeries[$d]['revenue'], $trendDates),
+                'color' => 'c1',
+            ]],
+        ];
+
+        $topProductsChart = [
+            'type' => 'bar', 'horizontal' => true, 'money' => true, 'axis' => __('app.dashboard.top_selling_products'),
+            'labels' => array_map(fn ($p) => $p['name'], $topProducts),
+            'datasets' => [[
+                'label' => __('app.dashboard.metric_revenue'),
+                'data' => array_map(fn ($p) => $p['revenue'], $topProducts),
+                'color' => 'c1',
+            ]],
+            'links' => array_map(fn ($p) => "/admin/owners/{$owner->id}/products/{$p['product_id']}", $topProducts),
+        ];
+
+        return view('admin.business.products', compact(
+            'owner', 'products', 'stats', 'range',
+            'productSummary', 'productSeries', 'productTrendChart', 'topProductsChart', 'productInsights',
+        ) + [
             'workspace' => null, 'filters' => compact('search', 'stock', 'type'),
         ]);
     }
@@ -143,13 +178,34 @@ class BusinessController extends Controller
             'outstanding' => (float) (clone $base)->outstanding()->sum(DB::raw(Booking::OUTSTANDING_SQL)),
         ];
 
+        // Same doughnut shape/colors as the platform dashboard's status chart
+        // (admin/dashboard), just scoped to this one owner (+ workspace, if
+        // filtered) instead of platform-wide — reuses $byStatus above rather
+        // than a 2nd query, and links back to this same page's status chips.
+        $statusColors = ['completed' => 'success', 'confirmed' => 'info', 'pending' => 'warning', 'checked_in' => 'c3', 'open' => 'c3', 'cancelled' => 'danger', 'no_show' => 'neutral'];
+        // ->values() re-indexes after filter() — without it, the gappy keys
+        // left behind (e.g. 1, 4, 5, 6) survive into ->map()->all() and
+        // json_encode() turns that into a JS object instead of an array,
+        // which admin-charts.js can't iterate.
+        $presentStatuses = collect(BookingController::STATUSES)->filter(fn ($s) => ($byStatus[$s] ?? 0) > 0)->values();
+        $statusChart = [
+            'type' => 'doughnut', 'axis' => __('app.common.status'),
+            'labels' => $presentStatuses->map(fn ($s) => __('app.admin_platform.status.'.$s))->all(),
+            'datasets' => [[
+                'label' => __('app.nav.bookings'),
+                'data' => $presentStatuses->map(fn ($s) => (int) $byStatus[$s])->all(),
+                'color' => $presentStatuses->map(fn ($s) => $statusColors[$s] ?? 'neutral')->all(),
+            ]],
+            'links' => $presentStatuses->map(fn ($s) => $request->fullUrlWithQuery(['status' => $s, 'page' => null]))->all(),
+        ];
+
         $bookings = (clone $base)->when($status, fn ($q) => $q->where('status', $status))
             ->with(['owner:id,business_name', 'room:id,name,workspace_id', 'room.workspace:id,name', 'hotspotUser:id,name,phone'])
             ->withExists('sharedSession')
             ->orderByDesc('booking_date')->orderByDesc('start_time')
             ->paginate(25)->withQueryString();
 
-        return view('admin.business.bookings', compact('owner', 'workspace', 'bookings', 'stats', 'range', 'status'));
+        return view('admin.business.bookings', compact('owner', 'workspace', 'bookings', 'stats', 'statusChart', 'range', 'status'));
     }
 
     public function financials(Request $request, int $owner, PlatformAnalyticsService $analytics, RevenueAnalyticsService $revenue, ExpenseAnalyticsService $expenses): View

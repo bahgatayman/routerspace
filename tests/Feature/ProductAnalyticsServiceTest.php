@@ -116,6 +116,28 @@ class ProductAnalyticsServiceTest extends TestCase
         return AnalyticsPeriod::custom(Carbon::parse($start), Carbon::parse($end));
     }
 
+    private function booking(Owner $owner, Room $room, string $date): Booking
+    {
+        return Booking::create([
+            'owner_id' => $owner->id, 'room_id' => $room->id, 'hotspot_user_id' => $this->member($owner)->id,
+            'party_size' => 1, 'booking_date' => $date, 'start_time' => '09:00', 'end_time' => '11:00',
+            'price_per_hour' => 25, 'total_hours' => 2, 'total_price' => 50,
+            'amount_paid' => 50, 'payment_status' => 'paid', 'status' => 'completed',
+        ]);
+    }
+
+    /** A completed product sale attached to a booking — the join productSpendByRoomType() relies on. */
+    private function bookingProductSale(Owner $owner, Booking $booking, Product $product, string $soldAt, int $quantity, float $unitPrice): Sale
+    {
+        $sale = Sale::create([
+            'owner_id' => $owner->id, 'booking_id' => $booking->id, 'status' => 'completed',
+            'subtotal' => $quantity * $unitPrice, 'total' => $quantity * $unitPrice, 'sold_at' => $soldAt,
+        ]);
+        $this->item($sale, $product, $quantity, $unitPrice);
+
+        return $sale;
+    }
+
     // --- summary() ---
 
     public function test_summary_counts_units_revenue_orders_from_completed_sales_only(): void
@@ -372,6 +394,88 @@ class ProductAnalyticsServiceTest extends TestCase
         $lowStock = collect($insights)->firstWhere('type', 'low_stock');
         $this->assertNotNull($lowStock);
         $this->assertStringContainsString('Running Low', $lowStock['text']);
+    }
+
+    public function test_insights_identifies_fastest_selling_product(): void
+    {
+        $owner = $this->owner();
+        $fast = $this->product($owner, 'Coffee');
+        $slow = $this->product($owner, 'Water');
+        // 30 units over a 3-day period (10/day) vs 3 units over the same period (1/day).
+        $this->productSale($owner, $fast, '2026-09-10 10:00:00', 30, 1.0);
+        $this->productSale($owner, $slow, '2026-09-10 10:00:00', 3, 1.0);
+
+        $insights = $this->products->insights($owner, $this->period('2026-09-10', '2026-09-12'));
+
+        $fastest = collect($insights)->firstWhere('type', 'fastest_selling');
+        $this->assertNotNull($fastest);
+        $this->assertStringContainsString('Coffee', $fastest['text']);
+    }
+
+    public function test_insights_identifies_declining_sales_vs_previous_period(): void
+    {
+        $owner = $this->owner();
+        $product = $this->product($owner, 'Coffee');
+        $this->productSale($owner, $product, '2026-08-10 10:00:00', 20, 10.0); // previous period
+        $this->productSale($owner, $product, '2026-09-10 10:00:00', 1, 10.0); // current period, big drop
+
+        $insights = $this->products->insights($owner, $this->period('2026-09-01', '2026-09-30'));
+
+        $declining = collect($insights)->firstWhere('type', 'declining_sales');
+        $this->assertNotNull($declining);
+        $this->assertStringContainsString('Coffee', $declining['text']);
+    }
+
+    // --- productSpendByRoomType() ---
+
+    public function test_product_spend_by_room_type_groups_by_room_type_and_averages_per_booking(): void
+    {
+        $owner = $this->owner();
+        $meetingRoom = $this->room($owner);
+        $product = $this->product($owner, 'Coffee');
+
+        // 3 meeting-room bookings, product revenue 30/10/20 => avg 20/booking.
+        foreach ([30.0, 10.0, 20.0] as $amount) {
+            $booking = $this->booking($owner, $meetingRoom, '2026-09-10');
+            $this->bookingProductSale($owner, $booking, $product, '2026-09-10 10:00:00', 1, $amount);
+        }
+
+        $result = $this->products->productSpendByRoomType($owner, $this->period('2026-09-01', '2026-09-30'));
+
+        $this->assertCount(1, $result);
+        $this->assertSame('meeting', $result[0]['roomType']);
+        $this->assertSame(3, $result[0]['bookingCount']);
+        $this->assertSame(20.0, $result[0]['productRevenuePerBooking']);
+    }
+
+    public function test_product_spend_by_room_type_drops_types_below_minimum_booking_count(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $product = $this->product($owner, 'Coffee');
+
+        // Only 2 bookings — below MIN_BOOKINGS_FOR_ROOM_TYPE_COMPARISON (3).
+        foreach ([10.0, 10.0] as $amount) {
+            $booking = $this->booking($owner, $room, '2026-09-10');
+            $this->bookingProductSale($owner, $booking, $product, '2026-09-10 10:00:00', 1, $amount);
+        }
+
+        $result = $this->products->productSpendByRoomType($owner, $this->period('2026-09-01', '2026-09-30'));
+
+        $this->assertSame([], $result);
+    }
+
+    public function test_product_spend_by_room_type_excludes_sales_with_no_booking(): void
+    {
+        $owner = $this->owner();
+        $product = $this->product($owner, 'Coffee');
+
+        // A standalone walk-in sale with no booking_id — never counted here.
+        $this->productSale($owner, $product, '2026-09-10 10:00:00', 1, 10.0);
+
+        $result = $this->products->productSpendByRoomType($owner, $this->period('2026-09-01', '2026-09-30'));
+
+        $this->assertSame([], $result);
     }
 
     // --- empty period ---

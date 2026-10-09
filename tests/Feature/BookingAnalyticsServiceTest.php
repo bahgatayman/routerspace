@@ -126,7 +126,7 @@ class BookingAnalyticsServiceTest extends TestCase
         $breakdown = $this->bookingAnalytics->statusBreakdown($owner, $this->period('2026-08-01', '2026-08-31'));
 
         $this->assertSame([
-            'pending' => 0, 'confirmed' => 0, 'checked_in' => 0,
+            'pending' => 0, 'confirmed' => 0, 'checked_in' => 0, 'open' => 0,
             'completed' => 2, 'cancelled' => 1, 'no_show' => 0,
         ], $breakdown);
     }
@@ -229,5 +229,39 @@ class BookingAnalyticsServiceTest extends TestCase
         $peak = $this->bookingAnalytics->peakHours($owner, $this->period('2026-08-01', '2026-08-31'));
 
         $this->assertSame([9 => 2, 14 => 1], $peak);
+    }
+
+    // --- peakHoursByDayOfWeek ---
+
+    public function test_peak_hours_by_day_of_week_groups_by_day_and_hour_excluding_cancelled_and_no_show(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner);
+
+        // 2026-08-10 is a Monday (dow 1), 2026-08-11 a Tuesday (dow 2), 2026-08-12 a Wednesday (dow 3).
+        $this->booking($owner, $room, '2026-08-10', '09:15', '10:00', 0.75, 40);
+        $this->booking($owner, $room, '2026-08-10', '09:45', '10:15', 0.5, 30);
+        $this->booking($owner, $room, '2026-08-11', '14:00', '15:00', 1, 50);
+        $this->booking($owner, $room, '2026-08-11', '18:00', '19:00', 1, 50, 'cancelled');
+        $this->booking($owner, $room, '2026-08-12', '10:00', '11:00', 1, 50, 'no_show');
+
+        $grid = $this->bookingAnalytics->peakHoursByDayOfWeek($owner, $this->period('2026-08-01', '2026-08-31'));
+
+        $this->assertCount(7, $grid);
+        $this->assertCount(24, $grid[1]);
+        $this->assertSame(2, $grid[1][9]);
+        $this->assertSame(1, $grid[2][14]);
+        // Cancelled and no_show never contribute a count anywhere in the grid.
+        $this->assertSame(0, $grid[2][18]);
+        $this->assertSame(0, $grid[3][10]);
+    }
+
+    public function test_peak_hours_by_day_of_week_is_zero_filled_with_no_bookings(): void
+    {
+        $owner = $this->owner();
+
+        $grid = $this->bookingAnalytics->peakHoursByDayOfWeek($owner, $this->period('2026-08-01', '2026-08-31'));
+
+        $this->assertSame(array_fill(0, 7, array_fill(0, 24, 0)), $grid);
     }
 }

@@ -189,6 +189,30 @@ class DashboardAnalyticsTest extends TestCase
         $response->assertSee(__('app.dashboard.no_product_sales_for_period'));
     }
 
+    public function test_dashboard_hides_smart_insights_when_nothing_qualifies(): void
+    {
+        $owner = $this->owner(['workspace', 'booking']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertDontSee(__('app.dashboard.smart_insights'));
+    }
+
+    public function test_dashboard_shows_smart_insights_with_a_revenue_change_sentence(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner(['sales']);
+        $product = $this->product($owner);
+        $this->productSale($owner, $product, '2026-08-20 10:00:00', 1, 100.0); // current 30d window
+        $this->productSale($owner, $product, '2026-07-10 10:00:00', 1, 50.0); // previous 30d window
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard?period=30d');
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.smart_insights'));
+    }
+
     public function test_needs_attention_reflects_unread_notification_count(): void
     {
         $owner = $this->owner();

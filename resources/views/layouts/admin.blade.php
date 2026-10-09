@@ -1,21 +1,23 @@
 <!DOCTYPE html>
 @php $locale = app()->getLocale(); $isRtl = $locale === 'ar'; @endphp
-<html lang="{{ $locale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}" data-theme="light" data-server-now="{{ now()->getTimestampMs() }}">
+{{-- The Super Admin keeps its original light shell (dark-blue sidebar); data-theme-lock stops panel.js from applying a saved dark theme. --}}
+<html lang="{{ $locale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}" data-theme="light" data-theme-lock="light" data-server-now="{{ now()->getTimestampMs() }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    {{-- Resolve the theme (light | dark | system) and sidebar state before first paint — no flash. --}}
-    <script>(function(){var r=document.documentElement;try{var p=localStorage.getItem('ls-theme')||'system';var d=p==='dark'||(p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);r.dataset.theme=d?'dark':'light';r.dataset.themePref=p;if(localStorage.getItem('ls-nav')==='collapsed')r.dataset.nav='collapsed';}catch(e){}})();</script>
-    <meta name="color-scheme" content="light dark">
-    <title>Link Space Admin - @yield('page-title', __('app.nav.dashboard'))</title>
+    <title>Link Space Panel Admin - @yield('page-title', __('app.nav.dashboard'))</title>
     @include('partials.favicon')
     @include('partials.theme')
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-    {{-- Same design system as the owner app — public/css/panel.css + components/ui. --}}
+    {{-- Owner design system (ls-* classes) for the admin page content. --}}
     <link rel="stylesheet" href="/css/panel.css?v={{ @filemtime(public_path('css/panel.css')) }}">
+    @if($isRtl)
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Cairo', sans-serif; }</style>
+    @endif
     @php
         $lsI18n = [
             'h' => __('app.ui.unit_h'), 'm' => __('app.ui.unit_m'), 's' => __('app.ui.unit_s'),
@@ -24,137 +26,180 @@
         ];
     @endphp
     <script>window.LS_I18N = @json($lsI18n);</script>
-    <style>html, body { height: 100%; } .app-shell { height: 100vh; height: 100dvh; overflow: hidden; }</style>
+    <style>
+        /* App shell pinned to the viewport — see layouts/app.blade.php. */
+        html, body { height: 100%; }
+        .app-shell {
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+        }
+    </style>
     <script src="/js/panel.js?v={{ @filemtime(public_path('js/panel.js')) }}" defer></script>
     @stack('head')
 </head>
-<body class="ls-app ls-admin antialiased">
-@php
-    $admin = auth('admin')->user();
-    $pendingRenewals = \App\Models\SubscriptionRequest::pending()->count();
-    $navGroups = [
-        ['label' => __('app.admin_platform.nav.overview'), 'items' => [
-            ['href' => '/admin/dashboard', 'active' => request()->is('admin/dashboard'), 'icon' => 'home', 'label' => __('app.nav.dashboard')],
-        ]],
-        ['label' => __('app.admin_platform.nav.platform'), 'items' => [
-            ['href' => '/admin/workspaces', 'active' => request()->is('admin/workspaces*', 'admin/owners*'), 'icon' => 'building', 'label' => __('app.admin_platform.nav.workspaces')],
-            ['href' => '/admin/locations', 'active' => request()->is('admin/locations*'), 'icon' => 'pin', 'label' => __('app.admin_platform.nav.locations')],
-            ['href' => '/admin/rooms', 'active' => request()->is('admin/rooms*'), 'icon' => 'door', 'label' => __('app.admin_platform.nav.rooms')],
-            ['href' => '/admin/bookings', 'active' => request()->is('admin/bookings*'), 'icon' => 'calendar', 'label' => __('app.nav.bookings')],
-        ]],
-        ['label' => __('app.admin_platform.nav.money'), 'items' => [
-            ['href' => '/admin/financial', 'active' => request()->is('admin/financial*'), 'icon' => 'money', 'label' => __('app.nav.financial')],
-            ['href' => '/admin/plans', 'active' => request()->is('admin/plans*'), 'icon' => 'tag', 'label' => __('app.nav.plans')],
-            ['href' => route('admin.subscription-requests.index'), 'active' => request()->is('admin/subscription-requests*'), 'icon' => 'receipt', 'label' => __('app.subscription.admin_requests'), 'count' => $pendingRenewals],
-        ]],
-        ['label' => __('app.admin_platform.nav.engage'), 'items' => [
-            ['href' => '/admin/notifications', 'active' => request()->is('admin/notifications*'), 'icon' => 'bell', 'label' => __('app.nav.notifications')],
-            ['href' => '/admin/features', 'active' => request()->is('admin/features*'), 'icon' => 'gear', 'label' => __('app.nav.features')],
-        ]],
-    ];
-    $themeOptions = [
-        'light' => ['icon' => 'sun', 'label' => __('app.ui.theme_light')],
-        'dark' => ['icon' => 'moon', 'label' => __('app.ui.theme_dark')],
-        'system' => ['icon' => 'monitor', 'label' => __('app.ui.theme_system')],
-    ];
-@endphp
-    <a href="#main" class="ls-skip">{{ __('app.ui.skip_to_content') }}</a>
-    <div class="app-shell ls-shell">
-        <div id="sidebar-overlay" class="ls-side-scrim"></div>
-
-        <aside id="sidebar" class="ls-side" aria-label="{{ __('app.ui.main_navigation') }}">
-            <div class="ls-brand">
-                <a href="/admin/dashboard" class="ls-brand-logo" aria-label="Link Space Admin — {{ __('app.nav.dashboard') }}">
-                    <img src="/logo.webp" alt="Link Space Panel">
-                </a>
-                <span class="ls-admin-pill">Admin</span>
-                <button type="button" class="ls-iconbtn ls-collapse" data-ls-nav-toggle aria-controls="sidebar" aria-expanded="true" aria-label="{{ __('app.ui.collapse_sidebar') }}" title="{{ __('app.ui.collapse_sidebar') }}"><x-ui.icon name="sidebar" /></button>
-                <button type="button" class="ls-iconbtn ls-side-close" data-ls-side-close aria-label="{{ __('app.ui.close_menu') }}"><x-ui.icon name="x" /></button>
+<body class="ls-admin bg-[#f8fafc] font-sans antialiased">
+    @php
+        $navItem = fn (bool $active) => 'flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/10 transition '.($active ? 'bg-white/10 border-l-4 border-red-500' : '');
+        $pendingRenewals = \App\Models\SubscriptionRequest::pending()->count();
+    @endphp
+    <div class="app-shell flex flex-col lg:flex-row">
+        <!-- Mobile header -->
+        <div class="lg:hidden shrink-0 flex items-center justify-between bg-brand-900 px-4 py-3">
+            <div class="flex items-center gap-2">
+                <img src="/logo.webp" alt="Link Space Panel" class="h-7 w-auto brightness-0 invert">
+                <span class="text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded">Admin</span>
             </div>
-            <nav class="nav-scroll ls-nav">
-                @foreach ($navGroups as $group)
-                    <div class="ls-nav-label">{{ $group['label'] }}</div>
-                    @foreach ($group['items'] as $item)
-                        <a href="{{ $item['href'] }}" class="ls-nav-item {{ $item['active'] ? 'is-active' : '' }}" title="{{ $item['label'] }}" @if($item['active']) aria-current="page" @endif>
-                            <x-ui.icon :name="$item['icon']" />
-                            <span class="ls-trunc">{{ $item['label'] }}</span>
-                            @if (($item['count'] ?? 0) > 0)<b class="ls-nav-count ls-nav-count--alert">{{ $item['count'] }}</b>@endif
-                        </a>
-                    @endforeach
-                @endforeach
+            <div class="flex items-center gap-2">
+                <button id="menu-toggle" type="button" class="text-white p-2 focus:outline-none" aria-label="{{ __('app.ui.open_menu') }}">
+                    <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Sidebar overlay (mobile) -->
+        <div id="sidebar-overlay" class="lg:hidden fixed inset-0 bg-black/50 z-10 hidden" onclick="closeSidebar()"></div>
+
+        <!-- Sidebar -->
+        <aside id="sidebar" class="fixed lg:static inset-y-0 {{ $isRtl ? 'right-0' : 'left-0' }} z-20 w-[260px] bg-gradient-to-b from-brand-900 to-brand-800 text-white flex flex-col shrink-0 transition-transform duration-300 {{ $isRtl ? 'translate-x-full' : '-translate-x-full' }} lg:translate-x-0">
+            <div class="shrink-0 flex flex-col items-center px-6 py-6 border-b border-white/10">
+                <img src="/logo.webp" alt="Link Space Panel" class="h-8 w-auto brightness-0 invert">
+                <span class="text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded mt-2">Admin</span>
+            </div>
+            <nav class="nav-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
+                <a href="/admin/dashboard" class="{{ $navItem(request()->is('admin/dashboard')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                    </svg>
+                    <span>{{ __('app.nav.dashboard') }}</span>
+                </a>
+                <a href="/admin/workspaces" class="{{ $navItem(request()->is('admin/workspaces*', 'admin/owners*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                    </svg>
+                    <span>{{ __('app.admin_platform.nav.workspaces') }}</span>
+                </a>
+                <a href="/admin/notifications" class="{{ $navItem(request()->is('admin/notifications*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                    </svg>
+                    <span>{{ __('app.nav.notifications') }}</span>
+                </a>
+                <a href="/admin/features" class="{{ $navItem(request()->is('admin/features*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    </svg>
+                    <span>{{ __('app.nav.features') }}</span>
+                </a>
+                <a href="/admin/locations" class="{{ $navItem(request()->is('admin/locations*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <span>{{ __('app.admin_platform.nav.locations') }}</span>
+                </a>
+                <a href="/admin/rooms" class="{{ $navItem(request()->is('admin/rooms*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 21V4a1 1 0 011-1h10a1 1 0 011 1v17M3 21h18M14 12h.01"/>
+                    </svg>
+                    <span>{{ __('app.admin_platform.nav.rooms') }}</span>
+                </a>
+                <a href="/admin/bookings" class="{{ $navItem(request()->is('admin/bookings*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    <span>{{ __('app.nav.bookings') }}</span>
+                </a>
+                <a href="/admin/plans" class="{{ $navItem(request()->is('admin/plans*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                    </svg>
+                    <span>{{ __('app.nav.plans') }}</span>
+                </a>
+                <a href="{{ route('admin.subscription-requests.index') }}" class="{{ $navItem(request()->is('admin/subscription-requests*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                    </svg>
+                    <span class="flex-1">{{ __('app.subscription.admin_requests') }}</span>
+                    @if ($pendingRenewals > 0)
+                        <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold text-white bg-red-500 rounded-full">{{ $pendingRenewals }}</span>
+                    @endif
+                </a>
+                <a href="/admin/financial" class="{{ $navItem(request()->is('admin/financial*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span>{{ __('app.nav.financial') }}</span>
+                </a>
             </nav>
-            <div class="ls-side-foot">
-                <x-ui.avatar :name="$admin->name" size="sm" />
-                <span class="ls-who">
-                    <b class="ls-trunc">{{ $admin->name }}</b>
-                    <span class="ls-trunc">{{ __('app.admin.admin_panel') }}</span>
-                </span>
+            <div class="px-4 py-4 border-t border-white/10">
+                <p class="text-sm text-gray-400 truncate">{{ auth('admin')->user()->name }}</p>
                 <form method="POST" action="/admin/logout">
                     @csrf
-                    <button type="submit" class="ls-iconbtn ls-admin-logout" title="{{ __('app.nav.logout') }}" aria-label="{{ __('app.nav.logout') }}"><x-ui.icon name="logout" /></button>
+                    <button type="submit" class="text-xs text-red-400 hover:text-red-300 mt-1">{{ __('app.nav.logout') }}</button>
                 </form>
             </div>
         </aside>
 
-        <div class="ls-sheet">
-            <header class="ls-topbar">
-                <button id="menu-toggle" type="button" class="ls-iconbtn ls-menu-btn" data-ls-side-open aria-controls="sidebar" aria-expanded="false" aria-label="{{ __('app.ui.open_menu') }}"><x-ui.icon name="menu" /></button>
-                <nav class="ls-crumbs" aria-label="{{ __('app.ui.breadcrumb') }}">
-                    <a href="/admin/dashboard" class="ls-crumb-home">{{ __('app.admin.admin_panel') }}</a>
-                    @hasSection('crumb-parent')
-                        <span class="ls-crumb-sep" aria-hidden="true">/</span>
-                        <span class="ls-crumb-home ls-trunc">@yield('crumb-parent')</span>
-                    @endif
-                    <span class="ls-crumb-sep" aria-hidden="true">/</span>
-                    <span class="ls-crumb-now ls-trunc" aria-current="page">@yield('page-title', __('app.nav.dashboard'))</span>
-                </nav>
-                <div class="ls-topbar-spacer"></div>
-
-                <div class="ls-menu-wrap">
-                    <button type="button" class="ls-iconbtn" data-ls-menu="theme-menu" aria-haspopup="true" aria-expanded="false" aria-label="{{ __('app.ui.theme') }}" title="{{ __('app.ui.theme') }}">
-                        <x-ui.icon name="sun" data-ls-theme-icon="light" />
-                        <x-ui.icon name="moon" data-ls-theme-icon="dark" hidden />
-                    </button>
-                    <div id="theme-menu" class="ls-pop" role="menu" aria-label="{{ __('app.ui.theme') }}" hidden>
-                        <div class="ls-menu">
-                            <div class="ls-menu-label" aria-hidden="true">{{ __('app.ui.theme') }}</div>
-                            @foreach ($themeOptions as $key => $opt)
-                                <button type="button" class="ls-menu-item" role="menuitemradio" aria-checked="false" data-ls-theme-option="{{ $key }}">
-                                    <x-ui.icon :name="$opt['icon']" />
-                                    <span>{{ $opt['label'] }}</span>
-                                    <x-ui.icon name="check" class="ls-menu-check" />
-                                </button>
-                            @endforeach
-                        </div>
-                    </div>
-                </div>
-
-                <div class="ls-lang" role="group" aria-label="{{ __('app.ui.language') }}">
-                    <form method="POST" action="{{ route('language.switch', 'en') }}">@csrf<button type="submit" class="{{ $isRtl ? '' : 'is-on' }}" lang="en" aria-pressed="{{ $isRtl ? 'false' : 'true' }}">EN</button></form>
-                    <form method="POST" action="{{ route('language.switch', 'ar') }}">@csrf<button type="submit" class="{{ $isRtl ? 'is-on' : '' }}" lang="ar" aria-pressed="{{ $isRtl ? 'true' : 'false' }}">عربي</button></form>
+        <!-- Main -->
+        <div class="flex-1 flex flex-col min-w-0 min-h-0">
+            <header class="shrink-0 bg-white shadow-sm px-4 lg:px-6 py-4 flex items-center justify-between">
+                <h1 class="text-lg font-semibold text-gray-800 truncate">@yield('page-title', __('app.nav.dashboard'))</h1>
+                <div class="flex items-center gap-3">
+                    <form method="POST" action="{{ route('language.switch', $isRtl ? 'en' : 'ar') }}" class="flex items-center gap-1.5">
+                        @csrf
+                        <button type="submit" class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none {{ $isRtl ? 'bg-indigo-600' : 'bg-gray-300' }}" role="switch" aria-checked="{{ $isRtl ? 'true' : 'false' }}">
+                            <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out {{ $isRtl ? 'translate-x-[18px]' : 'translate-x-[3px]' }}"></span>
+                        </button>
+                        <span class="text-xs font-medium {{ $isRtl ? 'text-indigo-600' : 'text-gray-500' }}">{{ $isRtl ? 'AR' : 'EN' }}</span>
+                    </form>
+                    <span class="text-sm text-gray-500 truncate">{{ __('app.admin.admin_panel') }}</span>
                 </div>
             </header>
 
-            <main id="main" class="ls-main flex-1 min-h-0 overflow-y-auto" tabindex="-1">
-                <div class="ls-page ls-admin-page">
-                    @if (session('error'))
-                        <x-ui.banner tone="danger">{{ session('error') }}</x-ui.banner>
-                    @endif
-                    @if ($errors->any() && ! View::hasSection('handles-errors'))
-                        <x-ui.banner tone="danger">{{ $errors->first() }}</x-ui.banner>
-                    @endif
-                    @yield('content')
-                </div>
+            <main class="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
+                @if (session('success'))
+                    <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6" role="status">
+                        {{ session('success') }}
+                    </div>
+                @endif
+                @if (session('error'))
+                    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6" role="alert">
+                        {{ session('error') }}
+                    </div>
+                @endif
+
+                @yield('content')
             </main>
         </div>
     </div>
 
-    @if (session('success'))
-        <script>document.addEventListener('DOMContentLoaded', () => window.LS && LS.toast(@json(session('success')), { tone: 'ok' }));</script>
-        <noscript><p role="status">{{ session('success') }}</p></noscript>
-    @endif
+    {{-- Confirm dialog for forms marked data-confirm="message" (plan enable/disable/delete). --}}
+    <x-ui.modal id="ls-confirm" :title="__('app.admin_platform.confirm_title')" size="narrow">
+        <div class="ls-field" hidden>
+            <label class="ls-label" for="ls-confirm-reason">{{ __('app.admin_platform.reason') }} <span class="ls-opt">({{ __('app.admin_platform.optional') }})</span></label>
+            <textarea id="ls-confirm-reason" class="ls-textarea" rows="2" maxlength="500"></textarea>
+        </div>
+        <x-slot:footer>
+            <button type="button" class="ls-btn ls-btn--secondary" data-ls-close>{{ __('app.common.cancel') }}</button>
+            <button type="button" id="ls-confirm-ok" class="ls-btn ls-btn--danger">{{ __('app.common.confirm') }}</button>
+        </x-slot:footer>
+    </x-ui.modal>
 
     <script>
+    function closeSidebar() {
+        document.getElementById('sidebar').classList.add('{{ $isRtl ? "translate-x-full" : "-translate-x-full" }}');
+        document.getElementById('sidebar-overlay').classList.add('hidden');
+    }
+    document.getElementById('menu-toggle').addEventListener('click', function() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        sidebar.classList.toggle('{{ $isRtl ? "translate-x-full" : "-translate-x-full" }}');
+        overlay.classList.toggle('hidden');
+    });
+
     // Whole-row navigation for rows marked class="row-link" data-href="…" (each row also holds a real link).
     document.querySelectorAll('tr.row-link').forEach(row => {
         const ignore = e => e.target.closest('a, button, form, input, select, label');
@@ -163,12 +208,12 @@
             if (e.metaKey || e.ctrlKey) window.open(row.dataset.href, '_blank', 'noopener'); else location.href = row.dataset.href;
         });
     });
-    // Confirm any form marked data-confirm="message" with the design-system dialog.
+
+    // Confirm any form marked data-confirm="message" with the dialog above.
     document.addEventListener('submit', e => {
         const f = e.target;
-        if (!f.dataset || !f.dataset.confirm || f.dataset.confirmed) return;
+        if (!f.dataset || !f.dataset.confirm || f.dataset.confirmed || !window.LS) return;
         e.preventDefault();
-        const dlg = document.getElementById('ls-confirm');
         document.getElementById('ls-confirm-sub').textContent = f.dataset.confirm;
         const reason = document.getElementById('ls-confirm-reason');
         reason.closest('.ls-field').hidden = !f.querySelector('input[name="reason"]');
@@ -186,17 +231,6 @@
         LS.open('ls-confirm');
     });
     </script>
-
-    <x-ui.modal id="ls-confirm" :title="__('app.admin_platform.confirm_title')" size="narrow">
-        <div class="ls-field" hidden>
-            <label class="ls-label" for="ls-confirm-reason">{{ __('app.admin_platform.reason') }} <span class="ls-opt">({{ __('app.admin_platform.optional') }})</span></label>
-            <textarea id="ls-confirm-reason" class="ls-textarea" rows="2" maxlength="500"></textarea>
-        </div>
-        <x-slot:footer>
-            <button type="button" class="ls-btn ls-btn--secondary" data-ls-close>{{ __('app.common.cancel') }}</button>
-            <button type="button" id="ls-confirm-ok" class="ls-btn ls-btn--danger">{{ __('app.common.confirm') }}</button>
-        </x-slot:footer>
-    </x-ui.modal>
 
     @stack('scripts')
 </body>

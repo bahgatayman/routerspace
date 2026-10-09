@@ -488,6 +488,10 @@ return [
         'metric_units' => 'Units Sold',
         'metric_revenue' => 'Revenue',
         'metric_orders' => 'Orders',
+        'metric_other' => 'Other',
+        'view_ranking' => 'Ranking',
+        'view_share' => 'Share',
+        'product_revenue_share' => 'Revenue Share by Product',
         'product_insights' => 'Product Insights',
         'no_product_sales_for_period' => 'No product sales in this period.',
         'no_products_no_sales' => 'No product sales to show yet.',
@@ -498,6 +502,32 @@ return [
         'insight_no_sales' => ':name had no sales this period.',
         'no_low_stock_products' => 'No products are running low right now.',
         'no_insights_yet' => 'Insights will appear once there is enough sales data.',
+        'insight_fastest_selling' => ':name is your fastest-selling product, selling about :perDay a day.',
+        'insight_declining_sales' => ':name is down ج.م :amount vs the previous period.',
+
+        // Smart Insights (pooled from every analytics source below)
+        'smart_insights' => 'What You Should Know',
+        'no_smart_insights_yet' => 'Check back once there\'s more activity this period — we\'ll surface what matters here.',
+        'change_up' => 'up',
+        'change_down' => 'down',
+        'insight_revenue_change' => 'Revenue is :direction :percent% compared with the previous :period.',
+        'insight_busiest_time' => 'Your busiest time is usually :day around :start–:end.',
+        'insight_room_disagreement' => ':utilizationRoom has the highest utilization, but :revenueRoom earns more per available hour.',
+        'insight_returning_customers' => ':percent% of your customers returned during this period.',
+        'insight_room_type_product_spend' => 'Customers booking :topType spend :percent% more on products than customers using :otherType.',
+
+        // Room Performance (replaces the old single-metric Room Utilization card)
+        'room_performance' => 'Room Performance',
+        'revenue_per_open_hour' => 'EGP / available hour',
+
+        // Peak Hours heatmap (replaces the old flat 24-hour Peak Hours bar)
+        'peak_hours_heatmap' => 'Peak Hours',
+        'no_heatmap_data' => 'No booking activity yet for this period.',
+
+        // Customer Insights
+        'returning_customers' => 'Returning Customers',
+        'avg_spend_per_customer' => 'Avg. Spend / Customer',
+        'not_enough_data' => 'Not enough data yet',
     ],
 
     /*

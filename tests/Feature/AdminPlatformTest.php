@@ -265,6 +265,43 @@ class AdminPlatformTest extends TestCase
         $this->asAdmin()->get("/admin/owners/{$a->id}/bookings?workspace={$bws->id}")->assertNotFound();
     }
 
+    public function test_business_bookings_page_shows_a_status_breakdown_chart_scoped_to_the_owner(): void
+    {
+        [$a] = $this->seedPlatform();
+
+        $res = $this->asAdmin()->get("/admin/owners/{$a->id}/bookings?preset=this_month")->assertOk();
+        $res->assertSee(__('app.admin_platform.chart.status_title'));
+
+        // Alpha's seeded bookings this period: 3 completed, 1 confirmed, 1 cancelled, 1 no_show.
+        // Order follows BookingController::STATUSES (pending, confirmed, checked_in,
+        // open, completed, cancelled, no_show), zero-count statuses omitted.
+        $chart = $res->viewData('statusChart');
+        $this->assertSame('doughnut', $chart['type']);
+        $this->assertSame(
+            ['Confirmed', 'Completed', 'Cancelled', 'No-show'],
+            $chart['labels'],
+        );
+        $this->assertSame([1, 3, 1, 1], $chart['datasets'][0]['data']);
+    }
+
+    public function test_business_products_page_shows_analytics_only_when_the_owner_has_itemized_product_sales(): void
+    {
+        [$a] = $this->seedPlatform();
+
+        // seedPlatform()'s one Sale for Alpha has no SaleItem line — no per-product
+        // breakdown exists yet, so the analytics section stays hidden.
+        $this->asAdmin()->get("/admin/owners/{$a->id}/products?preset=this_month")->assertOk()
+            ->assertDontSee(__('app.dashboard.product_sales_trend'));
+
+        $product = Product::create(['owner_id' => $a->id, 'name' => 'Alpha Coffee', 'type' => 'product', 'price' => 10, 'is_active' => true]);
+        $sale = Sale::create(['owner_id' => $a->id, 'status' => 'completed', 'sold_at' => '2026-10-12 10:00:00', 'subtotal' => 40, 'total' => 40]);
+        $sale->items()->create(['product_id' => $product->id, 'name' => 'Alpha Coffee', 'unit_price' => 10, 'quantity' => 4, 'line_total' => 40]);
+
+        $res = $this->asAdmin()->get("/admin/owners/{$a->id}/products?preset=this_month")->assertOk();
+        $res->assertSee(__('app.dashboard.product_sales_trend'))->assertSee('Alpha Coffee');
+        $this->assertSame(4, $res->viewData('productSummary')['totalUnits']);
+    }
+
     // ------------------------------------------------------------------ rooms
 
     public function test_platform_rooms_list_filters_and_detail(): void

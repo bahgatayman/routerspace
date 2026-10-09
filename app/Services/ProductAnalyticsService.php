@@ -28,6 +28,9 @@ use Illuminate\Support\Collection;
  */
 class ProductAnalyticsService
 {
+    /** A room type needs at least this many product-bearing bookings before its per-booking average is trustworthy enough to compare against another type. */
+    public const MIN_BOOKINGS_FOR_ROOM_TYPE_COMPARISON = 3;
+
     /**
      * @return array{topProduct: ?array, totalUnits: int, productRevenue: float, avgOrderValue: ?float, orderCount: int, lowStockCount: int}
      */
@@ -109,6 +112,44 @@ class ProductAnalyticsService
             ->all();
     }
 
+    /**
+     * Product revenue per completed booking, grouped by the booked room's
+     * type — join sale_items -> sales -> bookings -> rooms via
+     * sales.booking_id (a standalone walk-in sale with no booking_id is
+     * excluded by the inner join, the same treatment baseQuery() already
+     * gives a deleted product's line). A room type with too few
+     * product-bearing bookings is dropped entirely rather than returned
+     * with a shaky average (see MIN_BOOKINGS_FOR_ROOM_TYPE_COMPARISON).
+     *
+     * @return array<int, array{roomType: string, productRevenuePerBooking: float, bookingCount: int}>
+     */
+    public function productSpendByRoomType(Owner $owner, AnalyticsPeriod $period): array
+    {
+        // Built directly rather than via baseQuery() — Sale::completed()
+        // filters on the unqualified 'status' column, which becomes
+        // ambiguous once 'bookings' (which also has a 'status' column) is
+        // joined in below; 'sales.status' sidesteps that.
+        return Sale::where('sales.owner_id', $owner->id)
+            ->where('sales.status', 'completed')
+            ->whereBetween('sales.sold_at', [$period->start, $period->end])
+            ->join('sale_items', 'sale_items.sale_id', '=', 'sales.id')
+            ->join('products', 'products.id', '=', 'sale_items.product_id')
+            ->where('products.type', 'product')
+            ->join('bookings', 'bookings.id', '=', 'sales.booking_id')
+            ->join('rooms', 'rooms.id', '=', 'bookings.room_id')
+            ->selectRaw('rooms.type as room_type, SUM(sale_items.line_total) as revenue, COUNT(DISTINCT bookings.id) as bookings')
+            ->groupBy('rooms.type')
+            ->get()
+            ->map(fn ($row) => [
+                'roomType' => $row->room_type,
+                'bookingCount' => (int) $row->bookings,
+                'productRevenuePerBooking' => $row->bookings > 0 ? round((float) $row->revenue / (int) $row->bookings, 2) : 0.0,
+            ])
+            ->filter(fn (array $row) => $row['bookingCount'] >= self::MIN_BOOKINGS_FOR_ROOM_TYPE_COMPARISON)
+            ->values()
+            ->all();
+    }
+
     /** @return Collection<int, Product> */
     public function lowStockProducts(Owner $owner): Collection
     {
@@ -145,14 +186,36 @@ class ProductAnalyticsService
             }
 
             $previous = collect($this->topProducts($owner, $period->previous()))->keyBy('product_id');
-            $biggestIncrease = collect($top)
-                ->map(fn ($row) => [...$row, 'delta' => $row['revenue'] - (float) ($previous[$row['product_id']]['revenue'] ?? 0)])
-                ->sortByDesc('delta')
-                ->first();
+            $withDelta = collect($top)->map(fn ($row) => [
+                ...$row,
+                'delta' => $row['revenue'] - (float) ($previous[$row['product_id']]['revenue'] ?? 0),
+            ]);
+
+            $biggestIncrease = $withDelta->sortByDesc('delta')->first();
             if ($biggestIncrease && $biggestIncrease['delta'] > 0) {
                 $insights[] = [
                     'type' => 'biggest_increase',
                     'text' => __('app.dashboard.insight_biggest_increase', ['name' => $biggestIncrease['name'], 'amount' => number_format($biggestIncrease['delta'], 2)]),
+                ];
+            }
+
+            $biggestDecrease = $withDelta->sortBy('delta')->first();
+            if ($biggestDecrease && $biggestDecrease['delta'] < 0) {
+                $insights[] = [
+                    'type' => 'declining_sales',
+                    'text' => __('app.dashboard.insight_declining_sales', ['name' => $biggestDecrease['name'], 'amount' => number_format(abs($biggestDecrease['delta']), 2)]),
+                ];
+            }
+
+            // Units sold per day open — a product can rank low on total units
+            // yet still be "fastest selling" over a short period; not the
+            // same question biggest-revenue/biggest-seller already answer.
+            $daysInPeriod = max(1, $period->start->diffInDays($period->end) + 1);
+            $fastest = collect($top)->sortByDesc(fn ($row) => $row['units'] / $daysInPeriod)->first();
+            if ($fastest && $fastest['units'] / $daysInPeriod > 0) {
+                $insights[] = [
+                    'type' => 'fastest_selling',
+                    'text' => __('app.dashboard.insight_fastest_selling', ['name' => $fastest['name'], 'perDay' => round($fastest['units'] / $daysInPeriod, 1)]),
                 ];
             }
         }

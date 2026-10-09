@@ -535,6 +535,18 @@ html[dir="rtl"] .ls-select[dir="ltr"] { background-position: calc(100% - 18px) 5
 .ls-meter.is-warn > i { background: var(--color-warning) !important; }
 .ls-meter.is-danger > i { background: var(--color-danger) !important; }
 
+/* Day x hour "peak hours" heatmap — 7 day columns, a narrow hour-label gutter; cell
+   intensity is set inline per-cell via color-mix() against --color-chart, so only
+   the neutral/empty state lives here. Rows stack vertically, never horizontally,
+   so this never needs an overflow-x-auto wrapper. */
+.ls-heatmap { display: flex; flex-direction: column; gap: 2px; }
+.ls-heatmap-row { display: grid; grid-template-columns: 1.75rem repeat(7, 1fr); gap: 2px; }
+.ls-heatmap-row--header { margin-bottom: 2px; }
+.ls-heatmap-cell { min-height: 13px; border-radius: 2px; background: var(--color-border-subtle); }
+.ls-heatmap-cell--label, .ls-heatmap-cell--header { background: transparent; font-size: 10px; color: var(--color-text-muted); }
+.ls-heatmap-cell--label { display: flex; align-items: center; justify-content: flex-end; padding-inline-end: 4px; }
+.ls-heatmap-cell--header { display: flex; align-items: center; justify-content: center; }
+
 .ls-table-wrap { overflow-x: auto; }
 .ls-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ls-table th { text-align: start; font-weight: var(--fw-medium); font-size: 12.5px; color: var(--color-text-muted); padding: 0 var(--space-4); height: 40px; border-bottom: 1px solid var(--color-border); white-space: nowrap; background: var(--color-surface-subtle); }
@@ -1723,6 +1735,8 @@ a.ls-pager-btn:hover { background: var(--color-hover); color: var(--color-text);
 .ls-plan-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; padding-top: var(--space-3); border-top: 1px solid var(--color-border-subtle); }
 .ls-plan-actions form { margin: 0; }
 .ls-adm-form .ls-dialog-foot { border-top: 1px solid var(--color-border-subtle); }
+.ls-admin .ls-dialog-foot { flex-wrap: wrap; }
+.ls-admin .ls-dialog-foot form { margin: 0; }
 .ls-adm-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: var(--space-4); }
 .ls-adm-fieldset { border: 0; margin: 0; padding: 0; }
 .ls-adm-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: var(--space-2); }

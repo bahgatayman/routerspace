@@ -22,6 +22,34 @@
         @include('admin.partials.stat', ['label' => $t('kpi.sales'), 'value' => Money::format($stats['sales']), 'tone' => 'revenue', 'help' => $t('help.sales')])
     </div>
 
+    @php $hasProductSales = collect($productSeries)->sum('units') > 0; @endphp
+    @if ($hasProductSales)
+        <div class="ls-akpis">
+            @include('admin.partials.stat', ['label' => __('app.dashboard.top_selling_product'), 'value' => $productSummary['topProduct']['name'] ?? '—'])
+            @include('admin.partials.stat', ['label' => __('app.dashboard.total_units_sold'), 'value' => number_format($productSummary['totalUnits'])])
+            @include('admin.partials.stat', ['label' => __('app.dashboard.avg_product_order_value'), 'value' => $productSummary['avgOrderValue'] !== null ? Money::format($productSummary['avgOrderValue']) : '—'])
+            @include('admin.partials.stat', ['label' => __('app.dashboard.product_orders'), 'value' => number_format($productSummary['orderCount'])])
+        </div>
+
+        <div class="ls-adm-grid">
+            @include('admin.partials.chart', ['id' => 'biz-product-trend', 'title' => __('app.dashboard.product_sales_trend'), 'spec' => $productTrendChart, 'height' => 240])
+            @include('admin.partials.chart', ['id' => 'biz-top-products', 'title' => __('app.dashboard.top_selling_products'), 'spec' => $topProductsChart, 'height' => 240])
+        </div>
+
+        @if (! empty($productInsights))
+            <section class="ls-card">
+                <div class="ls-card-head"><h2 class="ls-card-title">{{ __('app.dashboard.product_insights') }}</h2></div>
+                <div class="ls-card-body">
+                    <ul style="margin: 0; padding-inline-start: 1.25rem;">
+                        @foreach ($productInsights as $insight)
+                            <li style="margin-bottom: var(--space-2, 8px);">{{ $insight['text'] }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            </section>
+        @endif
+    @endif
+
     <form method="GET" class="ls-adm-filters">
         <div class="ls-field ls-filter-field ls-filter-field--grow">
             <label class="ls-label" for="f-q">{{ __('app.common.search') }}</label>
