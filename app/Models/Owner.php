@@ -167,9 +167,25 @@ class Owner extends Authenticatable
             ->withTimestamps();
     }
 
+    /**
+     * Active feature keys, loaded once per model instance (i.e. once per request:
+     * the auth guard keeps one Owner instance) instead of one query per check —
+     * the feature middleware, sidebar and shared props ask 10-25 times a page.
+     * enableFeature()/disableFeature() reset it; other requests get a fresh instance.
+     *
+     * @var array<int, string>|null
+     */
+    protected ?array $activeFeatureKeys = null;
+
+    /** @return array<int, string> */
+    public function activeFeatureKeys(): array
+    {
+        return $this->activeFeatureKeys ??= $this->features()->where('is_active', true)->pluck('key')->values()->all();
+    }
+
     public function hasFeature(string $key): bool
     {
-        return $this->features()->where('key', $key)->where('is_active', true)->exists();
+        return in_array($key, $this->activeFeatureKeys(), true);
     }
 
     /**
@@ -220,6 +236,7 @@ class Owner extends Authenticatable
         $this->features()->syncWithoutDetaching([
             $feature->id => ['enabled_at' => now()],
         ]);
+        $this->activeFeatureKeys = null;
     }
 
     /** Enable this owner's plan default features. Safe to call repeatedly. */
@@ -300,6 +317,7 @@ class Owner extends Authenticatable
         if ($feature) {
             $this->features()->detach($feature->id);
         }
+        $this->activeFeatureKeys = null;
     }
 
     public function isSubscriptionActive(): bool

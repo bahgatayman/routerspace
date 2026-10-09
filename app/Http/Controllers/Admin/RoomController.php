@@ -40,7 +40,7 @@ class RoomController extends Controller
         $idle = $request->boolean('idle');
         $sort = array_key_exists($request->query('sort'), self::SORTS) ? $request->query('sort') : 'bookings';
         $dir = $request->query('dir') === 'asc' ? 'asc' : 'desc';
-        $inPeriod = fn ($q) => $q->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate());
+        $inPeriod = fn ($q) => $q->whereDateBetween('booking_date', $period->startDate(), $period->endDate());
 
         $rooms = Room::with(['owner:id,business_name,name', 'workspace:id,name'])
             ->withCount(['bookings as period_bookings' => fn ($q) => $inPeriod($q)->countsTowardGbv()])
@@ -89,7 +89,7 @@ class RoomController extends Controller
         $room = Room::with(['owner', 'workspace', 'plans' => fn ($q) => $q->orderBy('sort_order'), 'pricingProfiles' => fn ($q) => $q->orderBy('sort_order')])->findOrFail($room);
 
         $base = fn () => Booking::where('owner_id', $room->owner_id)->where('room_id', $room->id);
-        $inPeriod = fn () => $base()->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate());
+        $inPeriod = fn () => $base()->whereDateBetween('booking_date', $period->startDate(), $period->endDate());
         $byStatus = $inPeriod()->selectRaw('status, COUNT(*) as n')->groupBy('status')->pluck('n', 'status');
         $total = (int) $byStatus->sum();
         $cancelled = (int) ($byStatus['cancelled'] ?? 0) + (int) ($byStatus['no_show'] ?? 0);

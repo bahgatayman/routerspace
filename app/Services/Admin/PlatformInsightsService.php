@@ -138,7 +138,7 @@ class PlatformInsightsService
     public function highCancellation(AnalyticsPeriod $period, array $filters = [], int $limit = 3): Collection
     {
         $rows = $this->analytics->scoped(Booking::query(), $filters)
-            ->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->selectRaw("owner_id, COUNT(*) as total, SUM(CASE WHEN status IN ('cancelled','no_show') THEN 1 ELSE 0 END) as cancelled")
             ->groupBy('owner_id')->having('total', '>=', self::CANCEL_MIN)->get()
             ->map(fn ($r) => ['owner_id' => (int) $r->owner_id, 'total' => (int) $r->total, 'cancelled' => (int) $r->cancelled, 'rate' => round($r->cancelled / $r->total * 100, 1)])
@@ -152,7 +152,7 @@ class PlatformInsightsService
     {
         return $this->analytics->owners($filters)->where('is_active', true)->where('subscription_expires_at', '>', now())
             ->has('rooms')
-            ->whereDoesntHave('bookings', fn ($q) => $q->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate()))
+            ->whereDoesntHave('bookings', fn ($q) => $q->whereDateBetween('booking_date', $period->startDate(), $period->endDate()))
             ->get(['id', 'business_name', 'name']);
     }
 
@@ -161,14 +161,14 @@ class PlatformInsightsService
     {
         return $this->analytics->scoped(Room::query(), $filters)->where('is_available', true)
             ->whereIn('owner_id', Owner::where('is_active', true)->where('subscription_expires_at', '>', now())->select('id'))
-            ->whereDoesntHave('bookings', fn ($q) => $q->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate()))
+            ->whereDoesntHave('bookings', fn ($q) => $q->whereDateBetween('booking_date', $period->startDate(), $period->endDate()))
             ->count();
     }
 
     private function earningsByOwner(AnalyticsPeriod $p, array $filters): Collection
     {
         $bookings = $this->analytics->scoped(Booking::query(), $filters)->revenueRecognised()
-            ->whereDate('booking_date', '>=', $p->startDate())->whereDate('booking_date', '<=', $p->endDate())
+            ->whereDateBetween('booking_date', $p->startDate(), $p->endDate())
             ->selectRaw('owner_id, SUM(amount_paid) as v')->groupBy('owner_id')->pluck('v', 'owner_id');
         $sales = $this->analytics->scoped(Sale::query(), $filters)->completed()->whereBetween('sold_at', [$p->start, $p->end])
             ->selectRaw('owner_id, SUM(total) as v')->groupBy('owner_id')->pluck('v', 'owner_id');

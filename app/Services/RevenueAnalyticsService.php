@@ -27,8 +27,7 @@ class RevenueAnalyticsService
     {
         return (float) Booking::where('owner_id', $owner->id)
             ->revenueRecognised()
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->when($workspaceId, fn ($q, $id) => $q->whereHas('room', fn ($r) => $r->where('workspace_id', $id)))
             ->sum('amount_paid');
     }
@@ -71,8 +70,7 @@ class RevenueAnalyticsService
     {
         $completed = Booking::where('owner_id', $owner->id)
             ->where('status', 'completed')
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate());
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate());
 
         $count = (clone $completed)->count();
 
@@ -99,8 +97,7 @@ class RevenueAnalyticsService
     {
         $bookingByDate = Booking::where('owner_id', $owner->id)
             ->where('status', 'completed')
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->selectRaw('date(booking_date) as d, SUM(amount_paid) as total')
             ->groupBy('d')
             ->pluck('total', 'd');
@@ -134,8 +131,7 @@ class RevenueAnalyticsService
     {
         return Booking::where('bookings.owner_id', $owner->id)
             ->where('bookings.status', 'completed')
-            ->whereDate('bookings.booking_date', '>=', $period->startDate())
-            ->whereDate('bookings.booking_date', '<=', $period->endDate())
+            ->whereDateBetween('bookings.booking_date', $period->startDate(), $period->endDate())
             ->join('rooms', 'rooms.id', '=', 'bookings.room_id')
             ->selectRaw('rooms.id as room_id, rooms.name as room_name, SUM(bookings.amount_paid) as revenue, COUNT(*) as bookings')
             ->groupBy('rooms.id', 'rooms.name')
@@ -160,8 +156,7 @@ class RevenueAnalyticsService
     {
         return Booking::where('bookings.owner_id', $owner->id)
             ->where('bookings.status', 'completed')
-            ->whereDate('bookings.booking_date', '>=', $period->startDate())
-            ->whereDate('bookings.booking_date', '<=', $period->endDate())
+            ->whereDateBetween('bookings.booking_date', $period->startDate(), $period->endDate())
             ->join('rooms', 'rooms.id', '=', 'bookings.room_id')
             ->selectRaw('rooms.type as type, SUM(bookings.amount_paid) as revenue, COUNT(*) as bookings')
             ->groupBy('rooms.type')

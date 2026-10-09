@@ -41,7 +41,7 @@ class WorkspaceDirectoryController extends Controller
         $joinedFrom = $this->validDate($request->query('joined_from'));
         $joinedTo = $this->validDate($request->query('joined_to'));
 
-        $inPeriod = fn ($q) => $q->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate());
+        $inPeriod = fn ($q) => $q->whereDateBetween('booking_date', $period->startDate(), $period->endDate());
 
         $base = Owner::query()
             ->when($search !== '', fn ($q) => $q->where(function ($w) use ($search) {

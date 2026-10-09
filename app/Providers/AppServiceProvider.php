@@ -6,6 +6,8 @@ use App\Models\Notification;
 use App\Services\NotificationService;
 use App\Support\ActiveSessionsQuery;
 use App\Support\TenantContext;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\View;
@@ -27,6 +29,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Same rows as ->whereDate($column, '>=', $from)->whereDate($column, '<=', $to), for
+        // date and datetime columns alike, but as a plain range on the raw column:
+        // whereDate() wraps the column in strftime()/DATE(), which stops the
+        // (owner_id|room_id|status, booking_date) indexes being used, so every report
+        // scanned the whole table. $from/$to: Y-m-d strings or Carbon dates.
+        Builder::macro('whereDateBetween', function (string $column, $from, $to) {
+            /** @var Builder $this */
+            return $this->where($column, '>=', Carbon::parse($from)->toDateString())
+                ->where($column, '<', Carbon::parse($to)->addDay()->toDateString());
+        });
+
         View::composer('*', function ($view) {
             $owner = TenantContext::user();
             if ($owner) {

@@ -330,8 +330,7 @@ class PlatformAnalyticsService
     private function bookingsIn(AnalyticsPeriod $p, array $filters): Builder
     {
         return $this->scoped(Booking::query(), $filters)
-            ->whereDate('booking_date', '>=', $p->startDate())
-            ->whereDate('booking_date', '<=', $p->endDate());
+            ->whereDateBetween('booking_date', $p->startDate(), $p->endDate());
     }
 
     private function subscriptions(AnalyticsPeriod $p, array $filters): Builder

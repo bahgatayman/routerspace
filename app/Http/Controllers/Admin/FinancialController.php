@@ -157,7 +157,7 @@ class FinancialController extends Controller
             ->leftJoin('rooms as r', 'r.id', '=', 'b.room_id')
             ->where('b.amount_paid', '>', 0)
             ->where(fn ($w) => $w->whereNull('b.payment_method')->orWhere('b.payment_method', '!=', Booking::METHOD_PACKAGE))
-            ->whereDate('b.booking_date', '>=', $p->startDate())->whereDate('b.booking_date', '<=', $p->endDate())
+            ->whereDateBetween('b.booking_date', $p->startDate(), $p->endDate())
             ->when($payment, fn ($w) => $w->where('b.payment_status', $payment))
             ->selectRaw("'booking' as type, b.id as id, b.owner_id as owner_id, o.business_name as workspace, u.name as payer, r.name as ref, b.amount_paid as amount, b.status as status, CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END as counted, b.booking_date as at"), 'b.owner_id');
 

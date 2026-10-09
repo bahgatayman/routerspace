@@ -46,7 +46,7 @@ class ActiveSessionsQuery
         // below, never duplicated.
         $confirmed = Booking::where('owner_id', $ownerId)
             ->where('status', 'confirmed')
-            ->whereDate('booking_date', $now->toDateString())
+            ->whereDateBetween('booking_date', $now, $now)
             ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
             ->with(['room.workspace', 'hotspotUser', 'sale.items'])
             ->get()
@@ -67,9 +67,29 @@ class ActiveSessionsQuery
         return $shared->concat($confirmed)->concat($openExclusive)->values();
     }
 
-    /** Live count only — used by the nav badge, never cached/stored. */
+    /**
+     * Live count only — used by the nav badge on every page, never cached/stored.
+     * Same three sets as build(), but counted without hydrating rows or eager
+     * loading room/workspace/member/sale relations nobody displays.
+     */
     public static function count(int $ownerId): int
     {
-        return self::build($ownerId)->count();
+        $now = now();
+
+        $shared = SharedSession::where('owner_id', $ownerId)->where('status', 'open')->count();
+
+        $confirmed = Booking::where('owner_id', $ownerId)
+            ->where('status', 'confirmed')
+            ->whereDateBetween('booking_date', $now, $now)
+            ->get(['id', 'booking_date', 'start_time', 'end_time'])
+            ->filter(fn (Booking $booking) => $booking->startsAt()->lte($now) && $booking->endsAt()->gt($now))
+            ->count();
+
+        $openExclusive = Booking::where('owner_id', $ownerId)
+            ->where('status', 'open')
+            ->whereHas('room', fn ($q) => $q->where('type', '!=', 'shared'))
+            ->count();
+
+        return $shared + $confirmed + $openExclusive;
     }
 }

@@ -19,8 +19,7 @@ class BookingAnalyticsService
     public function bookingsCount(Owner $owner, AnalyticsPeriod $period, bool $excludeCancelled = false): int
     {
         $query = Booking::where('owner_id', $owner->id)
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate());
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate());
 
         if ($excludeCancelled) {
             $query->where('status', '!=', 'cancelled');
@@ -33,8 +32,7 @@ class BookingAnalyticsService
     public function statusBreakdown(Owner $owner, AnalyticsPeriod $period): array
     {
         $counts = Booking::where('owner_id', $owner->id)
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->selectRaw('status, COUNT(*) as c')
             ->groupBy('status')
             ->pluck('c', 'status');
@@ -65,8 +63,7 @@ class BookingAnalyticsService
     {
         $perRoom = Booking::where('owner_id', $owner->id)
             ->whereIn('status', ['completed', 'checked_in', 'confirmed'])
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->selectRaw('room_id, SUM(total_hours) as hours, SUM(total_price - discount_total) as revenue, COUNT(*) as bookings')
             ->groupBy('room_id')
             ->get()
@@ -171,8 +168,7 @@ class BookingAnalyticsService
     {
         return Booking::where('owner_id', $owner->id)
             ->where('status', '!=', 'cancelled')
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->selectRaw('CAST(substr(start_time, 1, 2) AS INTEGER) as hour, COUNT(*) as c')
             ->groupBy('hour')
             ->pluck('c', 'hour')
@@ -198,8 +194,7 @@ class BookingAnalyticsService
 
         return Booking::where('owner_id', $owner->id)
             ->whereNotIn('status', ['cancelled', 'no_show'])
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->selectRaw("CAST(strftime('%w', booking_date) AS INTEGER) as dow, CAST(substr(start_time, 1, 2) AS INTEGER) as hour, COUNT(*) as c")
             ->groupBy('dow', 'hour')
             ->get()
@@ -218,7 +213,7 @@ class BookingAnalyticsService
     public function todaysSchedule(Owner $owner, int $limit = 20): Collection
     {
         return Booking::where('owner_id', $owner->id)
-            ->whereDate('booking_date', today())
+            ->whereDateBetween('booking_date', today(), today())
             ->whereNotIn('status', ['cancelled', 'no_show'])
             ->with(['room:id,name,type', 'hotspotUser:id,name'])
             ->orderBy('start_time')

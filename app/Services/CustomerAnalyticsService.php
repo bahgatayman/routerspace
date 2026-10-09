@@ -80,8 +80,7 @@ class CustomerAnalyticsService
         $bookingRevenue = (float) Booking::where('owner_id', $owner->id)
             ->revenueRecognised()
             ->whereIn('hotspot_user_id', $active)
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->sum('amount_paid');
 
         $saleRevenue = (float) Sale::where('owner_id', $owner->id)
@@ -99,8 +98,7 @@ class CustomerAnalyticsService
         $bookingIds = Booking::where('owner_id', $owner->id)
             ->countsTowardGbv()
             ->whereNotNull('hotspot_user_id')
-            ->whereDate('booking_date', '>=', $start->toDateString())
-            ->whereDate('booking_date', '<=', $end->toDateString())
+            ->whereDateBetween('booking_date', $start->toDateString(), $end->toDateString())
             ->pluck('hotspot_user_id');
 
         $saleIds = Sale::where('owner_id', $owner->id)
@@ -118,7 +116,7 @@ class CustomerAnalyticsService
         $bookingIds = Booking::where('owner_id', $owner->id)
             ->countsTowardGbv()
             ->whereNotNull('hotspot_user_id')
-            ->whereDate('booking_date', '<', $before->toDateString())
+            ->where('booking_date', '<', $before->toDateString()) // = whereDate '<' (Y-m-d prefix), but index-friendly
             ->pluck('hotspot_user_id');
 
         $saleIds = Sale::where('owner_id', $owner->id)

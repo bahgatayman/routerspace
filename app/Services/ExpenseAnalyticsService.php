@@ -20,8 +20,7 @@ class ExpenseAnalyticsService
     public function totalExpenses(Owner $owner, AnalyticsPeriod $period): float
     {
         return (float) Expense::where('owner_id', $owner->id)
-            ->whereDate('expense_date', '>=', $period->startDate())
-            ->whereDate('expense_date', '<=', $period->endDate())
+            ->whereDateBetween('expense_date', $period->startDate(), $period->endDate())
             ->sum('amount');
     }
 
@@ -37,8 +36,7 @@ class ExpenseAnalyticsService
         return Expense::query()
             ->leftJoin('expense_categories', 'expense_categories.id', '=', 'expenses.expense_category_id')
             ->where('expenses.owner_id', $owner->id)
-            ->whereDate('expenses.expense_date', '>=', $period->startDate())
-            ->whereDate('expenses.expense_date', '<=', $period->endDate())
+            ->whereDateBetween('expenses.expense_date', $period->startDate(), $period->endDate())
             ->selectRaw('expenses.expense_category_id as category_id, expense_categories.name as name, SUM(expenses.amount) as amount')
             ->groupBy('expenses.expense_category_id', 'expense_categories.name')
             ->orderByDesc('amount')

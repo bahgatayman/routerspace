@@ -218,7 +218,7 @@ class BusinessController extends Controller
         $owner = $this->owner($owner);
         $workspace = $this->location($request, $owner);
         [$period, $range] = $this->resolvePeriod($request);
-        $inPeriod = fn ($q) => $q->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate());
+        $inPeriod = fn ($q) => $q->whereDateBetween('booking_date', $period->startDate(), $period->endDate());
 
         $rooms = Room::where('owner_id', $owner->id)->with('workspace:id,name')
             ->when($workspace, fn ($q) => $q->where('workspace_id', $workspace->id))
@@ -255,7 +255,7 @@ class BusinessController extends Controller
         $status = in_array($request->query('status'), BookingController::STATUSES, true) ? $request->query('status') : null;
 
         $base = Booking::where('owner_id', $owner->id)
-            ->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->when($workspace, fn ($q) => $q->whereIn('room_id', Room::where('owner_id', $owner->id)->where('workspace_id', $workspace->id)->select('id')));
 
         $byStatus = (clone $base)->selectRaw('status, COUNT(*) as n')->groupBy('status')->pluck('n', 'status');

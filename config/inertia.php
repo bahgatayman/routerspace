@@ -165,11 +165,14 @@ return [
     | read it back over HTTP. Recording is limited to your local environment.
     | See https://inertiajs.com/docs/devtools for the gate and storage options.
     |
+    | Opt-in (INERTIA_DEVTOOLS_ENABLED=true): recording adds ~75-110ms to every
+    | local request, which made all page navigation feel slow during development.
+    |
     */
 
     'devtools' => [
 
-        'enabled' => env('INERTIA_DEVTOOLS_ENABLED'),
+        'enabled' => (bool) env('INERTIA_DEVTOOLS_ENABLED', false),
 
         'except' => ['telescope*', 'horizon*', '_inertia/devtools*'],
 

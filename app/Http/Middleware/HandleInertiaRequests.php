@@ -113,7 +113,7 @@ class HandleInertiaRequests extends Middleware
             'business_name' => $owner->business_name,
             'logo_url' => $owner->logoUrl(),
             'initials' => $owner->initials(),
-            'features' => $owner->features()->where('is_active', true)->pluck('key')->values()->all(),
+            'features' => $owner->activeFeatureKeys(),
             'subscription_status' => $owner->subscriptionStatus(),
             'days_until_expiry' => $owner->daysUntilExpiry(),
         ];

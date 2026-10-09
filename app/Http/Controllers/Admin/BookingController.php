@@ -201,7 +201,7 @@ class BookingController extends Controller
     private function filter(Builder $q, array $f): Builder
     {
         return $q
-            ->when($f['period'], fn ($w, $p) => $w->whereDate('booking_date', '>=', $p->startDate())->whereDate('booking_date', '<=', $p->endDate()))
+            ->when($f['period'], fn ($w, $p) => $w->whereDateBetween('booking_date', $p->startDate(), $p->endDate()))
             ->when($f['owner'], fn ($w, $id) => $w->where('owner_id', $id))
             ->when($f['location'], fn ($w, $id) => $w->whereIn('room_id', Room::where('workspace_id', $id)->select('id')))
             ->when($f['room'], fn ($w, $id) => $w->where('room_id', $id))

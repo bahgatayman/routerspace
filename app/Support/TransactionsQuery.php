@@ -21,8 +21,7 @@ class TransactionsQuery
     public static function build(int $ownerId, AnalyticsPeriod $period, string $status, string $source): Builder
     {
         return Booking::where('owner_id', $ownerId)
-            ->whereDate('booking_date', '>=', $period->startDate())
-            ->whereDate('booking_date', '<=', $period->endDate())
+            ->whereDateBetween('booking_date', $period->startDate(), $period->endDate())
             ->when($status !== 'all', fn ($q) => $q->where('status', $status))
             ->when($source === 'direct_booking', fn ($q) => $q->whereDoesntHave('sharedSession'))
             ->when($source === 'shared_session', fn ($q) => $q->whereHas('sharedSession'))

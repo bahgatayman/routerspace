@@ -69,13 +69,15 @@ class MemberSearchService
     {
         $term = trim($term);
 
+        if ($term === '') {
+            return $this->latest($ownerId, $perPage, $page);
+        }
+
         $candidates = HotspotUser::where('owner_id', $ownerId)
             ->select(['id', 'name', 'phone', 'email', 'created_at'])
             ->get();
 
-        $matches = $term === ''
-            ? $candidates->sortByDesc('created_at')->values()
-            : $this->rank($candidates, $term);
+        $matches = $this->rank($candidates, $term);
 
         $total = $matches->count();
         $lastPage = max(1, (int) ceil($total / $perPage));
@@ -88,6 +90,32 @@ class MemberSearchService
         }
 
         $items = $matches->slice(($page - 1) * $perPage, $perPage)->values();
+
+        return new LengthAwarePaginator($items, $total, $perPage, $page, [
+            'path' => request()->url(),
+            'query' => request()->query(),
+        ]);
+    }
+
+    /**
+     * The unsearched list (newest first), paginated in SQL so only one page of
+     * members is loaded, not the whole membership. Same order the in-memory
+     * stable sort produced: created_at desc, ties by id, members without a
+     * created_at last; same out-of-range-page fallback to page 1.
+     *
+     * @return LengthAwarePaginator<int, HotspotUser>
+     */
+    private function latest(int $ownerId, int $perPage, int $page): LengthAwarePaginator
+    {
+        $query = HotspotUser::where('owner_id', $ownerId)->select(['id', 'name', 'phone', 'email', 'created_at']);
+
+        $total = (clone $query)->count();
+        if ($page > max(1, (int) ceil($total / $perPage))) {
+            $page = 1;
+        }
+
+        $items = $query->orderByRaw('created_at is null')->orderByDesc('created_at')->orderBy('id')
+            ->forPage($page, $perPage)->get();
 
         return new LengthAwarePaginator($items, $total, $perPage, $page, [
             'path' => request()->url(),
