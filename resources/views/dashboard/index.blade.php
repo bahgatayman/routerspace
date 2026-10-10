@@ -221,7 +221,12 @@
     @if ($owner->hasFeature('booking'))
         @php
             $heatmapDayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-            $heatmapMax = collect($peakHoursGrid)->flatten()->max() ?? 0;
+            $heatmapHourStart = $peakHoursRange['start'] ?? 0;
+            $heatmapHourEnd = $peakHoursRange['end'] ?? 24;
+            $heatmapMax = collect($peakHoursGrid)
+                ->map(fn ($hours) => array_slice($hours, $heatmapHourStart, $heatmapHourEnd - $heatmapHourStart, true))
+                ->collapse()
+                ->max() ?? 0;
         @endphp
         <div class="ls-card p-4 lg:p-6 mb-6">
             <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.peak_hours_heatmap') }}</h3>
@@ -235,7 +240,7 @@
                             <div class="ls-heatmap-cell ls-heatmap-cell--header">{{ mb_substr(__('app.day.'.$dayKey), 0, 3) }}</div>
                         @endforeach
                     </div>
-                    @for ($hour = 0; $hour < 24; $hour++)
+                    @for ($hour = $heatmapHourStart; $hour < $heatmapHourEnd; $hour++)
                         <div class="ls-heatmap-row">
                             <div class="ls-heatmap-cell ls-heatmap-cell--label">{{ sprintf('%02d', $hour) }}</div>
                             @foreach ($heatmapDayKeys as $dow => $dayKey)

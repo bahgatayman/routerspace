@@ -232,4 +232,83 @@ class BusinessHoursServiceTest extends TestCase
         $this->assertFalse($service->isWithinWorkingHours($ownerA, '2026-08-18', '23:00', '23:30'));
         $this->assertTrue($service->isWithinWorkingHours($ownerB, '2026-08-18', '23:00', '23:30'));
     }
+
+    // --- weeklyDisplayHourRange() — the dashboard heatmap's hour-axis trim ---
+
+    public function test_weekly_display_hour_range_is_null_when_unconfigured(): void
+    {
+        $owner = $this->owner();
+        $service = app(BusinessHoursService::class);
+
+        $this->assertNull($service->weeklyDisplayHourRange($owner));
+    }
+
+    public function test_weekly_display_hour_range_matches_a_normal_daytime_schedule(): void
+    {
+        $owner = $this->owner();
+        foreach (range(1, 5) as $weekday) { // Mon-Fri
+            $this->day($owner, $weekday, ['open_time' => '09:00:00', 'close_time' => '22:00:00']);
+        }
+        $this->day($owner, 0, ['is_open' => false, 'open_time' => null, 'close_time' => null]); // Sun closed
+        $this->day($owner, 6, ['is_open' => false, 'open_time' => null, 'close_time' => null]); // Sat closed
+        $service = app(BusinessHoursService::class);
+
+        $this->assertSame(['start' => 9, 'end' => 22], $service->weeklyDisplayHourRange($owner));
+    }
+
+    public function test_weekly_display_hour_range_unions_different_hours_per_weekday(): void
+    {
+        $owner = $this->owner();
+        $this->day($owner, 1, ['open_time' => '09:00:00', 'close_time' => '17:00:00']); // Mon
+        $this->day($owner, 5, ['open_time' => '18:00:00', 'close_time' => '23:00:00']); // Fri — later than Monday
+        $service = app(BusinessHoursService::class);
+
+        // Earliest open (9) across every day, latest close (23) across every day.
+        $this->assertSame(['start' => 9, 'end' => 23], $service->weeklyDisplayHourRange($owner));
+    }
+
+    public function test_weekly_display_hour_range_rounds_partial_hours_outward(): void
+    {
+        $owner = $this->owner();
+        $this->day($owner, 2, ['open_time' => '09:30:00', 'close_time' => '22:30:00']);
+        $service = app(BusinessHoursService::class);
+
+        // 09:30 still needs the 09:00 row; 22:30 still needs the 22:00 row shown.
+        $this->assertSame(['start' => 9, 'end' => 23], $service->weeklyDisplayHourRange($owner));
+    }
+
+    public function test_weekly_display_hour_range_closing_exactly_on_the_hour_does_not_add_an_extra_row(): void
+    {
+        $owner = $this->owner();
+        $this->day($owner, 2, ['open_time' => '09:00:00', 'close_time' => '22:00:00']);
+        $service = app(BusinessHoursService::class);
+
+        // Closes exactly at 22:00 — the 22:00 row (which would represent 22:00-23:00,
+        // already closed) must not appear; end=22 means hours 0..21 are the last shown.
+        $this->assertSame(22, $service->weeklyDisplayHourRange($owner)['end']);
+    }
+
+    public function test_weekly_display_hour_range_covers_an_overnight_schedules_spillover(): void
+    {
+        $owner = $this->owner();
+        $this->day($owner, 4, ['open_time' => '22:00:00', 'close_time' => '02:00:00']); // Thu overnight only
+        $service = app(BusinessHoursService::class);
+
+        // Thursday's own segment runs 22:00->24:00 (sentinel); Friday's spillover
+        // segment runs 00:00->02:00 — the union must cover both tails.
+        $this->assertSame(['start' => 0, 'end' => 24], $service->weeklyDisplayHourRange($owner));
+    }
+
+    public function test_weekly_display_hour_range_is_null_when_every_day_is_configured_closed(): void
+    {
+        $owner = $this->owner();
+        foreach (range(0, 6) as $dow) {
+            $this->day($owner, $dow, ['is_open' => false, 'open_time' => null, 'close_time' => null]);
+        }
+        $service = app(BusinessHoursService::class);
+
+        // Configured, but nothing is ever open — nothing to narrow to, so the
+        // caller falls back to showing all 24 hours rather than a zero-width range.
+        $this->assertNull($service->weeklyDisplayHourRange($owner));
+    }
 }

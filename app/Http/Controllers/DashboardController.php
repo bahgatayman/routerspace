@@ -128,6 +128,10 @@ class DashboardController extends Controller
             // the daily Bookings Activity trend above ("how many, over the
             // period"); kept as supporting detail further down the page.
             $viewData['peakHoursGrid'] = $this->bookingAnalytics->peakHoursByDayOfWeek($owner, $period);
+            // Display-only trim to the hours the business can ever be open —
+            // null (show all 24) when hours aren't configured. Never affects
+            // the grid's own data above, only which rows of it get drawn.
+            $viewData['peakHoursRange'] = $this->businessHours->weeklyDisplayHourRange($owner);
             $viewData['todaysSchedule'] = $this->bookingAnalytics->todaysSchedule($owner);
         }
 

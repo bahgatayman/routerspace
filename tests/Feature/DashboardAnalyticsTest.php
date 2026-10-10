@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\Room;
 use App\Models\Sale;
 use App\Models\SaleItem;
+use App\Models\WorkingHour;
 use App\Models\Workspace;
 use App\Services\HotspotSyncService;
 use Carbon\Carbon;
@@ -641,5 +642,77 @@ class DashboardAnalyticsTest extends TestCase
         $this->assertNotEmpty($matches, "Could not find the {$id} chart spec in the dashboard HTML.");
 
         return json_decode($matches[1], true);
+    }
+
+    private function workingHour(Owner $owner, int $dayOfWeek, array $overrides = []): WorkingHour
+    {
+        return WorkingHour::create(array_merge([
+            'owner_id' => $owner->id, 'day_of_week' => $dayOfWeek,
+            'is_open' => true, 'open_time' => '09:00:00', 'close_time' => '22:00:00',
+        ], $overrides));
+    }
+
+    private function assertHeatmapHourRow(string $html, int $hour, bool $present): void
+    {
+        $pattern = '/ls-heatmap-cell--label">'.sprintf('%02d', $hour).'</';
+        $this->assertSame($present, (bool) preg_match($pattern, $html), $present
+            ? "Expected hour row {$hour} to appear in the peak-hours heatmap."
+            : "Expected hour row {$hour} to be trimmed from the peak-hours heatmap.");
+    }
+
+    // --- Peak Hours heatmap: trimmed to configured business hours ---
+
+    public function test_heatmap_trims_to_configured_business_hours(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00')); // Thursday
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $this->workingHour($owner, 4, ['open_time' => '09:00:00', 'close_time' => '22:00:00']); // Thu only
+        $this->booking($owner, $room, '2026-08-27', start: '10:00', end: '12:00');
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+        $html = $response->getContent();
+
+        $response->assertOk();
+        $this->assertHeatmapHourRow($html, 9, present: true);
+        $this->assertHeatmapHourRow($html, 21, present: true);
+        $this->assertHeatmapHourRow($html, 22, present: false); // closes exactly at 22:00 — no extra row
+        $this->assertHeatmapHourRow($html, 0, present: false);
+        $this->assertHeatmapHourRow($html, 23, present: false);
+    }
+
+    public function test_heatmap_shows_all_24_hours_when_business_hours_are_not_configured(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $this->booking($owner, $room, '2026-08-27', start: '10:00', end: '12:00');
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+        $html = $response->getContent();
+
+        $response->assertOk();
+        $this->assertHeatmapHourRow($html, 0, present: true);
+        $this->assertHeatmapHourRow($html, 23, present: true);
+    }
+
+    public function test_heatmap_range_covers_different_hours_on_different_weekdays(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00')); // Thursday
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $this->workingHour($owner, 1, ['open_time' => '09:00:00', 'close_time' => '17:00:00']); // Monday
+        $this->workingHour($owner, 4, ['open_time' => '18:00:00', 'close_time' => '23:00:00']); // Thursday, later hours
+        $this->booking($owner, $room, '2026-08-27', start: '19:00', end: '20:00');
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+        $html = $response->getContent();
+
+        $response->assertOk();
+        // The shared axis must stretch to cover Thursday's later close (23:00)
+        // even though Monday's own hours end much earlier.
+        $this->assertHeatmapHourRow($html, 9, present: true);
+        $this->assertHeatmapHourRow($html, 22, present: true);
+        $this->assertHeatmapHourRow($html, 23, present: false);
     }
 }

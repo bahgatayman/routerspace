@@ -159,6 +159,56 @@ class BusinessHoursService
         return $best;
     }
 
+    /**
+     * The hour range [start, end) that covers every day's configured open
+     * segment, for trimming an "all 24 hours" display (e.g. the dashboard's
+     * peak-hours heatmap) down to only the hours that can ever be open.
+     * Built from effectiveWindowForDate() — the same overnight-spillover-
+     * aware definition every other caller of this class already uses — on
+     * one representative date per day-of-week, then unioned across the
+     * week, since different days can open/close at different times and the
+     * display needs one shared hour axis wide enough for all of them.
+     *
+     * Null when hours aren't configured (hasConfiguredHours() === false) —
+     * matching this class's existing "unconfigured = unrestricted" rule, so
+     * callers keep showing the full 24 hours rather than guessing a window.
+     * Also null if every day is configured closed (nothing to narrow to).
+     *
+     * end is exclusive and rounds a partial closing hour up (close at 22:30
+     * → end=23, so the 22:00 row — the one actually still open at 22:30 —
+     * isn't cut off); start rounds a partial opening hour down the same way.
+     *
+     * @return array{start: int, end: int}|null
+     */
+    public function weeklyDisplayHourRange(Owner $owner): ?array
+    {
+        if (! $this->hasConfiguredHours($owner)) {
+            return null;
+        }
+
+        $minStart = null;
+        $maxEnd = null;
+        $anchor = Carbon::now()->startOfWeek(Carbon::SUNDAY);
+
+        for ($dow = 0; $dow < 7; $dow++) {
+            foreach ($this->effectiveWindowForDate($owner, $anchor->copy()->addDays($dow)->toDateString()) as [$start, $end]) {
+                $startMinutes = $this->toMinutes($start);
+                $endMinutes = $this->toMinutes($end);
+                $startHour = intdiv($startMinutes, 60);
+                $endHour = intdiv($endMinutes, 60) + ($endMinutes % 60 > 0 ? 1 : 0);
+
+                $minStart = $minStart === null ? $startHour : min($minStart, $startHour);
+                $maxEnd = $maxEnd === null ? $endHour : max($maxEnd, $endHour);
+            }
+        }
+
+        if ($minStart === null) {
+            return null;
+        }
+
+        return ['start' => $minStart, 'end' => min(24, $maxEnd)];
+    }
+
     private function rowFor(Owner $owner, int $dayOfWeek): ?WorkingHour
     {
         return $owner->workingHours()->where('day_of_week', $dayOfWeek)->first();
