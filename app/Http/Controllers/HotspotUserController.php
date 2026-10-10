@@ -72,7 +72,23 @@ class HotspotUserController extends Controller
             'users' => $paginator->withQueryString()->through(fn (HotspotUser $u) => $this->indexRow($u, $search)),
             'search' => $search,
             'hasHotspot' => $owner->hasFeature('hotspot'),
+            // For the "Add user" pop-up; lazy so live-search partial reloads skip it.
+            'plan' => fn () => $this->planUsage($owner),
         ]);
+    }
+
+    /** Members used vs the plan limit (add-member pop-up and page). */
+    private function planUsage(Owner $owner): ?array
+    {
+        $plan = $owner->plan;
+
+        return $plan ? [
+            'name' => $plan->name,
+            'max_members' => $plan->max_members,
+            'members' => $owner->hotspotUsers()->count(),
+            'percent' => $owner->usagePercentage(),
+            'remaining' => $owner->remainingUserSlots(),
+        ] : null;
     }
 
     /**
@@ -110,17 +126,10 @@ class HotspotUserController extends Controller
     public function create(): Response
     {
         $owner = TenantContext::user();
-        $plan = $owner->plan;
 
         return Inertia::render('Users/Create', [
             'hasHotspot' => $owner->hasFeature('hotspot'),
-            'plan' => $plan ? [
-                'name' => $plan->name,
-                'max_members' => $plan->max_members,
-                'members' => $owner->hotspotUsers()->count(),
-                'percent' => $owner->usagePercentage(),
-                'remaining' => $owner->remainingUserSlots(),
-            ] : null,
+            'plan' => $this->planUsage($owner),
         ]);
     }
 

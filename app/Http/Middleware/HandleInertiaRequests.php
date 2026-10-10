@@ -36,9 +36,16 @@ class HandleInertiaRequests extends Middleware
         $response = parent::handle($request, $next);
 
         if ($request->header('X-Inertia')
+            && $request->isMethod('GET')
             && ! $response->headers->has('X-Inertia')
             && $response->getStatusCode() === 200
             && str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
+            // This render already consumed the flash (e.g. "saved" after a redirect):
+            // keep it for the full page load that follows.
+            if ($request->hasSession()) {
+                $request->session()->reflash();
+            }
+
             return Inertia::location($request->fullUrl());
         }
 

@@ -216,7 +216,10 @@
                     <div class="ls-card-body">
                         <h2 class="ls-section-label">{{ __('app.booking.room') }}</h2>
                         <div class="ls-field">
-                            <select name="room_id" id="open-room-select" class="ls-select" aria-label="{{ __('app.booking.room') }}">
+                            {{-- Disabled until "Open Session" is chosen: it shares name="room_id" with the
+                                 room cards, and an enabled empty copy posted after them would override the
+                                 picked room ("room id field is required"). --}}
+                            <select name="room_id" id="open-room-select" class="ls-select" aria-label="{{ __('app.booking.room') }}" disabled>
                                 <option value="">{{ __('app.common.select') }}</option>
                                 @foreach ($exclusiveRooms as $r)
                                     <option value="{{ $r->id }}">{{ $r->workspace?->name }} / {{ $r->name }} — {{ $r->pricingSummary() }}</option>
@@ -226,7 +229,7 @@
 
                         <div class="ls-field" id="open-profile-field" style="margin-top: var(--space-3)" hidden>
                             <label class="ls-label" for="open-profile-select">{{ __('app.pricing_profiles.section') }}</label>
-                            <select name="room_pricing_profile_id" id="open-profile-select" class="ls-select"></select>
+                            <select name="room_pricing_profile_id" id="open-profile-select" class="ls-select" disabled></select>
                         </div>
                     </div>
                 </div>
@@ -951,6 +954,10 @@
             if (bookingDate) bookingDate.required = ! open;
             roomRadios.forEach(r => { r.disabled = open; if (open) r.required = false; });
             roomSelect.required = open;
+            // Only the active mode's fields may be posted: these share names with the
+            // fixed-time room cards / pricing-profile input.
+            roomSelect.disabled = ! open;
+            profileSelect.disabled = ! open;
 
             choice.querySelectorAll('[data-duration-opt]').forEach(label => {
                 label.classList.toggle('is-selected', label.dataset.durationOpt === (open ? 'open' : 'fixed'));

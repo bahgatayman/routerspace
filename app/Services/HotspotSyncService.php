@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\HotspotUser;
 use App\Models\Owner;
 use App\Models\SpeedProfile;
 
@@ -28,11 +29,16 @@ class HotspotSyncService
 {
     private function client(Owner $owner): MikroTikService
     {
+        // The settings/register forms allow an empty router password, and a
+        // model built in memory may lack the port default: pass strings and
+        // the standard RouterOS API port rather than nulls, so a half-filled
+        // router config fails to connect (handled by callers) instead of
+        // throwing a TypeError (dashboard 500).
         return new MikroTikService(
-            $owner->mikrotik_host,
-            $owner->mikrotik_port,
-            $owner->mikrotik_username,
-            $owner->mikrotik_password,
+            (string) $owner->mikrotik_host,
+            (int) ($owner->mikrotik_port ?: 8728),
+            (string) $owner->mikrotik_username,
+            (string) $owner->mikrotik_password,
         );
     }
 
@@ -128,8 +134,8 @@ class HotspotSyncService
      * users that failed (empty array = all synced, or sync disabled). Throws only
      * if the connect / profile-update step itself fails.
      *
-     * @param  iterable<int, \App\Models\HotspotUser>  $assignedUsers
-     * @return string[]  per-user sync errors
+     * @param  iterable<int, HotspotUser>  $assignedUsers
+     * @return string[] per-user sync errors
      */
     public function syncProfileToUsers(Owner $owner, SpeedProfile $profile, iterable $assignedUsers): array
     {
@@ -149,10 +155,10 @@ class HotspotSyncService
                     $client->setUserSpeed($user->phone, $profile->name);
                     $user->update([
                         'speed_download' => $profile->speed_download,
-                        'speed_upload'   => $profile->speed_upload,
+                        'speed_upload' => $profile->speed_upload,
                     ]);
                 } catch (\Exception $e) {
-                    $errors[] = $user->name . ': ' . $e->getMessage();
+                    $errors[] = $user->name.': '.$e->getMessage();
                 }
             }
         } finally {

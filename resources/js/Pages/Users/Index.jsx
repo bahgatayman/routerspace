@@ -1,6 +1,7 @@
 import { Link, router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
-import { ConfirmButton, Icon, Pagination } from '../../Components/ui';
+import { ConfirmButton, Icon, Modal, Pagination } from '../../Components/ui';
+import MemberForm, { PlanUsage } from '../../Components/Users/MemberForm';
 import { t } from '../../lib/i18n';
 import { usePageTitle } from '../../lib/pageTitle';
 
@@ -23,9 +24,16 @@ function rowAuxClick(e, href) {
  * Ranking and the <mark> highlighting are done server-side
  * (MemberSearchService + App\Support\Highlight, HTML already escaped).
  */
-export default function UsersIndex({ users, search, hasHotspot }) {
+export default function UsersIndex({ users, search, hasHotspot, plan }) {
     const title = hasHotspot ? t('user.hotspot_users') : t('common.members');
     usePageTitle(title);
+    const [adding, setAdding] = useState(false);
+    // Plain click opens the pop-up; ctrl/cmd/middle-click still opens the full page.
+    const openAdd = (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+        e.preventDefault();
+        setAdding(true);
+    };
     const [term, setTerm] = useState(search || '');
     const [busy, setBusy] = useState(false);
     const timer = useRef(null);
@@ -66,10 +74,16 @@ export default function UsersIndex({ users, search, hasHotspot }) {
         <>
             <div className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-                <Link href="/users/create" className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
+                <a href="/users/create" onClick={openAdd} aria-haspopup="dialog" className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
                     {t('btn.add_user')}
-                </Link>
+                </a>
             </div>
+
+            <Modal open={adding} onClose={() => setAdding(false)} title={t('user.add_new_user')} id="add-member">
+                <PlanUsage plan={plan} className="mb-4" />
+                {/* Remounted per opening (key) so a reopened pop-up starts empty. */}
+                {adding && <MemberForm key="add" hasHotspot={hasHotspot} idPrefix="add" autoFocus onSaved={() => setAdding(false)} />}
+            </Modal>
 
             <div className="mb-6 max-w-md relative" id="user-search-wrap">
                 <input ref={inputRef} type="text" id="user-search-input" value={term} onChange={onInput} placeholder={t('user.search_placeholder')}

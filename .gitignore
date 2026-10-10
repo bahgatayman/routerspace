@@ -1,8 +1,13 @@
 *.log
 .DS_Store
 .env
+.env.*
+!.env.example
 .env.backup
 .env.production
+# Never commit server credentials (env copies kept as notes, e.g. "env host.txt").
+env*.txt
+*.env.txt
 .phpactor.json
 .phpunit.result.cache
 /.codex

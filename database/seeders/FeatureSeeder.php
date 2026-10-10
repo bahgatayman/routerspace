@@ -11,32 +11,32 @@ class FeatureSeeder extends Seeder
     {
         $features = [
             [
-                'key'         => 'hotspot',
-                'name'        => 'MikroTik Hotspot Management',
+                'key' => 'hotspot',
+                'name' => 'MikroTik Hotspot Management',
                 'description' => 'Manage internet users, speeds, and active sessions via MikroTik RouterOS',
-                'icon'        => 'wifi',
-                'is_active'   => true,
+                'icon' => 'wifi',
+                'is_active' => true,
             ],
             [
-                'key'         => 'workspace',
-                'name'        => 'Workspace & Rooms',
+                'key' => 'workspace',
+                'name' => 'Workspace & Rooms',
                 'description' => 'Add and manage workspaces and rooms in your coworking space',
-                'icon'        => 'building',
-                'is_active'   => true,
+                'icon' => 'building',
+                'is_active' => true,
             ],
             [
-                'key'         => 'booking',
-                'name'        => 'Booking System',
+                'key' => 'booking',
+                'name' => 'Booking System',
                 'description' => 'Allow customers to book workspaces and rooms',
-                'icon'        => 'calendar',
-                'is_active'   => true,
+                'icon' => 'calendar',
+                'is_active' => true,
             ],
             [
-                'key'         => 'sales',
-                'name'        => 'Sales & Products',
+                'key' => 'sales',
+                'name' => 'Sales & Products',
                 'description' => 'Sell products and services (coffee, printing, rentals) and attach them to bookings',
-                'icon'        => 'shopping-cart',
-                'is_active'   => true,
+                'icon' => 'shopping-cart',
+                'is_active' => true,
             ],
         ];
 

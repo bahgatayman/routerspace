@@ -83,6 +83,9 @@ class LoginController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
+        // Drop (encrypted) page data kept in browser history, so Back can't redisplay it.
+        Inertia::clearHistory();
+
         return redirect('/login');
     }
 }

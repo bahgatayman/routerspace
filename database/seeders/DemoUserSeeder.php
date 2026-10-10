@@ -23,7 +23,7 @@ class DemoUserSeeder extends Seeder
         Admin::updateOrCreate(
             ['email' => 'admin@gmail.com'],
             [
-                'name'     => 'Admin',
+                'name' => 'Admin',
                 'password' => Hash::make('password'),
             ]
         );
@@ -34,12 +34,12 @@ class DemoUserSeeder extends Seeder
         $owner = Owner::updateOrCreate(
             ['email' => 'owner@gmail.com'],
             [
-                'name'                    => 'Demo Owner',
-                'password'                => 'password',
-                'business_name'           => 'Demo Space',
-                'plan_id'                 => $plan?->id,
-                'is_active'               => true,
-                'subscription_starts_at'  => now(),
+                'name' => 'Demo Owner',
+                'password' => 'password',
+                'business_name' => 'Demo Space',
+                'plan_id' => $plan?->id,
+                'is_active' => true,
+                'subscription_starts_at' => now(),
                 'subscription_expires_at' => now()->addYear(),
             ]
         );

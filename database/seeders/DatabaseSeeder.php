@@ -17,7 +17,11 @@ class DatabaseSeeder extends Seeder
             PlanSeeder::class,
             PermissionSeeder::class,
             RoleSeeder::class,
-            DemoUserSeeder::class,
         ]);
+
+        // The demo tenant has a publicly known password: never create it on a live server.
+        if (! app()->environment('production')) {
+            $this->call(DemoUserSeeder::class);
+        }
     }
 }

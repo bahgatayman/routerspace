@@ -21,7 +21,7 @@ return [
 
     'ssr' => [
 
-        'enabled' => (bool) env('INERTIA_SSR_ENABLED', true),
+        'enabled' => (bool) env('INERTIA_SSR_ENABLED', false), // no SSR bundle: shared hosting has no Node
 
         'runtime' => env('INERTIA_SSR_RUNTIME', 'node'),
 
@@ -152,7 +152,7 @@ return [
 
     'history' => [
 
-        'encrypt' => (bool) env('INERTIA_ENCRYPT_HISTORY', false),
+        'encrypt' => (bool) env('INERTIA_ENCRYPT_HISTORY', true), // page data in history is encrypted; cleared on logout
 
     ],
 
