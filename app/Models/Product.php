@@ -13,10 +13,22 @@ class Product extends Model
 {
     use HasFactory;
 
+    /**
+     * Predefined icon keys a product/service can be assigned, each mapped to
+     * an existing <x-ui.icon> name — never arbitrary markup. The chosen key
+     * is validated against these exact keys in ProductController; anything
+     * else is rejected before it ever reaches the database.
+     */
+    public const ICONS = [
+        'box', 'cup', 'tea', 'bottle', 'juice', 'can', 'snack',
+        'printer', 'wifi', 'clock', 'lock', 'bolt', 'tag',
+    ];
+
     protected $fillable = [
         'owner_id',
         'name',
         'type',
+        'icon',
         'price',
         'purchase_price',
         'sku',
@@ -79,6 +91,16 @@ class Product extends Model
             'service' => 'purple',
             default => 'blue',
         };
+    }
+
+    /**
+     * The <x-ui.icon> name to render for this product — the owner's chosen
+     * icon when there is one, else the same type-based default the product
+     * listing already used before per-product icons existed.
+     */
+    public function iconName(): string
+    {
+        return $this->icon ?? ($this->isService() ? 'bolt' : 'box');
     }
 
     // ---- Inventory & cost (derived; only InventoryService changes stock) ----

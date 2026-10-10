@@ -26,10 +26,14 @@ class ProductController extends Controller
     {
         $ownerId = TenantContext::id();
         $stock = in_array($request->get('stock'), ['low', 'out'], true) ? $request->get('stock') : null;
+        $search = trim(mb_substr((string) $request->get('q', ''), 0, 100));
 
         $products = Product::where('owner_id', $ownerId)
             ->when($stock === 'low', fn ($q) => $this->scopeLow($q))
             ->when($stock === 'out', fn ($q) => $this->scopeOut($q))
+            ->when($search !== '', fn ($q) => $q->where(fn ($w) => $w
+                ->where('name', 'like', '%'.addcslashes($search, '%_\\').'%')
+                ->orWhere('sku', 'like', '%'.addcslashes($search, '%_\\').'%')))
             ->orderBy('name')
             ->paginate(15)
             ->withQueryString();
@@ -41,7 +45,7 @@ class ProductController extends Controller
             'out' => $this->scopeOut(Product::where('owner_id', $ownerId))->count(),
         ];
 
-        return view('sales.products.index', compact('products', 'stock', 'counts'));
+        return view('sales.products.index', compact('products', 'stock', 'counts', 'search'));
     }
 
     /** Product details: pricing, stock metrics, sales-to-date profit and the stock history. */
@@ -198,6 +202,7 @@ class ProductController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'type' => 'required|in:product,service',
+            'icon' => ['nullable', 'string', Rule::in(Product::ICONS)],
             'price' => 'required|numeric|gt:0|max:1000000',
             'purchase_price' => 'nullable|numeric|min:0|max:1000000',
             'sku' => 'nullable|string|max:100',

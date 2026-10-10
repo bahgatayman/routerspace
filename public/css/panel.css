@@ -85,6 +85,8 @@
   --color-revenue: #276b53;            /* money earned: a calm positive accent */
   --color-teal: #23706b;    --color-teal-soft: #e5f1ef;
   --color-violet: #5b4aa6;  --color-violet-soft: #efecf8;
+  --color-coffee: #7a4a23;  --color-coffee-soft: #f1e6da;   /* product illustrations: coffee/tea drinks */
+  --color-snack: #8a7214;   --color-snack-soft: #f5efd8;    /* product illustrations: snacks */
   --color-chart: #3f68af;              /* single-series bars */
   --color-meter: var(--color-accent);
   --color-brand-gradient: linear-gradient(135deg, #1e3a73 0%, #2e5299 100%);
@@ -186,6 +188,8 @@ html[data-theme="dark"] {
   --color-revenue: #7fd0ae;
   --color-teal: #6cc8c0;    --color-teal-soft: rgba(108, 200, 192, .13);
   --color-violet: #b3a4f2;  --color-violet-soft: rgba(179, 164, 242, .13);
+  --color-coffee: #d8a876;  --color-coffee-soft: rgba(216, 168, 118, .14);
+  --color-snack: #d9c873;   --color-snack-soft: rgba(217, 200, 115, .14);
   --color-chart: #5a82c6;              /* Link Space secondary blue, calmed for large areas */
   --color-meter: linear-gradient(90deg, #436ec9, #8fb2f0);
   --color-brand-gradient: linear-gradient(135deg, #1c3566 0%, #2a4c8e 100%);
@@ -692,6 +696,7 @@ html[dir="rtl"] .ls-session-items summary svg { transform: scaleX(-1); }
 html[dir="rtl"] .ls-session-items details[open] summary svg { transform: rotate(90deg); }
 .ls-session-items ul { list-style: none; margin: var(--space-2) 0 0; padding: var(--space-3); display: grid; gap: var(--space-1); background: var(--color-surface-subtle); border-radius: var(--ls-r-ctl); }
 .ls-session-items li { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.ls-session-item-name { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .ls-session-item-end { display: inline-flex; align-items: center; gap: 2px; flex: none; }
 /* Small remove icon on each product line of a session card */
 .ls-item-remove { display: grid; place-items: center; width: 26px; height: 26px; margin-inline-end: -6px; border: 0; border-radius: var(--ls-r-sm); background: transparent; color: var(--color-text-muted); cursor: pointer; transition: background var(--ls-t-fast) var(--ls-ease), color var(--ls-t-fast) var(--ls-ease); }
@@ -701,7 +706,7 @@ html[dir="rtl"] .ls-session-items details[open] summary svg { transform: rotate(
 .ls-item-remove:disabled { opacity: .5; cursor: progress; }
 .ls-session-quick { display: flex; gap: var(--space-1); align-items: center; min-width: 0; overflow: hidden; margin-top: calc(var(--space-2) * -1); }
 .ls-session-quick-label { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.ls-qa { min-height: 28px; max-width: 160px; padding: 0 var(--space-2); border-radius: var(--ls-r-sm); border: 0; background: transparent; font: var(--fw-medium) 13px var(--ls-font); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; transition: background var(--ls-t-fast) var(--ls-ease), color var(--ls-t-fast) var(--ls-ease), transform 80ms var(--ls-ease); }
+.ls-qa { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: 160px; padding: 0 var(--space-2); border-radius: var(--ls-r-sm); border: 0; background: transparent; font: var(--fw-medium) 13px var(--ls-font); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; transition: background var(--ls-t-fast) var(--ls-ease), color var(--ls-t-fast) var(--ls-ease), transform 80ms var(--ls-ease); }
 .ls-qa:first-of-type { margin-inline-start: calc(var(--space-2) * -1); }
 html[dir="rtl"] .ls-qa { font-family: var(--ls-font-ar); }
 .ls-qa-plus { color: var(--color-accent); font-weight: var(--fw-strong); margin-inline-end: 2px; }
@@ -792,7 +797,7 @@ html[dir="rtl"] .ls-staff-email { text-align: right; } /* the address stays LTR,
 .ls-product-foot form { margin: 0; }
 .ls-product-delete { margin-inline-start: auto !important; }
 .ls-product.is-inactive .ls-product-name, .ls-product.is-inactive .ls-product-price { color: var(--color-text-secondary); }
-.ls-product.is-inactive .ls-product-icon { opacity: .6; }
+.ls-product.is-inactive .ls-product-icon, .ls-product.is-inactive .ls-picon { opacity: .6; }
 @media (max-width: 640px) { .ls-product-grid { grid-template-columns: 1fr; gap: var(--space-3); } .ls-product { padding: var(--space-4); } }
 
 /* ---------- 10a+. EXPERIMENT — quick booking modal (bookings/_quick-modal) ---------- */
@@ -983,6 +988,49 @@ html[dir="rtl"] .ls-token--add { font-family: var(--ls-font-ar); }
 .ls-inv-group[hidden] { display: none; }
 .ls-inv-group .ls-field { align-content: start; } /* side-by-side fields keep their inputs level */
 .ls-inv-legend { font-size: 15px; font-weight: var(--fw-strong); color: var(--color-text); padding: 0; margin-bottom: var(--space-2); }
+
+/* Premium 3D product illustration tile (x-ui.product-icon) — real transparent-WebP artwork
+   (public/images/products/*.webp) on a fixed pastel tile colour per icon key, so a given
+   product looks identical everywhere it appears. */
+.ls-picon { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; border-radius: var(--ls-r-ctl); overflow: hidden; }
+.ls-picon img { width: 72%; height: 72%; object-fit: contain; transition: transform var(--ls-t-fast) var(--ls-ease); }
+.ls-picon-sm { width: 26px; height: 26px; border-radius: 8px; }
+.ls-picon-md { width: 44px; height: 44px; border-radius: 10px; }
+.ls-picon-lg { width: 64px; height: 64px; border-radius: 15px; }
+.ls-picon-xl { width: 84px; height: 84px; border-radius: 18px; }
+
+/* Motion is restrained and layered on top of already-finished artwork, not a substitute for
+   it: idle float (bottle/juice) + a tiny animated steam accent (cup/tea) only — everything
+   else moves on hover/focus or once on selection. Neutralised app-wide by the existing
+   prefers-reduced-motion rule (section 13), so no separate media query is needed here. */
+.ls-pi-float-img { animation: ls-pi-float 3.6s ease-in-out infinite; }
+.ls-pi-glow { position: absolute; inset: 18% 30% auto 30%; height: 30%; border-radius: 50%; background: radial-gradient(circle, rgba(255, 255, 255, .55), transparent 70%); animation: ls-pi-glow-pulse 4.2s ease-in-out infinite; pointer-events: none; }
+.ls-pi-steam { position: absolute; top: 6%; left: 50%; width: 34%; height: 34%; transform: translateX(-50%); animation: ls-pi-steam 3.2s ease-in-out infinite; pointer-events: none; }
+.ls-icon-opt:hover .ls-pi-tilt-img, .ls-icon-opt:focus-within .ls-pi-tilt-img,
+.ls-product:hover .ls-pi-tilt-img, .ls-qa:hover .ls-pi-tilt-img { animation: ls-pi-tilt .5s ease-in-out; }
+.ls-icon-opt:hover .ls-picon img, .ls-icon-opt:focus-within .ls-picon img,
+.ls-product:hover .ls-picon img, .ls-qa:hover .ls-picon img { transform: scale(1.08); }
+.ls-icon-opt:has(input:checked) .ls-picon img { animation: ls-pi-pop .32s var(--ls-ease); }
+@keyframes ls-pi-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes ls-pi-glow-pulse { 0%, 100% { opacity: .2; } 50% { opacity: .65; } }
+@keyframes ls-pi-steam { 0%, 100% { transform: translateX(-50%) translateY(0); opacity: .5; } 50% { transform: translateX(-50%) translateY(-3px); opacity: .9; } }
+@keyframes ls-pi-tilt { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-7deg); } 65% { transform: rotate(5deg); } 100% { transform: rotate(0); } }
+@keyframes ls-pi-pop { 0% { transform: scale(1); } 45% { transform: scale(1.16); } 100% { transform: scale(1); } }
+
+/* Icon picker (product/service form) — same hidden-input + :has(:checked) pattern as .ls-pricing-model/.ls-plan-opt.
+   Selection is shown on the option tile (border/background/ring); each icon keeps its own
+   fixed colour at all times so colour never doubles as the "selected" signal on its own. */
+.ls-icon-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: var(--space-3); }
+.ls-icon-opt { position: relative; display: grid; justify-items: center; gap: 4px; padding: var(--space-2) var(--space-1); border: 1px solid var(--color-border); border-radius: var(--ls-r-ctl); background: var(--color-surface); cursor: pointer; transition: border-color var(--ls-t-fast) var(--ls-ease), background var(--ls-t-fast) var(--ls-ease); }
+.ls-icon-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.ls-icon-opt:hover { border-color: var(--color-border-hover); }
+.ls-icon-opt span { font-size: 10.5px; color: var(--color-text-muted); text-align: center; line-height: 1.2; }
+.ls-icon-opt:has(input:checked) { border-color: var(--color-accent); background: var(--color-surface-brand); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.ls-icon-opt:has(input:checked) span { color: var(--color-primary-text); font-weight: var(--fw-medium); }
+.ls-icon-opt:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+/* Compact picker inside the Add product pop-up so the whole form stays scannable. */
+.ls-dialog .ls-icon-picker { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: var(--space-2); }
+.ls-dialog .ls-icon-opt .ls-picon-xl { width: 48px; height: 48px; border-radius: 12px; }
 .ls-inv-preview { display: flex; gap: var(--space-6); flex-wrap: wrap; padding: var(--space-3) var(--space-4); border-radius: var(--ls-r-ctl); background: var(--color-surface-brand); }
 .ls-inv-preview > div { display: grid; gap: 2px; }
 .ls-inv-preview span { font-size: 12.5px; color: var(--color-text-muted); }
@@ -1006,6 +1054,57 @@ html[dir="rtl"] .ls-token--add { font-family: var(--ls-font-ar); }
 .ls-product.is-out { border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border)); }
 a.ls-product-name { display: block; text-decoration: none; border-radius: var(--ls-r-sm); }
 a.ls-product-name:hover { color: var(--color-primary-text); }
+
+/* Products catalog (sales/products/index): toolbar + richer cards. Scoped with
+   --catalog because .ls-product is shared by packages, workspaces and rooms. */
+.ls-product-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-5); }
+.ls-product-search { width: 300px; max-width: 100%; }
+.ls-product-search .ls-clear.is-on { display: grid; }
+#product-results[aria-busy="true"] { opacity: .55; transition: opacity var(--ls-t-fast) var(--ls-ease); }
+.ls-product-grid--catalog { grid-template-columns: repeat(auto-fill, minmax(264px, 1fr)); }
+.ls-product--catalog { position: relative; gap: var(--space-4); background: var(--color-surface); transition: border-color var(--ls-t-fast) var(--ls-ease), box-shadow var(--ls-t-med) var(--ls-ease), transform var(--ls-t-med) var(--ls-ease); }
+.ls-product--catalog:hover { transform: translateY(-2px); }
+.ls-product--catalog:has(.ls-product-name:focus-visible) { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-product--catalog.is-inactive { background: var(--color-surface-subtle); }
+.ls-product-head { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.ls-product-title { flex: 1; min-width: 0; padding-top: 2px; }
+.ls-product--catalog .ls-product-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 15.5px; outline: none; }
+.ls-product--catalog:has(.ls-pop:not([hidden])) { z-index: 5; }
+/* The whole card opens the product; menu, actions and links sit above this layer. */
+.ls-product--catalog .ls-product-name::after { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: 0; }
+.ls-product-menu, .ls-product--catalog .ls-product-foot, .ls-product-cost a { position: relative; z-index: 1; }
+.ls-product--catalog .ls-product-meta { flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; }
+.ls-product-kind { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: var(--fw-medium); background: var(--color-primary-soft); color: var(--color-primary-text); }
+.ls-product-kind.is-service { background: var(--color-violet-soft); color: var(--color-violet); }
+.ls-product-menu { margin-top: -4px; margin-inline-end: -8px; }
+.ls-product-menu .ls-pop { min-width: 190px; }
+.ls-menu form { margin: 0; }
+.ls-menu-item.is-danger, .ls-menu-item.is-danger svg { color: var(--color-danger); }
+.ls-menu-item.is-danger:hover, .ls-menu-item.is-danger:focus-visible { background: var(--color-danger-soft); }
+.ls-product-pricing { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--color-border-subtle); }
+.ls-product--catalog .ls-product-price { margin-top: 0; font-size: 24px; letter-spacing: -.02em; line-height: 1.1; }
+.ls-product-margin { flex: none; height: 22px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; background: var(--color-success-soft); color: var(--color-success); }
+.ls-product-margin.is-negative { background: var(--color-danger-soft); color: var(--color-danger); }
+.ls-product-cost { margin: calc(var(--space-3) * -1) 0 0; min-height: 20px; font-size: 13px; color: var(--color-text-muted); }
+.ls-product-cost b { font-weight: var(--fw-medium); }
+.ls-product-cost .is-profit { color: var(--color-success); }
+.ls-product-cost .is-negative { color: var(--color-danger); }
+.ls-product-cost .ls-link { font-size: 13px; }
+.ls-product-stock { display: flex; align-items: center; gap: 8px; margin-top: auto; min-height: 36px; padding: 0 var(--space-3); border-radius: var(--ls-r-ctl); background: var(--color-surface-subtle); font-size: 13px; color: var(--color-text-secondary); }
+.ls-product--catalog.is-inactive .ls-product-stock { background: var(--color-surface); }
+.ls-product-stock b { font-weight: var(--fw-strong); }
+.ls-product-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--color-success); box-shadow: 0 0 0 3px var(--color-success-soft); }
+.ls-product-stock.is-low { background: var(--color-warning-soft); color: var(--color-warning); }
+.ls-product-stock.is-out { background: var(--color-danger-soft); color: var(--color-danger); }
+.ls-product-stock.is-low .ls-product-dot, .ls-product-stock.is-out .ls-product-dot { background: currentColor; box-shadow: none; }
+.ls-product-stock.is-untracked .ls-product-dot { background: var(--color-text-muted); box-shadow: none; }
+.ls-product--catalog .ls-product-foot { flex-wrap: nowrap; gap: var(--space-2); padding-top: 0; border-top: 0; }
+.ls-product--catalog .ls-product-foot .ls-btn { flex: 1; justify-content: center; }
+@media (max-width: 640px) {
+  .ls-product-search { width: 100%; }
+  .ls-product--catalog:hover { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ls-product--catalog:hover { transform: none; } }
 /* Details page */
 .ls-strip-value.is-danger { color: var(--color-danger); }
 .ls-inv-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }

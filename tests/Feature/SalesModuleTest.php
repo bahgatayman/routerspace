@@ -365,4 +365,102 @@ class SalesModuleTest extends TestCase
 
         $this->assertSame(2, $item->fresh()->quantity);
     }
+
+    // --- Product icon picker ---
+
+    public function test_owner_can_create_a_product_with_a_selected_icon(): void
+    {
+        $owner = $this->owner($this->plan());
+
+        $this->actingAs($owner, 'owner')
+            ->post('/products', ['name' => 'Spanish Coffee', 'type' => 'product', 'price' => 30, 'is_active' => 1, 'icon' => 'cup'])
+            ->assertRedirect('/products');
+
+        $product = Product::where('owner_id', $owner->id)->firstOrFail();
+        $this->assertSame('cup', $product->icon);
+        $this->assertSame('cup', $product->iconName());
+    }
+
+    public function test_owner_can_edit_a_products_icon(): void
+    {
+        $owner = $this->owner($this->plan());
+        $product = $this->product($owner, ['icon' => 'box']);
+
+        $this->actingAs($owner, 'owner')
+            ->put("/products/{$product->id}", [
+                'name' => $product->name, 'type' => 'product', 'price' => $product->price,
+                'is_active' => 1, 'icon' => 'tea',
+            ])
+            ->assertRedirect('/products');
+
+        $this->assertSame('tea', $product->fresh()->icon);
+    }
+
+    public function test_creating_a_product_rejects_an_icon_key_outside_the_predefined_list(): void
+    {
+        $owner = $this->owner($this->plan());
+
+        $this->actingAs($owner, 'owner')
+            ->post('/products', ['name' => 'Hack', 'type' => 'product', 'price' => 10, 'is_active' => 1, 'icon' => '<script>alert(1)</script>'])
+            ->assertSessionHasErrors('icon');
+
+        $this->assertDatabaseMissing('products', ['owner_id' => $owner->id, 'name' => 'Hack']);
+    }
+
+    public function test_a_product_without_an_assigned_icon_falls_back_to_its_type_default(): void
+    {
+        $owner = $this->owner($this->plan());
+        $product = $this->product($owner, ['type' => 'product']);
+        $service = $this->product($owner, ['type' => 'service', 'name' => 'Printing']);
+
+        $this->assertNull($product->icon);
+        $this->assertSame('box', $product->iconName());
+        $this->assertNull($service->icon);
+        $this->assertSame('bolt', $service->iconName());
+    }
+
+    public function test_staff_without_products_manage_permission_cannot_update_a_products_icon(): void
+    {
+        $owner = $this->owner($this->plan());
+        $product = $this->product($owner, ['icon' => 'box']);
+        $staff = $this->staffWithRole($owner, 'receptionist'); // never has products.manage
+
+        auth('owner')->logout();
+        $this->actingAs($staff, 'staff')
+            ->put("/products/{$product->id}", [
+                'name' => $product->name, 'type' => 'product', 'price' => $product->price,
+                'is_active' => 1, 'icon' => 'tea',
+            ])
+            ->assertSessionHas('permission_denied');
+
+        $this->assertSame('box', $product->fresh()->icon);
+    }
+
+    public function test_product_icon_renders_in_the_catalog_listing(): void
+    {
+        $owner = $this->owner($this->plan());
+        $this->product($owner, ['name' => 'Spanish Coffee', 'icon' => 'cup']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/products');
+
+        $response->assertOk();
+        $response->assertSee('Spanish Coffee');
+        // Confirms the per-product illustration asset rendered, not the old
+        // hardcoded type-based box/bolt default.
+        $response->assertSee('images/products/cup.webp', false);
+    }
+
+    public function test_product_icon_renders_beside_the_name_in_active_sessions(): void
+    {
+        $owner = $this->owner($this->plan());
+        $booking = $this->bookingFor($owner, ['status' => 'open']);
+        $product = $this->product($owner, ['name' => 'Spanish Coffee', 'icon' => 'cup']);
+        $this->actingAs($owner, 'owner')->post("/bookings/{$booking->id}/items", ['product_id' => $product->id, 'quantity' => 1]);
+
+        $response = $this->actingAs($owner, 'owner')->get('/active-sessions');
+
+        $response->assertOk();
+        $response->assertSee('Spanish Coffee');
+        $response->assertSee('images/products/cup.webp', false);
+    }
 }

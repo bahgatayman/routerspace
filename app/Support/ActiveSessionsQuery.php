@@ -30,7 +30,7 @@ class ActiveSessionsQuery
         $shared = SharedSession::where('owner_id', $ownerId)
             ->where('status', 'open')
             ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
-            ->with(['room.workspace', 'hotspotUser', 'sale.items'])
+            ->with(['room.workspace', 'hotspotUser', 'sale.items.product'])
             ->orderBy('opened_at')
             ->get()
             ->map(fn (SharedSession $session) => ActiveSessionRow::fromSharedSession($session));
@@ -48,7 +48,7 @@ class ActiveSessionsQuery
             ->where('status', 'confirmed')
             ->whereDate('booking_date', $now->toDateString())
             ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
-            ->with(['room.workspace', 'hotspotUser', 'sale.items'])
+            ->with(['room.workspace', 'hotspotUser', 'sale.items.product'])
             ->get()
             ->filter(fn (Booking $booking) => $booking->startsAt()->lte($now) && $booking->endsAt()->gt($now))
             ->map(fn (Booking $booking) => ActiveSessionRow::fromBooking($booking));
@@ -59,7 +59,7 @@ class ActiveSessionsQuery
             ->where('status', 'open')
             ->whereHas('room', fn ($q) => $q->where('type', '!=', 'shared'))
             ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
-            ->with(['room.workspace', 'hotspotUser', 'sale.items'])
+            ->with(['room.workspace', 'hotspotUser', 'sale.items.product'])
             ->orderBy('start_time')
             ->get()
             ->map(fn (Booking $booking) => ActiveSessionRow::fromBooking($booking));

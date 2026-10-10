@@ -41,6 +41,17 @@
         'eye-off' => '<path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-2.6 3.5M6.7 6.7C3.9 8.5 2.5 12 2.5 12S6 19 12 19a9.6 9.6 0 0 0 5.3-1.7M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18"/>',
         'lock' => '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
         'tag' => '<path d="M12.5 3.5h6a1 1 0 0 1 1 1v6a1 1 0 0 1-.3.7l-9 9a1 1 0 0 1-1.4 0l-6.7-6.7a1 1 0 0 1 0-1.4l9-9a1 1 0 0 1 .7-.3zM17 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/>',
+
+        // Product/service icon picker (see Product::ICONS)
+        'tea' => '<path d="M4.5 9h11v4.5a5.5 5.5 0 0 1-5.5 5.5 5.5 5.5 0 0 1-5.5-5.5zM15.5 10.5H17a2 2 0 0 1 0 4h-1.5M7 9 6 5l2 .5L9 4"/>',
+        'bottle' => '<path d="M10 2h4v2.5l1.5 2V20a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 8.5 20V6.5l1.5-2z"/><path d="M8.5 10h7"/>',
+        'juice' => '<path d="M7 3h10l-1.2 16.3a1.5 1.5 0 0 1-1.5 1.4H9.7a1.5 1.5 0 0 1-1.5-1.4zM15.5 3l2-2M7.5 9h9"/>',
+        'can' => '<rect x="6.5" y="3" width="11" height="18" rx="3"/><path d="M6.5 7.5h11M6.5 16.5h11"/>',
+        'snack' => '<path d="M6.3 8c.1-2.3 1.3-4.5 3.4-4.5h4.6c2.1 0 3.3 2.2 3.4 4.5l.9 10.8a1.5 1.5 0 0 1-1.5 1.7H7a1.5 1.5 0 0 1-1.5-1.7zM8 8.2h8"/>',
+        'printer' => '<path d="M7 8V4h10v4"/><rect x="5" y="8" width="14" height="8" rx="1.5"/><path d="M7 16v4h10v-4"/>',
+        'more' => '<path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/>',
+        'edit' => '<path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-4-4L4 16z"/><path d="m14 6 4 4"/>',
+        'power' => '<path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>',
     ];
 @endphp
 <svg {{ $attributes->merge(['class' => 'ls-icon']) }} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $paths[$name] ?? '' !!}</svg>

@@ -188,7 +188,10 @@
                 <ul>
                     @foreach ($items as $item)
                         <li>
-                            <span class="ls-trunc">{{ $item->quantity }}× {{ $item->name }}</span>
+                            <span class="ls-session-item-name">
+                                <x-ui.product-icon :name="$item->product?->iconName() ?? 'box'" size="sm" />
+                                <span class="ls-trunc">{{ $item->quantity }}× {{ $item->name }}</span>
+                            </span>
                             <span class="ls-session-item-end">
                                 <x-ui.money :amount="$item->line_total" />
                                 @if ($canSell)
@@ -215,7 +218,7 @@
             @foreach ($quickProducts as $p)
                 <button type="button" class="ls-qa" title="{{ __('app.ui.sessions.add_to_bill') }}: {{ $p->name }}"
                         data-qa-kind="{{ $isShared ? 'shared' : 'booking' }}" data-qa-id="{{ $model->id }}"
-                        data-qa-product="{{ $p->id }}" data-qa-name="{{ $p->name }}" data-qa-customer="{{ $customer->name }}"><span class="ls-qa-plus" aria-hidden="true">+</span>{{ $p->name }}</button>
+                        data-qa-product="{{ $p->id }}" data-qa-name="{{ $p->name }}" data-qa-customer="{{ $customer->name }}"><span class="ls-qa-plus" aria-hidden="true">+</span><x-ui.product-icon :name="$p->iconName()" size="sm" />{{ $p->name }}</button>
             @endforeach
         </div>
     @endif

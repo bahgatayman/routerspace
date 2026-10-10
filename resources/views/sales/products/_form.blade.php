@@ -40,6 +40,22 @@
         </div>
     </div>
 
+    {{-- Icon --}}
+    <fieldset class="ls-inv-group">
+        <legend class="ls-inv-legend">{{ __('app.inventory.icon') }}</legend>
+        <p class="ls-hint">{{ __('app.inventory.icon_hint') }}</p>
+        <div class="ls-icon-picker" role="radiogroup" aria-label="{{ __('app.inventory.icon') }}">
+            @foreach (\App\Models\Product::ICONS as $iconKey)
+                <label class="ls-icon-opt">
+                    <input type="radio" name="icon" value="{{ $iconKey }}" @checked(old('icon', $product->icon ?? '') === $iconKey)>
+                    <x-ui.product-icon :name="$iconKey" size="xl" />
+                    <span>{{ __('app.inventory.icons.'.$iconKey) }}</span>
+                </label>
+            @endforeach
+        </div>
+        @error('icon') <p class="ls-error">{{ $message }}</p> @enderror
+    </fieldset>
+
     {{-- Pricing --}}
     <fieldset class="ls-inv-group">
         <legend class="ls-inv-legend">{{ __('app.inventory.pricing') }}</legend>
