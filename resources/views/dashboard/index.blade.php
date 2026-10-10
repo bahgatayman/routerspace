@@ -3,35 +3,37 @@
 @section('page-title', __('app.section.dashboard'))
 
 @section('content')
-    <div class="flex flex-wrap items-center gap-3 mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">Welcome, {{ $owner->business_name }}</h1>
-        @if ($hasConfiguredWorkingHours ?? false)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium {{ $isOpenNow ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500' }}">
-                <span class="w-1.5 h-1.5 rounded-full {{ $isOpenNow ? 'bg-green-500' : 'bg-gray-400' }}"></span>
-                {{ $isOpenNow ? __('app.label.open_now') : __('app.label.closed_now') }}
-            </span>
-        @endif
-    </div>
+    <x-ui.page-header :eyebrow="now()->translatedFormat('l, j F')" title="{{ __('app.dashboard.welcome', ['business' => $owner->business_name]) }}" class="mb-6">
+        <x-slot:actions>
+            @if ($hasConfiguredWorkingHours ?? false)
+                <span class="ls-status {{ $isOpenNow ? 'ls-status--ok' : 'ls-status--neutral' }}">
+                    <span class="ls-dot" @unless($isOpenNow) style="background: var(--color-text-muted); box-shadow: none;" @endunless></span>
+                    {{ $isOpenNow ? __('app.label.open_now') : __('app.label.closed_now') }}
+                </span>
+            @endif
+        </x-slot:actions>
+    </x-ui.page-header>
 
     @if ($owner->hasFeature('hotspot') && $mikrotikError)
-        <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg mb-6">
-            MikroTik unreachable — live stats unavailable
-        </div>
+        <x-ui.banner tone="warn" class="mb-6">{{ __('app.dashboard.mikrotik_unreachable') }}</x-ui.banner>
     @endif
 
-    {{-- ================= Top KPIs — the 4-6 most important numbers =================
-         Needs Attention always renders here regardless of feature mix (a
-         hotspot-only owner still needs to see subscription alerts), so this
-         grid is never conditionally hidden as a whole. --}}
-    {{-- Sized by the space it actually has (container queries in panel.css), not the viewport: 2 → 3 → 6 columns, Revenue leads at double width. --}}
-    <div class="ls-kpis-wrap mb-8"><div class="ls-kpis ls-kpis--5">
-        @if ($showRevenue)
-            <div class="ls-kpi-hero bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
+    {{-- ================= Hero — revenue trend chart (visual left) + Revenue Today (visual right) =================
+         ls-visual-ltr forces grid column 1 to be the physical left regardless of
+         page direction (plain logical/RTL-flipping grid columns would otherwise
+         swap these in Arabic — see panel.css), while each card's own content still
+         reads in the page's natural direction. --}}
+    @if ($showRevenue)
+        <div class="ls-visual-ltr grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 mb-6">
+            <div>
+                @include('admin.partials.chart', ['id' => 'ls-revenue-trend', 'title' => __('app.dashboard.revenue_trend'), 'spec' => $revenueTrendSpec, 'height' => 240])
+            </div>
+            <div class="ls-card p-4 lg:p-6">
                 <div class="flex items-center justify-between">
                     <div class="min-w-0">
                         <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.dashboard.revenue_today') }}</p>
-                        <p class="text-2xl lg:text-3xl font-bold text-green-600 mt-1 whitespace-nowrap">ج.م {{ number_format($revenueToday, 2) }}</p>
-                        <p class="text-xs text-gray-400 mt-1 truncate">{{ __('app.dashboard.revenue_this_month') }}: ج.م {{ number_format($revenueThisMonth, 2) }}</p>
+                        <p class="text-2xl lg:text-3xl font-bold text-green-600 mt-1 whitespace-nowrap"><x-ui.money :amount="$revenueToday" /></p>
+                        <p class="text-xs text-gray-400 mt-1 truncate">{{ __('app.dashboard.revenue_this_month') }}: <x-ui.money :amount="$revenueThisMonth" /></p>
                         @if ($revenueComparison['changePercent'] !== null)
                             @php $up = $revenueComparison['change'] >= 0; @endphp
                             <p class="text-xs mt-1 font-medium {{ $up ? 'text-green-600' : 'text-red-600' }}">
@@ -43,32 +45,34 @@
                         @endif
                     </div>
                     <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
-                        <svg class="w-5 h-5 lg:w-6 lg:h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
+                        <x-ui.icon name="money" class="text-green-600" />
                     </div>
                 </div>
             </div>
-        @endif
+        </div>
+    @endif
 
+    {{-- ================= Compact KPI row — the remaining essentials =================
+         Needs Attention always renders here regardless of feature mix (a
+         hotspot-only owner still needs to see subscription alerts), so this
+         grid is never conditionally hidden as a whole. --}}
+    <div class="ls-kpis-wrap mb-8"><div class="ls-kpis ls-kpis--4">
         @if ($owner->hasFeature('booking'))
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
+            <div class="ls-card p-4 lg:p-6">
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.label.today_bookings') }}</p>
                         <p class="text-2xl lg:text-3xl font-bold text-gray-900 mt-1">{{ $todayBookings }}</p>
                     </div>
                     <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-orange-50 rounded-xl flex items-center justify-center shrink-0">
-                        <svg class="w-5 h-5 lg:w-6 lg:h-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                        </svg>
+                        <x-ui.icon name="calendar" class="text-orange-600" />
                     </div>
                 </div>
             </div>
         @endif
 
         @if ($showWorkspace)
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
+            <div class="ls-card p-4 lg:p-6">
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.dashboard.current_occupancy') }}</p>
@@ -76,38 +80,32 @@
                         <p class="text-xs text-gray-400 mt-1">{{ __('app.dashboard.seats_occupied', ['occupied' => $occupancy['occupied'], 'capacity' => $occupancy['capacity']]) }}</p>
                     </div>
                     <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-brand-50 rounded-xl flex items-center justify-center shrink-0">
-                        <svg class="w-5 h-5 lg:w-6 lg:h-6 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
-                        </svg>
+                        <x-ui.icon name="users" class="text-brand-600" />
                     </div>
                 </div>
             </div>
 
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
+            <div class="ls-card p-4 lg:p-6">
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.label.available_rooms') }}</p>
                         <p class="text-2xl lg:text-3xl font-bold text-green-600 mt-1">{{ $availableRoomsNow }}</p>
                     </div>
                     <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
-                        <svg class="w-5 h-5 lg:w-6 lg:h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                        </svg>
+                        <x-ui.icon name="door" class="text-green-600" />
                     </div>
                 </div>
             </div>
         @endif
 
-        <a href="{{ route('notifications.index') }}" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6 hover:shadow-md transition block">
+        <a href="{{ route('notifications.index') }}" class="ls-card is-link p-4 lg:p-6 block">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.dashboard.needs_attention') }}</p>
                     <p class="text-2xl lg:text-3xl font-bold {{ $needsAttentionCount > 0 ? 'text-red-600' : 'text-gray-900' }} mt-1">{{ $needsAttentionCount }}</p>
                 </div>
                 <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 {{ $needsAttentionCount > 0 ? 'bg-red-50' : 'bg-gray-50' }} rounded-xl flex items-center justify-center shrink-0">
-                    <svg class="w-5 h-5 lg:w-6 lg:h-6 {{ $needsAttentionCount > 0 ? 'text-red-600' : 'text-gray-400' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-                    </svg>
+                    <x-ui.icon name="bell" class="{{ $needsAttentionCount > 0 ? 'text-red-600' : 'text-gray-400' }}" />
                 </div>
             </div>
         </a>
@@ -143,20 +141,25 @@
         </div>
     @endif
 
-    {{-- ================= Middle — trends & operational insight ================= --}}
-    @if ($showRevenue)
-        @php $maxTrend = max(1, ...array_values($revenueTrend)); @endphp
-        <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6 mb-6">
-            <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.revenue_trend') }}</h3>
-            <div class="flex items-end gap-1 lg:gap-2 h-40 overflow-x-auto">
-                @foreach ($revenueTrend as $date => $amount)
-                    <div class="flex-1 min-w-[1.5rem] flex flex-col items-center gap-1 h-full justify-end">
-                        <span class="text-[10px] text-gray-500 whitespace-nowrap">{{ $amount > 0 ? number_format($amount, 0) : '' }}</span>
-                        <div class="w-full rounded-t-md bg-brand-500" style="height: {{ ($amount / $maxTrend) * 120 }}px; min-height: 2px;"></div>
-                        <span class="text-[10px] text-gray-400">{{ \Carbon\Carbon::parse($date)->format('j M') }}</span>
-                    </div>
-                @endforeach
-            </div>
+    {{-- ================= Main analytics — bookings activity, status ================= --}}
+    @if ($owner->hasFeature('booking'))
+        <div class="mb-6">
+            @include('admin.partials.chart', ['id' => 'ls-bookings-activity', 'title' => __('app.dashboard.bookings_activity'), 'spec' => $bookingsActivitySpec, 'height' => 240])
+        </div>
+    @endif
+
+    @if ($owner->hasFeature('booking') || $showProducts)
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 mb-6">
+            @if ($owner->hasFeature('booking'))
+                <div class="{{ $showProducts ? '' : 'lg:col-span-2' }}">
+                    @include('admin.partials.chart', ['id' => 'ls-booking-status', 'title' => __('app.dashboard.booking_status'), 'spec' => $bookingStatusSpec, 'height' => 240])
+                </div>
+            @endif
+            @if ($showProducts)
+                <div class="{{ $owner->hasFeature('booking') ? '' : 'lg:col-span-2' }}">
+                    @include('admin.partials.chart', ['id' => 'ls-products-services', 'title' => __('app.dashboard.products_services'), 'spec' => $productsServicesSpec, 'height' => 240])
+                </div>
+            @endif
         </div>
     @endif
 
@@ -174,7 +177,7 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 @forelse ($roomUtilization as $row)
                     @php $value = $row['utilization_percent'] ?? $row['hours_booked']; @endphp
-                    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6">
+                    <div class="ls-card p-4 lg:p-6">
                         <div class="flex items-center justify-between gap-2 mb-2">
                             <span class="font-medium text-gray-900 truncate">{{ $row['room_name'] }}</span>
                             <span class="text-[11px] text-gray-400 shrink-0">{{ $row['room']->typeLabel() }}</span>
@@ -190,7 +193,7 @@
                         </div>
                         @if ($canViewRevenue)
                             <div class="flex items-center justify-between gap-2">
-                                <span class="text-sm font-semibold text-gray-900 whitespace-nowrap">ج.م {{ number_format($row['revenue'], 2) }}</span>
+                                <span class="text-sm font-semibold text-gray-900 whitespace-nowrap"><x-ui.money :amount="$row['revenue']" /></span>
                                 @if ($row['revenue_change_percent'] !== null)
                                     @php $rup = $row['revenue_change_percent'] >= 0; @endphp
                                     <span class="text-[11px] font-medium shrink-0 {{ $rup ? 'text-green-600' : 'text-red-600' }}">
@@ -199,7 +202,7 @@
                                 @endif
                             </div>
                             @if ($row['revenue_per_open_hour'] !== null)
-                                <p class="text-[11px] text-gray-400 mt-1">ج.م {{ number_format($row['revenue_per_open_hour'], 2) }} {{ __('app.dashboard.revenue_per_open_hour') }}</p>
+                                <p class="text-[11px] text-gray-400 mt-1"><x-ui.money :amount="$row['revenue_per_open_hour']" /> {{ __('app.dashboard.revenue_per_open_hour') }}</p>
                             @endif
                         @endif
                     </div>
@@ -213,138 +216,71 @@
         </div>
     @endif
 
+    {{-- Supporting detail: *when* the business is busiest (day x hour) — a different
+         question than the Bookings Activity trend above ("how many, over the period"). --}}
     @if ($owner->hasFeature('booking'))
         @php
             $heatmapDayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
             $heatmapMax = collect($peakHoursGrid)->flatten()->max() ?? 0;
         @endphp
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6">
-            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6 lg:col-span-2">
-                <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.peak_hours_heatmap') }}</h3>
-                @if ($heatmapMax === 0)
-                    <p class="text-sm text-gray-400">{{ __('app.dashboard.no_heatmap_data') }}</p>
-                @else
-                    <div class="ls-heatmap" role="img" aria-label="{{ __('app.dashboard.peak_hours_heatmap') }}">
-                        <div class="ls-heatmap-row ls-heatmap-row--header">
-                            <div class="ls-heatmap-cell ls-heatmap-cell--label"></div>
-                            @foreach ($heatmapDayKeys as $dayKey)
-                                <div class="ls-heatmap-cell ls-heatmap-cell--header">{{ mb_substr(__('app.day.'.$dayKey), 0, 3) }}</div>
-                            @endforeach
-                        </div>
-                        @for ($hour = 0; $hour < 24; $hour++)
-                            <div class="ls-heatmap-row">
-                                <div class="ls-heatmap-cell ls-heatmap-cell--label">{{ sprintf('%02d', $hour) }}</div>
-                                @foreach ($heatmapDayKeys as $dow => $dayKey)
-                                    @php
-                                        $count = $peakHoursGrid[$dow][$hour] ?? 0;
-                                        $intensity = $heatmapMax > 0 ? round(($count / $heatmapMax) * 100) : 0;
-                                    @endphp
-                                    <div
-                                        class="ls-heatmap-cell"
-                                        @if ($count > 0) style="background: color-mix(in srgb, var(--color-chart) {{ $intensity }}%, transparent);" @endif
-                                        title="{{ __('app.day.'.$dayKey) }} {{ sprintf('%02d:00', $hour) }} — {{ $count }}"
-                                    ></div>
-                                @endforeach
-                            </div>
-                        @endfor
-                    </div>
-                @endif
-            </div>
-
-            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6">
-                <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.booking_status') }}</h3>
-                @php $totalStatus = array_sum($statusBreakdown); @endphp
-                @if ($totalStatus === 0)
-                    <p class="text-sm text-gray-400">{{ __('app.dashboard.no_data_for_period') }}</p>
-                @else
-                    <div class="space-y-2">
-                        @foreach ($statusBreakdown as $status => $count)
-                            @continue($count === 0)
-                            @php $tmp = new \App\Models\Booking(['status' => $status]); @endphp
-                            <div class="flex items-center justify-between text-sm">
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $tmp->statusBadgeClass() }}">
-                                    {{ $tmp->statusLabel() }}
-                                </span>
-                                <span class="text-gray-500">{{ $count }}</span>
-                            </div>
+        <div class="ls-card p-4 lg:p-6 mb-6">
+            <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.peak_hours_heatmap') }}</h3>
+            @if ($heatmapMax === 0)
+                <p class="text-sm text-gray-400">{{ __('app.dashboard.no_heatmap_data') }}</p>
+            @else
+                <div class="ls-heatmap" role="img" aria-label="{{ __('app.dashboard.peak_hours_heatmap') }}">
+                    <div class="ls-heatmap-row ls-heatmap-row--header">
+                        <div class="ls-heatmap-cell ls-heatmap-cell--label"></div>
+                        @foreach ($heatmapDayKeys as $dayKey)
+                            <div class="ls-heatmap-cell ls-heatmap-cell--header">{{ mb_substr(__('app.day.'.$dayKey), 0, 3) }}</div>
                         @endforeach
                     </div>
-                @endif
-            </div>
+                    @for ($hour = 0; $hour < 24; $hour++)
+                        <div class="ls-heatmap-row">
+                            <div class="ls-heatmap-cell ls-heatmap-cell--label">{{ sprintf('%02d', $hour) }}</div>
+                            @foreach ($heatmapDayKeys as $dow => $dayKey)
+                                @php
+                                    $count = $peakHoursGrid[$dow][$hour] ?? 0;
+                                    $intensity = $heatmapMax > 0 ? round(($count / $heatmapMax) * 100) : 0;
+                                @endphp
+                                <div
+                                    class="ls-heatmap-cell"
+                                    @if ($count > 0) style="background: color-mix(in srgb, var(--color-chart) {{ $intensity }}%, transparent);" @endif
+                                    title="{{ __('app.day.'.$dayKey) }} {{ sprintf('%02d:00', $hour) }} — {{ $count }}"
+                                ></div>
+                            @endforeach
+                        </div>
+                    @endfor
+                </div>
+            @endif
         </div>
     @endif
 
     @if ($owner->hasFeature('hotspot'))
-    <div class="ls-kpis-wrap mb-8"><div class="ls-kpis ls-kpis--4">
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.label.total_users') }}</p>
-                    <p class="text-2xl lg:text-3xl font-bold text-gray-900 mt-1">{{ $totalUsers }}</p>
-                </div>
-                <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-blue-50 rounded-xl flex items-center justify-center">
-                    <svg class="w-5 h-5 lg:w-6 lg:h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
-                    </svg>
-                </div>
-            </div>
+    <div class="ls-strip">
+        <div>
+            <span class="ls-strip-label">{{ __('app.label.total_users') }}</span>
+            <span class="ls-strip-value">{{ $totalUsers }}</span>
         </div>
-
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.label.active_users') }}</p>
-                    <p class="text-2xl lg:text-3xl font-bold text-gray-900 mt-1">{{ $activeUsers }}</p>
-                </div>
-                <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-green-50 rounded-xl flex items-center justify-center">
-                    <svg class="w-5 h-5 lg:w-6 lg:h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                </div>
-            </div>
+        <div>
+            <span class="ls-strip-label">{{ __('app.label.active_users') }}</span>
+            <span class="ls-strip-value">{{ $activeUsers }}</span>
         </div>
-
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.label.online_now') }}</p>
-                    <p class="text-2xl lg:text-3xl font-bold text-gray-900 mt-1">{{ $activeSessions }}</p>
-                    <p class="text-xs text-gray-400 mt-1">Live from MikroTik</p>
-                </div>
-                <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-purple-50 rounded-xl flex items-center justify-center">
-                    <svg class="w-5 h-5 lg:w-6 lg:h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
-                    </svg>
-                </div>
-            </div>
+        <div>
+            <span class="ls-strip-label">{{ __('app.label.online_now') }}</span>
+            <span class="ls-strip-value is-brand">{{ $activeSessions }}</span>
+            <span class="ls-strip-meta">{{ __('app.dashboard.live_from_mikrotik') }}</span>
         </div>
-
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.section.speed_profiles') }}</p>
-                    <p class="text-2xl lg:text-3xl font-bold text-gray-900 mt-1">{{ $totalProfiles }}</p>
-                </div>
-                <div class="ls-kpi-icon w-10 h-10 lg:w-12 lg:h-12 bg-orange-50 rounded-xl flex items-center justify-center">
-                    <svg class="w-5 h-5 lg:w-6 lg:h-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                    </svg>
-                </div>
-            </div>
+        <div>
+            <span class="ls-strip-label">{{ __('app.section.speed_profiles') }}</span>
+            <span class="ls-strip-value">{{ $totalProfiles }}</span>
         </div>
-    </div></div>
-
-    <h2 class="text-lg font-semibold text-gray-700 mb-4">{{ __('app.label.quick_links') }}</h2>
-    <div class="flex flex-col sm:flex-row flex-wrap gap-3 lg:gap-4 mb-8">
-        <a href="/users/create" class="bg-brand-600 text-white px-5 py-2.5 rounded-lg hover:bg-brand-700 transition text-sm font-medium shadow-sm text-center">
-            {{ __('app.btn.add_user') }}
-        </a>
-        <a href="/sessions" class="bg-purple-600 text-white px-5 py-2.5 rounded-lg hover:bg-purple-700 transition text-sm font-medium shadow-sm text-center">
-            {{ __('app.label.view_active_sessions') }}
-        </a>
-        <a href="/speed-profiles" class="bg-orange-600 text-white px-5 py-2.5 rounded-lg hover:bg-orange-700 transition text-sm font-medium shadow-sm text-center">
-            {{ __('app.label.manage_speed_profiles') }}
-        </a>
+        <div>
+            <span class="ls-strip-label">{{ __('app.dashboard.router_status') }}</span>
+            <span class="ls-strip-value {{ $routerConnected ? 'is-brand' : 'is-warn' }}">
+                {{ $routerConnected ? __('app.dashboard.router_connected') : __('app.dashboard.router_unreachable') }}
+            </span>
+        </div>
     </div>
     @endif
 
@@ -352,7 +288,7 @@
     @if ($owner->hasFeature('booking') || isset($newCustomers))
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6">
         @if ($owner->hasFeature('booking'))
-            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6 lg:col-span-2">
+            <div class="ls-card p-4 lg:p-6 lg:col-span-2">
                 <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.todays_schedule') }}</h3>
                 @forelse ($todaysSchedule as $booking)
                     <div class="flex items-center justify-between gap-3 py-2.5 border-b border-gray-50 last:border-0 text-sm">
@@ -371,7 +307,7 @@
         @endif
 
         @if (isset($newCustomers))
-            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6">
+            <div class="ls-card p-4 lg:p-6">
                 <p class="text-xs lg:text-sm font-medium text-gray-500">{{ __('app.dashboard.new_customers') }}</p>
                 <p class="text-2xl lg:text-3xl font-bold text-gray-900 mt-1">{{ $newCustomers }}</p>
                 <p class="text-[11px] text-gray-400 mt-1">{{ __('app.dashboard.period_'.$periodKey) }}</p>
@@ -386,7 +322,11 @@
                     <div>
                         <p class="text-[11px] text-gray-500">{{ __('app.dashboard.avg_spend_per_customer') }}</p>
                         <p class="text-lg font-semibold text-gray-900 mt-0.5 whitespace-nowrap">
-                            {{ $averageSpendPerCustomer !== null ? 'ج.م '.number_format($averageSpendPerCustomer, 2) : __('app.dashboard.not_enough_data') }}
+                            @if ($averageSpendPerCustomer !== null)
+                                <x-ui.money :amount="$averageSpendPerCustomer" />
+                            @else
+                                {{ __('app.dashboard.not_enough_data') }}
+                            @endif
                         </p>
                     </div>
                 </div>
@@ -395,93 +335,4 @@
     </div>
     @endif
 
-    @if ($showWorkspace && $owner->hasFeature('booking') && isset($roomUtilization))
-        <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6 mb-6">
-            <h3 class="font-semibold text-gray-900 mb-4">{{ __('app.dashboard.room_utilization_details') }}</h3>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead>
-                        <tr class="text-left text-gray-500 border-b">
-                            <th class="pb-3">{{ __('app.table.th.room') }}</th>
-                            <th class="pb-3 hidden sm:table-cell">{{ __('app.dashboard.hours_booked') }}</th>
-                            <th class="pb-3 hidden sm:table-cell">{{ __('app.dashboard.bookings') }}</th>
-                            @if ($canViewRevenue)
-                                <th class="pb-3">{{ __('app.financial.revenue') }}</th>
-                                <th class="pb-3 hidden sm:table-cell">{{ __('app.dashboard.revenue_per_open_hour') }}</th>
-                            @endif
-                            <th class="pb-3">{{ __('app.dashboard.room_utilization') }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @forelse ($roomUtilization as $row)
-                            <tr class="border-b last:border-0">
-                                <td class="py-3 pe-3 font-medium text-gray-900">
-                                    {{ $row['room_name'] }}
-                                    <span class="block sm:hidden text-xs font-normal text-gray-500">{{ $row['hours_booked'] }}{{ __('app.ui.unit_h') }} · {{ $row['bookings_count'] }} {{ __('app.dashboard.bookings') }}</span>
-                                </td>
-                                <td class="py-3 hidden sm:table-cell">{{ $row['hours_booked'] }}</td>
-                                <td class="py-3 hidden sm:table-cell">{{ $row['bookings_count'] }}</td>
-                                @if ($canViewRevenue)
-                                    <td class="py-3 pe-3 whitespace-nowrap">ج.م {{ number_format($row['revenue'], 2) }}</td>
-                                    <td class="py-3 hidden sm:table-cell whitespace-nowrap">{{ $row['revenue_per_open_hour'] !== null ? 'ج.م '.number_format($row['revenue_per_open_hour'], 2) : '—' }}</td>
-                                @endif
-                                <td class="py-3">{{ $row['utilization_percent'] !== null ? $row['utilization_percent'].'%' : '—' }}</td>
-                            </tr>
-                        @empty
-                            <tr><td colspan="{{ $canViewRevenue ? 6 : 4 }}" class="py-6 text-center text-gray-400">{{ __('app.dashboard.no_room_data') }}</td></tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    @endif
-
-    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 lg:p-6 mb-8">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="font-semibold text-gray-900">{{ __('app.dashboard.needs_attention') }}</h3>
-            <a href="{{ route('notifications.index') }}" class="text-xs font-medium text-brand-600 hover:text-brand-800">{{ __('app.notif.view_all') }}</a>
-        </div>
-        @forelse ($needsAttentionItems as $n)
-            @php $c = $n->levelColor(); @endphp
-            <a href="{{ route('notifications.open', $n->id) }}" class="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition">
-                <span class="mt-0.5 shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-{{ $c }}-100 text-{{ $c }}-600">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ $n->iconPath() }}"/>
-                    </svg>
-                </span>
-                <span class="min-w-0 flex-1">
-                    <span class="block text-sm font-medium text-gray-800">{{ $n->title }}</span>
-                    @if ($n->body)
-                        <span class="block text-xs text-gray-500">{{ $n->body }}</span>
-                    @endif
-                    <span class="block text-[11px] text-gray-400 mt-0.5">{{ $n->created_at->diffForHumans() }}</span>
-                </span>
-            </a>
-        @empty
-            <p class="text-sm text-gray-400">{{ __('app.dashboard.all_caught_up') }}</p>
-        @endforelse
-    </div>
-
-    @unless($isStaff)
-    <div class="mt-8">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">{{ __('app.label.your_features') }}</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            @php $ownerFeatures = $owner->features()->where('is_active', true)->get(); @endphp
-            @foreach ($ownerFeatures as $feature)
-                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
-                    @include('admin.features._icon', ['icon' => $feature->icon])
-                    <div>
-                        <p class="font-medium text-gray-900 text-sm">{{ $feature->name }}</p>
-                        <p class="text-xs text-gray-500 mt-1">{{ $feature->description }}</p>
-                    </div>
-                </div>
-            @endforeach
-            @if ($ownerFeatures->isEmpty())
-                <div class="col-span-3 text-center py-8 text-gray-400 text-sm">
-                    {{ __('app.empty.no_features') }}
-                </div>
-            @endif
-        </div>
-    </div>
-    @endunless
 @endsection

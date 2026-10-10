@@ -240,7 +240,7 @@ class StaffAccountsTest extends TestCase
         $asOwner->assertSee(__('app.dashboard.revenue_today'));
     }
 
-    public function test_dashboard_hides_workspace_overview_and_features_from_staff(): void
+    public function test_dashboard_hides_workspace_overview_from_staff_without_the_permission(): void
     {
         $owner = $this->owner(['workspace', 'booking']);
         $this->room($owner); // gives workspaces/rooms something to count
@@ -255,18 +255,14 @@ class StaffAccountsTest extends TestCase
         $asNoGrants->assertOk();
         $asNoGrants->assertDontSee(__('app.dashboard.current_occupancy'));
         $asNoGrants->assertDontSee(__('app.label.available_rooms'));
-        // "Your Features" is billing-facing tenant info, never shown to any staff.
-        $asNoGrants->assertDontSee(__('app.label.your_features'));
 
         $asManager = $this->asGuard($manager, 'staff')->get('/dashboard');
         $asManager->assertOk();
         $asManager->assertSee(__('app.dashboard.current_occupancy'));
-        $asManager->assertDontSee(__('app.label.your_features'));
 
         $asOwner = $this->asGuard($owner, 'owner')->get('/dashboard');
         $asOwner->assertOk();
         $asOwner->assertSee(__('app.dashboard.current_occupancy'));
-        $asOwner->assertSee(__('app.label.your_features'));
     }
 
     public function test_receptionist_can_create_a_booking_but_not_cancel_one(): void

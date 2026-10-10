@@ -295,4 +295,59 @@ class BookingAnalyticsServiceTest extends TestCase
             config(['database.default' => $originalDefault]);
         }
     }
+
+    public function test_daily_bookings_trend_is_zero_filled_with_no_bookings(): void
+    {
+        $owner = $this->owner();
+
+        $trend = $this->bookingAnalytics->dailyBookingsTrend($owner, $this->period('2026-09-01', '2026-09-05'));
+
+        $this->assertSame([
+            '2026-09-01' => 0, '2026-09-02' => 0, '2026-09-03' => 0,
+            '2026-09-04' => 0, '2026-09-05' => 0,
+        ], $trend);
+    }
+
+    public function test_daily_bookings_trend_counts_per_day_and_excludes_cancelled_by_default(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner);
+
+        $this->booking($owner, $room, '2026-09-01', '09:00', '10:00', 1, 50);
+        $this->booking($owner, $room, '2026-09-01', '11:00', '12:00', 1, 50);
+        $this->booking($owner, $room, '2026-09-02', '09:00', '10:00', 1, 50, 'cancelled');
+        $this->booking($owner, $room, '2026-09-02', '13:00', '14:00', 1, 50, 'confirmed');
+
+        $trend = $this->bookingAnalytics->dailyBookingsTrend($owner, $this->period('2026-09-01', '2026-09-03'));
+
+        $this->assertSame(['2026-09-01' => 2, '2026-09-02' => 1, '2026-09-03' => 0], $trend);
+    }
+
+    public function test_daily_bookings_trend_can_include_cancelled_when_asked(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner);
+
+        $this->booking($owner, $room, '2026-09-02', '09:00', '10:00', 1, 50, 'cancelled');
+
+        $trend = $this->bookingAnalytics->dailyBookingsTrend($owner, $this->period('2026-09-02', '2026-09-02'), excludeCancelled: false);
+
+        $this->assertSame(['2026-09-02' => 1], $trend);
+    }
+
+    public function test_daily_bookings_trend_never_counts_another_owners_bookings(): void
+    {
+        $owner = $this->owner();
+        $otherOwner = $this->owner();
+        $room = $this->room($owner);
+        $otherRoom = $this->room($otherOwner);
+
+        $this->booking($owner, $room, '2026-09-01', '09:00', '10:00', 1, 50);
+        $this->booking($otherOwner, $otherRoom, '2026-09-01', '09:00', '10:00', 1, 50);
+        $this->booking($otherOwner, $otherRoom, '2026-09-01', '11:00', '12:00', 1, 50);
+
+        $trend = $this->bookingAnalytics->dailyBookingsTrend($owner, $this->period('2026-09-01', '2026-09-01'));
+
+        $this->assertSame(['2026-09-01' => 1], $trend);
+    }
 }

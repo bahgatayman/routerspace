@@ -60,7 +60,7 @@
         </div>
 
         <!-- Sidebar overlay (mobile) -->
-        <div id="sidebar-overlay" class="lg:hidden fixed inset-0 bg-black/50 z-10 hidden" onclick="closeSidebar()"></div>
+        <div id="sidebar-overlay" class="lg:hidden fixed inset-0 bg-black/40 backdrop-blur-md z-10 hidden" onclick="closeSidebar()"></div>
 
         <!-- Sidebar -->
         <aside id="sidebar" class="fixed lg:static inset-y-0 {{ $isRtl ? 'right-0' : 'left-0' }} z-20 w-[260px] bg-gradient-to-b from-brand-900 to-brand-800 text-white flex flex-col shrink-0 transition-transform duration-300 {{ $isRtl ? 'translate-x-full' : '-translate-x-full' }} lg:translate-x-0">

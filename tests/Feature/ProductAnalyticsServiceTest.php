@@ -598,4 +598,59 @@ class ProductAnalyticsServiceTest extends TestCase
 
         $this->assertSame($smallCount, $largeCount, 'Product Analytics query count must not grow with catalog size.');
     }
+
+    // --- productsAndServicesBreakdown() — the dashboard's combined chart ---
+
+    public function test_products_and_services_breakdown_includes_both_types_with_units(): void
+    {
+        $owner = $this->owner();
+        $coffee = $this->product($owner, 'Coffee');
+        $printing = $this->product($owner, 'Printing', ['type' => 'service']);
+
+        $this->productSale($owner, $coffee, '2026-09-10 10:00:00', 3, 10.0);
+        $this->productSale($owner, $printing, '2026-09-10 11:00:00', 2, 5.0);
+
+        $rows = collect($this->products->productsAndServicesBreakdown($owner, $this->period('2026-09-01', '2026-09-30')))->keyBy('name');
+
+        $this->assertSame('product', $rows['Coffee']['type']);
+        $this->assertSame(3, $rows['Coffee']['units']);
+        $this->assertSame('service', $rows['Printing']['type']);
+        $this->assertSame(2, $rows['Printing']['units']);
+    }
+
+    public function test_products_and_services_breakdown_excludes_cancelled_sales(): void
+    {
+        $owner = $this->owner();
+        $coffee = $this->product($owner, 'Coffee');
+        $this->productSale($owner, $coffee, '2026-09-10 10:00:00', 5, 10.0, 'cancelled');
+
+        $rows = $this->products->productsAndServicesBreakdown($owner, $this->period('2026-09-01', '2026-09-30'));
+
+        $this->assertSame([], $rows);
+    }
+
+    public function test_products_and_services_breakdown_never_double_counts_a_sale_item(): void
+    {
+        $owner = $this->owner();
+        $coffee = $this->product($owner, 'Coffee');
+        $this->productSale($owner, $coffee, '2026-09-10 10:00:00', 4, 10.0);
+
+        $rows = $this->products->productsAndServicesBreakdown($owner, $this->period('2026-09-01', '2026-09-30'));
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(4, $rows[0]['units']);
+    }
+
+    public function test_products_and_services_breakdown_is_scoped_to_the_owner(): void
+    {
+        $owner = $this->owner();
+        $otherOwner = $this->owner();
+        $this->productSale($owner, $this->product($owner, 'Coffee'), '2026-09-10 10:00:00', 1, 10.0);
+        $this->productSale($otherOwner, $this->product($otherOwner, 'Tea'), '2026-09-10 10:00:00', 1, 10.0);
+
+        $rows = $this->products->productsAndServicesBreakdown($owner, $this->period('2026-09-01', '2026-09-30'));
+
+        $this->assertCount(1, $rows);
+        $this->assertSame('Coffee', $rows[0]['name']);
+    }
 }

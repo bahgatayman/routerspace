@@ -154,7 +154,7 @@
            from different base colors (surface-500 vs surface-600). */
         [data-nav-link].nav-active { color: #123068; }
 
-        .modal-overlay { background: rgba(28, 25, 23, 0.5); backdrop-filter: blur(8px); }
+        .modal-overlay { background: rgba(28, 25, 23, 0.4); -webkit-backdrop-filter: blur(14px) saturate(150%); backdrop-filter: blur(14px) saturate(150%); }
 
         /* Offset anchor targets so the fixed nav doesn't cover section headings */
         section[id] { scroll-margin-top: 5rem; }

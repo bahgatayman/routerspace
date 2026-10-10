@@ -10,9 +10,18 @@
     $isEmpty = $total == 0;
     $fmtCell = fn ($v) => ($spec['money'] ?? false) ? number_format((float) $v, 2) : number_format((float) $v);
 @endphp
+{{--
+    The CDN tag is emitted inline via a shared @once id (not pushed to the
+    'scripts' stack) so it's guaranteed available to anything later in
+    document order — including the Owner dashboard's Products section, which
+    loads Chart.js independently for its own bespoke charts and shares this
+    same id so only one of the two ever actually loads the library.
+--}}
+@once('chartjs-cdn')
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+@endonce
 @once
     @push('scripts')
-        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
         <script src="/js/admin-charts.js?v={{ @filemtime(public_path('js/admin-charts.js')) }}" defer></script>
     @endpush
 @endonce

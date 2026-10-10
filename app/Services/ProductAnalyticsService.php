@@ -150,6 +150,40 @@ class ProductAnalyticsService
             ->all();
     }
 
+    /**
+     * Every product OR service sold in the period, type unfiltered (unlike
+     * baseQuery()'s products-only scope) — for the dashboard's combined
+     * "Products & Services" chart. Products and services are both just
+     * Product rows distinguished by `type`, sold through the identical
+     * Sale/SaleItem flow (there is no separate booking-based service-usage
+     * model in this app), so one consistent "units sold" metric is accurate
+     * for both — never a mix of incompatible counts. Same completed-only,
+     * inner-joined-to-products shape as topProducts(), so cancelled sales
+     * and orphaned (deleted-product) lines are excluded the same way.
+     *
+     * @return array<int, array{product_id: int, name: string, type: string, units: int, revenue: float}>
+     */
+    public function productsAndServicesBreakdown(Owner $owner, AnalyticsPeriod $period): array
+    {
+        return Sale::completed()
+            ->where('sales.owner_id', $owner->id)
+            ->whereBetween('sales.sold_at', [$period->start, $period->end])
+            ->join('sale_items', 'sale_items.sale_id', '=', 'sales.id')
+            ->join('products', 'products.id', '=', 'sale_items.product_id')
+            ->selectRaw('products.id as product_id, sale_items.name as name, products.type as type, SUM(sale_items.quantity) as units, SUM(sale_items.line_total) as revenue')
+            ->groupBy('products.id', 'sale_items.name', 'products.type')
+            ->orderByDesc('units')
+            ->get()
+            ->map(fn ($row) => [
+                'product_id' => (int) $row->product_id,
+                'name' => $row->name,
+                'type' => $row->type,
+                'units' => (int) $row->units,
+                'revenue' => round((float) $row->revenue, 2),
+            ])
+            ->all();
+    }
+
     /** @return Collection<int, Product> */
     public function lowStockProducts(Owner $owner): Collection
     {

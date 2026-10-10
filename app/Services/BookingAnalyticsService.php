@@ -227,6 +227,37 @@ class BookingAnalyticsService
     }
 
     /**
+     * Daily booking count across the period, zero-filled for every day —
+     * same shape and query style as RevenueAnalyticsService::dailyRevenueTrend()
+     * (one grouped query, then a day-cursor loop), so the two trends line up
+     * on an identical set of date labels. Excludes cancelled by default,
+     * matching bookingsCount()'s existing excludeCancelled convention for
+     * "Today's Bookings."
+     *
+     * @return array<string, int> date (Y-m-d) => count, one entry per day in the period
+     */
+    public function dailyBookingsTrend(Owner $owner, AnalyticsPeriod $period, bool $excludeCancelled = true): array
+    {
+        $countByDate = Booking::where('owner_id', $owner->id)
+            ->when($excludeCancelled, fn ($q) => $q->where('status', '!=', 'cancelled'))
+            ->whereDate('booking_date', '>=', $period->startDate())
+            ->whereDate('booking_date', '<=', $period->endDate())
+            ->selectRaw('date(booking_date) as d, COUNT(*) as c')
+            ->groupBy('d')
+            ->pluck('c', 'd');
+
+        $trend = [];
+        $cursor = $period->start->copy()->startOfDay();
+        while ($cursor->lte($period->end)) {
+            $date = $cursor->toDateString();
+            $trend[$date] = (int) ($countByDate[$date] ?? 0);
+            $cursor->addDay();
+        }
+
+        return $trend;
+    }
+
+    /**
      * Today's still-relevant bookings (not cancelled/no-show), ordered by
      * start time, with room/customer eager-loaded — a display listing for
      * the dashboard's "today's schedule," not an aggregate.

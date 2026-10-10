@@ -266,5 +266,7 @@
     @if ($currentOwner->hasFeature('booking') && $can('bookings.create') && $can('bookings.view'))
         @include('bookings._quick-modal')
     @endif
+
+    @stack('scripts')
 </body>
 </html>

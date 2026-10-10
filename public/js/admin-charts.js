@@ -78,7 +78,14 @@
             boxPadding: 4,
             usePointStyle: true,
             callbacks: {
-              label: (ctx) => ' ' + (ctx.dataset.label ? ctx.dataset.label + ': ' : '') + fmt(isDonut ? ctx.parsed : (spec.horizontal ? ctx.parsed.x : ctx.parsed.y), spec.money),
+              label: (ctx) => {
+                const text = ' ' + (ctx.dataset.label ? ctx.dataset.label + ': ' : '') + fmt(isDonut ? ctx.parsed : (spec.horizontal ? ctx.parsed.x : ctx.parsed.y), spec.money);
+                if (!isDonut) return text;
+                // A doughnut slice is a share of a whole — the tooltip is the natural place for that percentage.
+                const total = ctx.dataset.data.reduce((sum, v) => sum + v, 0);
+                const pct = total > 0 ? Math.round((ctx.parsed / total) * 1000) / 10 : 0;
+                return text + ` (${pct}%)`;
+              },
               footer: (items) => (spec.links && items.length && spec.links[items[0].dataIndex]) ? canvas.dataset.clickHint || '' : '',
             },
           },

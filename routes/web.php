@@ -100,6 +100,8 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
         Route::post('/users', [HotspotUserController::class, 'store'])->middleware('permission:members.create');
         // Inline "add member" used by the booking + shared-session pickers.
         Route::post('/users/quick', [HotspotUserController::class, 'quickStore'])->middleware('permission:members.create');
+        // Live "already registered?" hint in the Add user pop-up (same rule as the store validation).
+        Route::get('/users/phone-check', [HotspotUserController::class, 'phoneCheck'])->middleware('permission:members.create');
         Route::get('/users/{id}', [HotspotUserController::class, 'show'])->middleware('permission:members.view');
         Route::get('/users/{id}/edit', [HotspotUserController::class, 'edit'])->middleware('permission:members.edit');
         Route::put('/users/{id}', [HotspotUserController::class, 'update'])->middleware('permission:members.edit');

@@ -88,7 +88,6 @@
   --color-chart: #3f68af;              /* single-series bars */
   --color-meter: var(--color-accent);
   --color-brand-gradient: linear-gradient(135deg, #1e3a73 0%, #2e5299 100%);
-  --color-nav-indicator: var(--color-primary);
 
   /* Identity hues — avatars get a stable tint per name (never status colours) */
   --color-id-1-bg: #e8edf5; --color-id-1-fg: #2e4f8f;
@@ -98,7 +97,8 @@
   --color-nav-active: #e9edf4;
   --color-avatar-bg: var(--color-id-1-bg);
   --color-avatar-text: var(--color-id-1-fg);
-  --color-overlay: rgba(26, 34, 51, .22);
+  --color-overlay: rgba(22, 30, 46, .34);
+  --overlay-blur: blur(14px) saturate(150%);
   --color-toast-bg: #1f2735;
   --color-toast-text: #f4f5f7;
   --color-toast-border: transparent;
@@ -189,14 +189,14 @@ html[data-theme="dark"] {
   --color-chart: #5a82c6;              /* Link Space secondary blue, calmed for large areas */
   --color-meter: linear-gradient(90deg, #436ec9, #8fb2f0);
   --color-brand-gradient: linear-gradient(135deg, #1c3566 0%, #2a4c8e 100%);
-  --color-nav-indicator: #8fb2f0;
 
   --color-id-1-bg: rgba(111, 150, 209, .20); --color-id-1-fg: #b5cefa;
   --color-id-2-bg: rgba(108, 200, 192, .20); --color-id-2-fg: #9be0d9;
   --color-id-3-bg: rgba(179, 164, 242, .22); --color-id-3-fg: #d2c8fb;
 
   --color-nav-active: rgba(111, 150, 209, .15);
-  --color-overlay: rgba(5, 8, 14, .62);
+  --color-overlay: rgba(5, 8, 14, .58);
+  --overlay-blur: blur(14px) saturate(120%);
   --color-toast-bg: #1f2a3d;
   --color-toast-text: #eef2f8;
   --color-toast-border: #2c3a52;
@@ -257,17 +257,18 @@ html[dir="rtl"] body.ls-app { font-family: var(--ls-font-ar); }
 .ls-side {
   width: 236px; flex: none; display: flex; flex-direction: column;
   background: linear-gradient(180deg, var(--color-side-glow), transparent 360px), var(--color-bg); padding: var(--space-4) var(--space-3) var(--space-3);
+  border-inline-end: 1px solid var(--color-border);
   transition: width var(--ls-t-med) var(--ls-ease);
 }
 .ls-brand { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 2px 2px var(--space-5) var(--space-2); min-height: 48px; }
 .ls-brand-logo { display: block; overflow: hidden; line-height: 0; transition: width var(--ls-t-med) var(--ls-ease); }
 .ls-brand-logo img { height: 24px; width: auto; max-width: none; }
 html[data-theme="dark"] .ls-brand-logo img { filter: brightness(0) invert(1); opacity: .88; }
-.ls-nav { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 2px; }
-.ls-nav-label { font-size: 12px; color: var(--color-text-muted); font-weight: var(--fw-medium); padding: var(--space-5) var(--space-3) var(--space-2); white-space: nowrap; }
-.ls-nav-label:first-child { padding-top: 0; }
+.ls-nav { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 4px; }
+.ls-nav-label { font-size: 12px; color: var(--color-text-muted); font-weight: var(--fw-medium); margin-top: var(--space-2); padding: var(--space-4) var(--space-3) var(--space-2); border-top: 1px solid var(--color-border-subtle); white-space: nowrap; }
+.ls-nav-label:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .ls-nav-item {
-  position: relative; display: flex; align-items: center; gap: var(--space-3); height: 36px; padding: 0 var(--space-3);
+  position: relative; display: flex; align-items: center; gap: var(--space-3); height: 42px; padding: 0 var(--space-4);
   border-radius: var(--ls-r-ctl); color: var(--color-text-secondary); font-weight: var(--fw-medium); font-size: 14px;
   text-decoration: none; white-space: nowrap;
   transition: background var(--ls-t-fast) var(--ls-ease), color var(--ls-t-fast) var(--ls-ease);
@@ -275,13 +276,12 @@ html[data-theme="dark"] .ls-brand-logo img { filter: brightness(0) invert(1); op
 .ls-nav-item svg { width: 18px; height: 18px; flex: none; opacity: .85; transition: opacity var(--ls-t-fast) var(--ls-ease); }
 .ls-nav-item:hover { background: var(--color-hover); color: var(--color-text); }
 .ls-nav-item:hover svg { opacity: 1; }
-.ls-nav-item.is-active { background: var(--color-nav-active); color: var(--color-primary-text); font-weight: var(--fw-strong); }
-.ls-nav-item.is-active svg { opacity: 1; color: var(--color-accent); }
-/* Brand indicator on the active item — a small Link Space bar, not a full outline. */
-.ls-nav-item.is-active::before { content: ""; position: absolute; inset-inline-start: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--color-nav-indicator); }
-html[dir="rtl"] .ls-nav-item.is-active::before { border-radius: 3px 0 0 3px; }
+/* Prominent filled pill for "where am I" — the one place the primary brand
+   color fills a nav row solid, matching the reference's active-item treatment. */
+.ls-nav-item.is-active { background: var(--color-primary); color: var(--color-on-primary); font-weight: var(--fw-strong); }
+.ls-nav-item.is-active svg { opacity: 1; color: var(--color-on-primary); }
 .ls-nav-count { margin-inline-start: auto; font-size: 12px; font-weight: var(--fw-medium); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.ls-nav-item.is-active .ls-nav-count { color: var(--color-primary-text); }
+.ls-nav-item.is-active .ls-nav-count { color: var(--color-on-primary); }
 .ls-side-foot { margin-top: var(--space-3); padding: var(--space-3) var(--space-1) 0; display: flex; align-items: center; gap: var(--space-3); border-top: 1px solid var(--color-border); }
 .ls-side-foot .ls-who { min-width: 0; flex: 1; text-decoration: none; color: inherit; border-radius: var(--ls-r-sm); }
 .ls-side-foot .ls-who b { display: block; font-size: 13.5px; font-weight: var(--fw-medium); }
@@ -293,7 +293,7 @@ html[dir="rtl"] .ls-nav-item.is-active::before { border-radius: 3px 0 0 3px; }
   html[data-nav="collapsed"] .ls-side { width: 68px; padding-inline: var(--space-3); }
   html[data-nav="collapsed"] .ls-brand { flex-direction: column; padding: 2px 0 var(--space-4); gap: var(--space-3); }
   html[data-nav="collapsed"] .ls-brand-logo { width: 25px; }
-  html[data-nav="collapsed"] .ls-nav-label { font-size: 0; padding: var(--space-3) 0; }
+  html[data-nav="collapsed"] .ls-nav-label { font-size: 0; margin-top: 0; padding: var(--space-3) 0; border-top: 0; }
   html[data-nav="collapsed"] .ls-nav-label::after { content: ""; display: block; height: 1px; background: var(--color-border); margin: 0 var(--space-3); }
   html[data-nav="collapsed"] .ls-nav-label:first-child { display: none; }
   html[data-nav="collapsed"] .ls-nav-item { justify-content: center; padding: 0; }
@@ -494,6 +494,8 @@ html[dir="rtl"] .ls-select[dir="ltr"] { background-position: calc(100% - 18px) 5
 
 /* ---------- 7. Data display ---------- */
 .ls-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--ls-r-card); }
+.ls-card.is-link { display: block; text-decoration: none; color: inherit; transition: background var(--ls-t-fast) var(--ls-ease), border-color var(--ls-t-fast) var(--ls-ease); }
+.ls-card.is-link:hover { border-color: var(--color-border-hover); background: var(--color-hover); }
 .ls-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-5) var(--space-6) 0; }
 .ls-card-title { font-size: 15px; font-weight: var(--fw-strong); margin: 0; }
 .ls-card-body { padding: var(--space-5) var(--space-6) var(--space-6); }
@@ -605,7 +607,18 @@ html[dir="rtl"] .ls-toast { padding: var(--space-2) var(--space-4) var(--space-2
 .ls-toast.is-leaving { animation: ls-toast-out .2s var(--ls-ease) forwards; }
 
 /* ---------- 9. Overlays: modal + drawer ---------- */
-.ls-overlay { position: fixed; inset: 0; z-index: 70; background: var(--color-overlay); display: none; align-items: center; justify-content: center; padding: var(--space-6); }
+.ls-overlay { position: fixed; inset: 0; z-index: 70; background: var(--color-overlay); -webkit-backdrop-filter: var(--overlay-blur); backdrop-filter: var(--overlay-blur); display: none; align-items: center; justify-content: center; padding: var(--space-6); }
+/* Frosted backdrop for every pop-up/drawer (and the mobile nav scrim). Without
+   backdrop-filter support, or when the user asks for less transparency, fall
+   back to a denser plain tint so the page behind still recedes. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --color-overlay: rgba(22, 30, 46, .5); }
+  html[data-theme="dark"] { --color-overlay: rgba(5, 8, 14, .75); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root { --overlay-blur: none; --color-overlay: rgba(22, 30, 46, .55); }
+  html[data-theme="dark"] { --overlay-blur: none; --color-overlay: rgba(5, 8, 14, .78); }
+}
 .ls-overlay.is-open { display: flex; animation: ls-fade .16s var(--ls-ease); }
 .ls-overlay.is-closing { animation: ls-fade-out .14s var(--ls-ease) forwards; }
 .ls-overlay.is-closing .ls-dialog { animation: ls-sink .14s var(--ls-ease) forwards; }
@@ -702,13 +715,20 @@ html[dir="rtl"] .ls-qa { font-family: var(--ls-font-ar); }
 
 /* ---------- 10-. Dashboard KPI grids (dashboard/index) ----------
    Sized by the width the grid actually gets (the sidebar eats ~240px, so
-   viewport breakpoints put five cards in ~170px each on a laptop). The lead
-   card (.ls-kpi-hero, Revenue) spans two columns so five cards never leave
-   an orphan: narrow 2 cols (hero full row) → 3 cols → one row of 6 units. */
+   viewport breakpoints put cards in ~170px each on a laptop): narrow 2 cols
+   → 4 cols once there's room. */
 .ls-kpis-wrap { container-type: inline-size; }
 .ls-kpis { display: grid; gap: var(--space-3); grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .ls-kpis > * { min-width: 0; }
-.ls-kpis > .ls-kpi-hero { grid-column: span 2; }
+.ls-kpi-icon svg { width: 22px; height: 22px; }
+
+/* Forces grid column 1 to the physical left regardless of page direction —
+   an explicit exception to the usual logical/RTL-flipping layout rule, for
+   the one place a chart must stay visually left-of its companion card even
+   in Arabic. Each child re-asserts its own reading direction so text inside
+   still renders naturally. */
+.ls-visual-ltr { direction: ltr; }
+html[dir="rtl"] .ls-visual-ltr > * { direction: rtl; }
 @container (max-width: 519px) {
   .ls-kpis > * { padding: var(--space-4) !important; }
   .ls-kpis .ls-kpi-icon { display: none !important; }   /* numbers get the room on phones */
@@ -1303,7 +1323,7 @@ html[data-theme="dark"] .ls-app :is([class*="ring-blue-"], [class*="ring-brand-"
   .ls-side { position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 60; width: min(288px, 86vw); padding-top: var(--space-3); transform: translateX(-100%); transition: transform .24s var(--ls-ease), visibility 0s .24s; visibility: hidden; box-shadow: var(--shadow-modal); background: var(--color-surface-elevated); }
   html[dir="rtl"] .ls-side { transform: translateX(100%); }
   .ls-side.is-open { transform: none !important; visibility: visible; transition: transform .24s var(--ls-ease); }
-  .ls-side-scrim.is-open { display: block; position: fixed; inset: 0; z-index: 55; background: var(--color-overlay); animation: ls-fade .2s var(--ls-ease); }
+  .ls-side-scrim.is-open { display: block; position: fixed; inset: 0; z-index: 55; background: var(--color-overlay); -webkit-backdrop-filter: var(--overlay-blur); backdrop-filter: var(--overlay-blur); animation: ls-fade .2s var(--ls-ease); }
   .ls-collapse { display: none !important; }
   .ls-side-close { display: grid !important; }
   .ls-sheet { margin: 0; border: 0; border-radius: 0; }

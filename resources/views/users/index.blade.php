@@ -5,10 +5,33 @@
 @section('content')
     <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-gray-900">{{ $owner->hasFeature('hotspot') ? __('app.user.hotspot_users') : __('app.common.members') }}</h1>
-        <a href="/users/create" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
+        {{-- Opens the pop-up below (panel.js data-ls-open); the href is the no-JS fallback. --}}
+        <a href="/users/create" data-ls-open="add-member-modal" aria-haspopup="dialog" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
             {{ __('app.btn.add_user') }}
         </a>
     </div>
+
+    @php
+        // POST /users redirects back here on failure: reopen the pop-up with the
+        // typed values and the messages (validation errors, or a plan-limit /
+        // router error flashed together with the old input).
+        $memberFormFailed = $errors->hasAny(['name', 'phone', 'email', 'notes']) || (session('error') && old('phone') !== null);
+    @endphp
+    <x-ui.modal id="add-member-modal" :title="__('app.user.add_new_user')" :subtitle="__('app.user.add_member_subtitle')" size="narrow">
+        @if ($memberFormFailed && session('error'))
+            <x-ui.banner tone="danger" style="margin: 0">{{ session('error') }}</x-ui.banner>
+        @endif
+        @include('users._member-form', ['formId' => 'add-member-form'])
+        <x-slot:footer>
+            <div class="ls-push">
+                <button type="button" class="ls-btn ls-btn--secondary" data-ls-close>{{ __('app.common.cancel') }}</button>
+                <button type="submit" form="add-member-form" class="ls-btn ls-btn--primary"><x-ui.icon name="plus" /><span>{{ __('app.btn.add_user') }}</span></button>
+            </div>
+        </x-slot:footer>
+    </x-ui.modal>
+    @if ($memberFormFailed)
+        <script>document.addEventListener('DOMContentLoaded', () => window.LS && LS.open('add-member-modal'));</script>
+    @endif
 
     @if (session('success'))
         <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4">{{ session('success') }}</div>

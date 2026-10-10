@@ -12,10 +12,12 @@ use App\Models\Room;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Workspace;
+use App\Services\HotspotSyncService;
 use Carbon\Carbon;
 use Database\Seeders\FeatureSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Support\TestableHotspotSyncService;
 use Tests\TestCase;
 
 /**
@@ -106,18 +108,18 @@ class DashboardAnalyticsTest extends TestCase
         ]);
     }
 
-    private function sale(Owner $owner, string $soldAt, float $total): Sale
+    private function sale(Owner $owner, string $soldAt, float $total, string $status = 'completed'): Sale
     {
         return Sale::create([
-            'owner_id' => $owner->id, 'status' => 'completed',
+            'owner_id' => $owner->id, 'status' => $status,
             'subtotal' => $total, 'total' => $total, 'sold_at' => $soldAt,
         ]);
     }
 
-    /** A completed sale with one product line — what the Products section actually reads. */
-    private function productSale(Owner $owner, Product $product, string $soldAt, int $quantity, float $unitPrice): Sale
+    /** A sale (completed by default) with one product line — what the Products section actually reads. */
+    private function productSale(Owner $owner, Product $product, string $soldAt, int $quantity, float $unitPrice, string $status = 'completed'): Sale
     {
-        $sale = $this->sale($owner, $soldAt, $quantity * $unitPrice);
+        $sale = $this->sale($owner, $soldAt, $quantity * $unitPrice, $status);
         SaleItem::create([
             'sale_id' => $sale->id, 'product_id' => $product->id, 'name' => $product->name,
             'unit_price' => $unitPrice, 'quantity' => $quantity, 'line_total' => $quantity * $unitPrice,
@@ -145,11 +147,10 @@ class DashboardAnalyticsTest extends TestCase
 
         $response->assertOk();
         $response->assertSee(__('app.dashboard.revenue_today'));
-        $response->assertSee('ج.م 175.00'); // 150 booking + 25 sale
+        $response->assertSee('EGP 175.00'); // 150 booking + 25 sale
         $response->assertSee(__('app.dashboard.current_occupancy'));
         $response->assertSee(__('app.dashboard.needs_attention'));
         $response->assertSee(__('app.dashboard.todays_schedule'));
-        $response->assertSee(__('app.dashboard.room_utilization_details'));
     }
 
     public function test_dashboard_renders_the_products_section_for_a_sales_feature_owner(): void
@@ -238,16 +239,6 @@ class DashboardAnalyticsTest extends TestCase
         $this->assertNotEmpty($matches, 'Could not locate the "Needs Attention" figure in the dashboard HTML.');
 
         return (int) $matches[1];
-    }
-
-    public function test_needs_attention_shows_all_caught_up_when_nothing_is_unread(): void
-    {
-        $owner = $this->owner();
-
-        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
-
-        $response->assertOk();
-        $response->assertSee(__('app.dashboard.all_caught_up'));
     }
 
     // --- Period switching ---
@@ -397,5 +388,258 @@ class DashboardAnalyticsTest extends TestCase
             $largeCount,
             "Query count grew from {$smallCount} (2 rooms) to {$largeCount} (12 rooms) — likely a per-room query loop.",
         );
+    }
+
+    // --- Interactive charts (admin.partials.chart reuse) ---
+
+    public function test_fully_featured_owner_sees_the_new_chart_titles_and_loads_chartjs_once(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $this->booking($owner, $room, '2026-08-27');
+        $product = $this->product($owner);
+        $this->productSale($owner, $product, '2026-08-27 09:00:00', 1, 10);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.revenue_trend'));
+        $response->assertSee(__('app.dashboard.bookings_activity'));
+        $response->assertSee(__('app.dashboard.booking_status'));
+
+        // Products' own bespoke charts and the shared admin.partials.chart component both
+        // want Chart.js on this exact page — must still resolve to exactly one CDN load.
+        $html = $response->getContent();
+        $this->assertSame(1, substr_count($html, 'chart.umd.min.js'), 'Chart.js CDN tag loaded more than once on the same page.');
+    }
+
+    public function test_booking_status_chart_omits_zero_count_statuses(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner(['booking']);
+        $room = $this->room($owner);
+        $this->booking($owner, $room, '2026-08-27', status: 'pending');
+        $this->booking($owner, $room, '2026-08-27', status: 'completed');
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertSee('Pending');
+        $response->assertSee('Completed');
+        $response->assertDontSee('Cancelled');
+        $response->assertDontSee('No Show');
+    }
+
+    public function test_router_status_shows_connected_when_no_router_failure(): void
+    {
+        $owner = $this->owner(['hotspot']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.router_status'));
+        $response->assertSee(__('app.dashboard.router_connected'));
+        $response->assertDontSee(__('app.dashboard.router_unreachable'));
+    }
+
+    public function test_router_status_shows_unreachable_when_the_configured_router_fails_to_connect(): void
+    {
+        $owner = $this->owner(['hotspot']);
+        $owner->forceFill(['mikrotik_host' => '10.0.0.1', 'mikrotik_port' => 8728, 'mikrotik_username' => 'admin', 'mikrotik_password' => 'secret'])->save();
+
+        $fake = new TestableHotspotSyncService;
+        $fake->fake->failConnect = true;
+        $this->app->instance(HotspotSyncService::class, $fake);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.router_unreachable'));
+        $response->assertDontSee(__('app.dashboard.router_connected'));
+    }
+
+    // --- Dashboard decluttering: Room Utilization Details / Needs Attention list / Your Features removed ---
+
+    public function test_removed_sections_no_longer_render_on_the_dashboard(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $this->booking($owner, $room, '2026-08-27');
+        Notification::create(['owner_id' => $owner->id, 'type' => 'general', 'level' => 'warning', 'title' => 'Alert one']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+        $html = $response->getContent();
+
+        $response->assertOk();
+        // Unique to the removed Room Utilization Details table — Room Performance
+        // (kept) uses different keys (room_performance/room_utilization).
+        $response->assertDontSee(__('app.dashboard.room_utilization_details'));
+        // Unique to the removed "Your Features" section.
+        $response->assertDontSee(__('app.label.your_features'));
+        // "Needs Attention" is shared with the top KPI tile (kept) — it must
+        // appear exactly once now, not twice (KPI tile + the removed card's
+        // own heading).
+        $this->assertSame(1, substr_count($html, __('app.dashboard.needs_attention')));
+    }
+
+    public function test_notifications_and_features_still_work_outside_the_dashboard(): void
+    {
+        $owner = $this->owner();
+        $notification = Notification::create(['owner_id' => $owner->id, 'type' => 'general', 'level' => 'warning', 'title' => 'Alert one']);
+
+        // Removing the dashboard's own list must not touch the Notification
+        // feature's routes/records elsewhere in the app.
+        $this->actingAs($owner, 'owner')->get(route('notifications.index'))->assertOk()->assertSee('Alert one');
+        $this->assertDatabaseHas('notifications', ['id' => $notification->id, 'owner_id' => $owner->id]);
+
+        // Feature pages themselves (workspace/booking/sales) are untouched —
+        // the removed section only ever displayed them, never gated them.
+        $this->assertTrue($owner->hasFeature('workspace'));
+        $this->assertTrue($owner->hasFeature('booking'));
+        $this->assertTrue($owner->hasFeature('sales'));
+    }
+
+    // --- Products & Services chart ---
+
+    public function test_products_services_chart_renders_alongside_booking_status_for_a_fully_featured_owner(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $product = $this->product($owner, 'Coffee');
+        $this->productSale($owner, $product, '2026-08-27 10:00:00', 3, 10);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.products_services'));
+        $response->assertSee(__('app.dashboard.booking_status'));
+        $response->assertSee('Coffee');
+    }
+
+    public function test_products_services_chart_is_hidden_without_the_sales_feature(): void
+    {
+        $owner = $this->owner(['booking']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertDontSee(__('app.dashboard.products_services'));
+    }
+
+    public function test_products_services_chart_excludes_cancelled_sales(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner(['sales']);
+        $product = $this->product($owner, 'Coffee');
+        $this->productSale($owner, $product, '2026-08-27 10:00:00', 5, 10, 'cancelled');
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        // The chart exists but with no data — the shared component's own empty state, not "Coffee".
+        $response->assertSee(__('app.dashboard.products_services'));
+        $response->assertDontSee('Coffee');
+    }
+
+    // --- Hero layout: revenue trend chart + Revenue Today, Quick Links removed ---
+
+    public function test_revenue_hero_shows_the_chart_and_the_revenue_today_card_together(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        $this->booking($owner, $room, '2026-08-27', totalPrice: 150.0);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+        $html = $response->getContent();
+
+        $response->assertOk();
+        $response->assertSee(__('app.dashboard.revenue_trend'));
+        $response->assertSee(__('app.dashboard.revenue_today'));
+        $response->assertSee('EGP 150.00');
+        // Exactly one chart instance — never duplicated by the layout move.
+        $this->assertSame(1, substr_count($html, 'data-ls-chart="ls-revenue-trend"'));
+    }
+
+    public function test_quick_links_no_longer_render_on_the_dashboard(): void
+    {
+        $owner = $this->owner(['hotspot']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertDontSee(__('app.label.quick_links'));
+        $response->assertDontSee(__('app.btn.add_user'));
+        // The stats strip itself (Total Users / Online Now / Router Status) is unaffected.
+        $response->assertSee(__('app.dashboard.router_status'));
+    }
+
+    public function test_users_create_and_speed_profile_routes_still_work_outside_the_dashboard(): void
+    {
+        $owner = $this->owner(['hotspot']);
+
+        // Quick Links only ever linked to these — removing the dashboard
+        // shortcut must not touch the destinations themselves.
+        $this->actingAs($owner, 'owner')->get('/users/create')->assertOk();
+        $this->actingAs($owner, 'owner')->get('/speed-profiles')->assertOk();
+    }
+
+    // --- Default period: last 7 days, not "today" ---
+
+    public function test_dashboard_defaults_to_the_last_7_days_period_without_a_query_param(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        // Inside the default 7-day window (today - 6 .. today).
+        $this->booking($owner, $room, '2026-08-22', totalPrice: 77.0);
+        // Outside it — must never contribute to any default-period chart.
+        $this->booking($owner, $room, '2026-08-10', totalPrice: 999.0);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+        $html = $response->getContent();
+
+        $response->assertOk();
+        // The "7 Days" period button is the one marked active by default.
+        $this->assertMatchesRegularExpression(
+            '/href="[^"]*period=7d[^"]*"\s+class="[^"]*bg-brand-600[^"]*"/',
+            $html,
+        );
+
+        $revenueTrend = $this->extractChartSpec($html, 'ls-revenue-trend');
+        $this->assertEqualsWithDelta(77.0, array_sum($revenueTrend['datasets'][0]['data']), 0.001);
+
+        $bookingsActivity = $this->extractChartSpec($html, 'ls-bookings-activity');
+        $this->assertSame(1, array_sum($bookingsActivity['datasets'][0]['data']));
+    }
+
+    public function test_revenue_today_kpi_stays_todays_figure_even_though_charts_default_to_7_days(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-27 10:00:00'));
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        // Within the new 7-day chart default, but not today — must never
+        // leak into the Revenue Today KPI, which stays AnalyticsPeriod::today().
+        $this->booking($owner, $room, '2026-08-22', totalPrice: 77.0);
+
+        $response = $this->actingAs($owner, 'owner')->get('/dashboard');
+        $html = $response->getContent();
+
+        $response->assertOk();
+        $response->assertSee('EGP 0.00'); // Revenue Today: nothing booked today itself.
+
+        // The chart, meanwhile, correctly reflects the 7-day window's real total.
+        $revenueTrend = $this->extractChartSpec($html, 'ls-revenue-trend');
+        $this->assertEqualsWithDelta(77.0, array_sum($revenueTrend['datasets'][0]['data']), 0.001);
+    }
+
+    private function extractChartSpec(string $html, string $id): array
+    {
+        preg_match('/<script type="application\/json" id="'.preg_quote($id, '/').'-spec">(.*?)<\/script>/s', $html, $matches);
+        $this->assertNotEmpty($matches, "Could not find the {$id} chart spec in the dashboard HTML.");
+
+        return json_decode($matches[1], true);
     }
 }

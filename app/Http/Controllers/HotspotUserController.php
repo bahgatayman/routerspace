@@ -140,6 +140,31 @@ class HotspotUserController extends Controller
     }
 
     /**
+     * GET /users/phone-check?phone= — tells the Add user pop-up, while typing,
+     * whether this owner already has a member with that number (exact or
+     * same normalized number, i.e. the uniquePhoneRule below). Read-only and
+     * owner-scoped; the store validation remains the authority.
+     */
+    public function phoneCheck(Request $request): JsonResponse
+    {
+        $phone = trim((string) $request->query('phone', ''));
+        if (mb_strlen($phone) < 6 || mb_strlen($phone) > 20) {
+            return response()->json(['exists' => false]);
+        }
+
+        $ownerId = TenantContext::id();
+        $normalized = PhoneNumber::normalize($phone);
+        $member = HotspotUser::where('owner_id', $ownerId)
+            ->where(fn ($q) => $q->where('phone', $phone)
+                ->when($normalized !== null, fn ($w) => $w->orWhere('phone_normalized', $normalized)))
+            ->first(['id', 'name', 'phone']);
+
+        return response()->json($member
+            ? ['exists' => true, 'name' => $member->name, 'phone' => $member->phone, 'url' => "/users/{$member->id}"]
+            : ['exists' => false]);
+    }
+
+    /**
      * Phone uniqueness, cross-format-aware: the existing exact-string unique
      * rule stays (catches a literal retype of the same value), plus a new
      * check against phone_normalized so "01012345678" and "+201012345678"
