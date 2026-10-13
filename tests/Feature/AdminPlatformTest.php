@@ -265,6 +265,18 @@ class AdminPlatformTest extends TestCase
         $this->asAdmin()->get("/admin/owners/{$a->id}/bookings?workspace={$bws->id}")->assertNotFound();
     }
 
+    public function test_business_products_list_shows_each_products_icon_beside_its_name(): void
+    {
+        [$a] = $this->seedPlatform();
+        Product::create(['owner_id' => $a->id, 'name' => 'Iced Tea', 'type' => 'product', 'icon' => 'tea', 'price' => 20, 'is_active' => true]);
+        Product::create(['owner_id' => $a->id, 'name' => 'Print Job', 'type' => 'service', 'price' => 5, 'is_active' => true]); // no icon -> service default
+
+        $this->asAdmin()->get("/admin/owners/{$a->id}/products")->assertOk()
+            ->assertSee('images/products/tea.webp', false)
+            ->assertSee('images/products/bolt.webp', false)
+            ->assertSeeInOrder(['images/products/tea.webp', 'Iced Tea'], false);
+    }
+
     public function test_business_bookings_page_shows_a_status_breakdown_chart_scoped_to_the_owner(): void
     {
         [$a] = $this->seedPlatform();

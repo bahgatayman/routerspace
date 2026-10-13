@@ -97,7 +97,15 @@
                         @foreach ($products as $p)
                             @php $ss = $p->stockStatus(); @endphp
                             <tr class="row-link" data-href="{{ $base }}/{{ $p->id }}">
-                                <td><a href="{{ $base }}/{{ $p->id }}" class="ls-adm-ident-name">{{ $p->name }}</a>@if ($p->sku)<small class="ls-adm-sub" dir="ltr">{{ $p->sku }}</small>@endif</td>
+                                <td>
+                                    <div class="ls-adm-ident">
+                                        <x-ui.product-icon :name="$p->iconName()" size="md" />
+                                        <span>
+                                            <a href="{{ $base }}/{{ $p->id }}" class="ls-adm-ident-name">{{ $p->name }}</a>
+                                            @if ($p->sku)<small dir="ltr">{{ $p->sku }}</small>@endif
+                                        </span>
+                                    </div>
+                                </td>
                                 <td>{{ $t('product_types.'.($p->isService() ? 'service' : 'product')) }}</td>
                                 <td class="is-money">{{ Money::format((float) $p->price) }}</td>
                                 <td class="is-money">{{ $p->purchase_price !== null ? Money::format((float) $p->purchase_price) : '—' }}</td>
