@@ -4,6 +4,7 @@ use App\Http\Controllers\ActiveSessionController;
 use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\BookingController as AdminBookingController;
 use App\Http\Controllers\Admin\BusinessController as AdminBusinessController;
+use App\Http\Controllers\Admin\CouponController as AdminCouponController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\FeatureController;
 use App\Http\Controllers\Admin\FinancialController;
@@ -447,6 +448,16 @@ Route::middleware('auth:admin')->prefix('admin')->group(function () {
     Route::delete('/plans/{plan}', [PlanController::class, 'destroy'])->whereNumber('plan')->name('admin.plans.destroy');
     Route::post('/plans/{plan}/toggle', [PlanController::class, 'toggle'])->whereNumber('plan')->name('admin.plans.toggle');
     Route::post('/plans/{plan}/migrate', [PlanController::class, 'migrate'])->whereNumber('plan')->name('admin.plans.migrate');
+
+    // Coupons — every business's discount codes (each coupon still belongs to one business).
+    Route::get('/coupons', [AdminCouponController::class, 'index'])->name('admin.coupons.index');
+    Route::get('/coupons/create', [AdminCouponController::class, 'create'])->name('admin.coupons.create');
+    Route::post('/coupons', [AdminCouponController::class, 'store'])->name('admin.coupons.store');
+    Route::get('/coupons/{coupon}', [AdminCouponController::class, 'show'])->whereNumber('coupon')->name('admin.coupons.show');
+    Route::get('/coupons/{coupon}/edit', [AdminCouponController::class, 'edit'])->whereNumber('coupon')->name('admin.coupons.edit');
+    Route::put('/coupons/{coupon}', [AdminCouponController::class, 'update'])->whereNumber('coupon')->name('admin.coupons.update');
+    Route::post('/coupons/{coupon}/toggle', [AdminCouponController::class, 'toggle'])->whereNumber('coupon')->name('admin.coupons.toggle');
+    Route::delete('/coupons/{coupon}', [AdminCouponController::class, 'destroy'])->whereNumber('coupon')->name('admin.coupons.destroy');
 
     // Admin Financial Dashboard
     Route::get('/financial', [FinancialController::class, 'index'])->name('admin.financial.index');

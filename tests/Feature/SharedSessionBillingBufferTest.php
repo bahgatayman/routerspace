@@ -256,17 +256,19 @@ class SharedSessionBillingBufferTest extends TestCase
         $this->assertEquals(20.0, app(RoomPricingService::class)->quoteSession($session->fresh(), now())->totalPrice);
     }
 
-    public function test_active_sessions_card_shows_grace_and_next_hour(): void
+    public function test_active_sessions_card_keeps_a_hidden_grace_aware_refresh_timer_without_showing_it(): void
     {
         $owner = $this->owner();
         $now = Carbon::parse('2026-08-01 12:00:00');
         $this->openSession($owner, $this->room($owner), $now->copy()->subMinutes(72));
         Carbon::setTestNow($now);
 
+        // The next-hour/grace text is no longer shown on the card, but the timer that
+        // reloads the page when the next (grace-adjusted) block starts must still be there.
         $this->actingAs($owner, 'owner')->get('/active-sessions')->assertOk()
-            ->assertSee(__('app.session.grace', ['count' => 15]))
             ->assertSee('data-ls-countdown="'.$now->copy()->addMinutes(4)->toIso8601String().'"', false)
-            ->assertSee(__('app.session.next_hour', ['d' => '4'.__('app.ui.unit_m')]));
+            ->assertDontSee(__('app.session.grace', ['count' => 15]))
+            ->assertDontSee(__('app.session.next_hour', ['d' => '4'.__('app.ui.unit_m')]));
     }
 
     // ------------------------------------------------------------------ settings

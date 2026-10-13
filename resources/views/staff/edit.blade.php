@@ -60,7 +60,7 @@
                 </div>
             </div>
 
-            <div>
+            <div id="permissions" class="ls-scroll-anchor">
                 <div class="flex items-center justify-between mb-2">
                     <p class="block text-sm font-medium text-gray-700">{{ __('app.staff.permissions') }}</p>
                     <button type="submit" form="reset-permissions-form" class="text-xs text-blue-600 hover:underline">

@@ -26,19 +26,30 @@ class ExpenseController extends Controller
         $owner = TenantContext::user();
         [$period, $periodKey, $customStart, $customEnd] = $this->resolvePeriod($request);
 
-        $expenses = Expense::where('owner_id', $owner->id)
-            ->with('category')
-            ->whereDate('expense_date', '>=', $period->startDate())
-            ->whereDate('expense_date', '<=', $period->endDate())
-            ->orderByDesc('expense_date')
-            ->orderByDesc('id')
-            ->paginate(20)
-            ->withQueryString();
-
         $categories = ExpenseCategory::where('owner_id', $owner->id)
             ->withCount('expenses')
             ->orderBy('name')
             ->get();
+
+        // ?category=<id> or ?category=none (uncategorized). An id is only honoured
+        // when it is one of this owner's categories — never another tenant's.
+        $categoryParam = (string) $request->query('category', '');
+        $activeCategory = $categoryParam === 'none'
+            ? 'none'
+            : $categories->firstWhere('id', ctype_digit($categoryParam) ? (int) $categoryParam : 0)?->id;
+
+        $inPeriod = fn ($q) => $q->where('owner_id', $owner->id)
+            ->whereDate('expense_date', '>=', $period->startDate())
+            ->whereDate('expense_date', '<=', $period->endDate());
+
+        $expenses = Expense::query()->tap($inPeriod)
+            ->with('category')
+            ->when($activeCategory === 'none', fn ($q) => $q->whereNull('expense_category_id'))
+            ->when(is_int($activeCategory), fn ($q) => $q->where('expense_category_id', $activeCategory))
+            ->orderByDesc('expense_date')
+            ->orderByDesc('id')
+            ->paginate(20)
+            ->withQueryString();
 
         $totalExpenses = $this->expenseAnalytics->totalExpenses($owner, $period);
         $totalRevenue = $this->revenueAnalytics->totalRevenue($owner, $period);
@@ -60,6 +71,9 @@ class ExpenseController extends Controller
             'totalRevenue' => $totalRevenue,
             'netTotal' => $totalRevenue - $totalExpenses,
             'byCategory' => $this->expenseAnalytics->expensesByCategory($owner, $period),
+            'activeCategory' => $activeCategory,
+            'entryCount' => Expense::query()->tap($inPeriod)->count(),
+            'periodLabel' => $this->periodLabel($period),
         ]);
     }
 
@@ -145,6 +159,19 @@ class ExpenseController extends Controller
         };
 
         return [$period, $key, $customStart, $customEnd];
+    }
+
+    /** "Oct 1 – Oct 14, 2026", or a single day; localized month names. */
+    private function periodLabel(AnalyticsPeriod $period): string
+    {
+        $start = Carbon::parse($period->startDate());
+        $end = Carbon::parse($period->endDate());
+
+        if ($start->isSameDay($end)) {
+            return $start->translatedFormat('j M Y');
+        }
+
+        return $start->translatedFormat($start->year === $end->year ? 'j M' : 'j M Y').' – '.$end->translatedFormat('j M Y');
     }
 
     private function parseDate(?string $value): ?Carbon

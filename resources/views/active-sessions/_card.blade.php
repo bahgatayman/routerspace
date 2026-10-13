@@ -53,17 +53,11 @@
         $unit = $model->billing_unit ?? 'minute';
         $rate = (float) ($estimate?->liveRatePerHour ?? 0);
         $roomCharge = (float) ($estimate?->totalPrice ?? 0);
-        $billingLabel = $estimate?->note ?? __('app.session.billed_per.'.$unit);
-        if ($model->pricing_profile_name && ! $model->pricing_snapshot && ! ($model->plan_snapshot ?? null)) {
-            // Pricing profile: "Photography · EGP 15.00/hr · Billed per hour".
-            $billingLabel .= ' · '.__('app.session.billed_per.'.$unit);
-        }
         // Block billing: when the bill next goes up (grace buffer included) —
         // from the same service that prices preview/close.
         $nextChargeAt = $isShared
             ? app(\App\Services\RoomPricingService::class)->nextSessionChargeAt($model, now())
             : app(\App\Services\RoomPricingService::class)->nextOpenBookingChargeAt($model, now());
-        $grace = $nextChargeAt ? (int) ($model->billing_buffer_minutes ?? 0) : 0;
         $endsAt = null;
         $endingSoon = false;
     } elseif ($needsCheckIn) {
@@ -130,7 +124,6 @@
             <div class="ls-session-time" data-ls-since="{{ $startedAt->toIso8601String() }}" data-ls-seconds>{{ $elapsedLabel }}</div>
         </div>
         <div class="ls-session-bill">
-            <div class="ls-session-label">{{ __('app.ui.sessions.bill_so_far') }}</div>
             @if ($liveBill)
                 {{-- Continuous billing: tick the estimate live (same formula as the server). --}}
                 <div class="ls-session-big" data-ls-since="{{ $startedAt->toIso8601String() }}" data-ls-rate="{{ $rate }}" data-ls-extra="{{ $itemsTotal }}"><x-ui.money :amount="$bill" /></div>
@@ -141,28 +134,19 @@
     </div>
 
     @if ($isShared || $isOpenBooking)
-        <div class="ls-session-meta">
-            <span class="ls-trunc">
-                {{ __('app.ui.sessions.since', ['time' => $startedAt->translatedFormat('g:i A')]) }} ·
-                {{ $row->isFromBooking() ? __('app.sales.from_booking', ['id' => str_pad($model->booking_id, 4, '0', STR_PAD_LEFT)]) : __('app.sales.walk_in') }}@if ($model->party_size > 1) · {{ __('app.session.party_of', ['count' => $model->party_size]) }}@endif
-            </span>
-            <span class="ls-faint ls-trunc">{{ $billingLabel }}</span>
-        </div>
-        @if ($nextChargeAt)
-            @php $nextKey = $unit === 'half_hour' ? 'next_half_hour' : 'next_hour'; @endphp
-            <div class="ls-session-next">
-                <x-ui.icon name="clock" />
-                <span data-ls-countdown="{{ $nextChargeAt->toIso8601String() }}"
-                      data-ls-template="{{ __('app.session.'.$nextKey, ['d' => ':d']) }}"
-                      data-ls-done="{{ __('app.session.next_updating') }}">{{ __('app.session.'.$nextKey, ['d' => max(1, (int) ceil(now()->diffInSeconds($nextChargeAt, false) / 60)).__('app.ui.unit_m')]) }}</span>
-                @if ($grace > 0)<span class="ls-faint">· {{ __('app.session.grace', ['count' => $grace]) }}</span>@endif
+        @if ($model->party_size > 1)
+            <div class="ls-session-meta">
+                <span class="ls-trunc">{{ __('app.session.party_of', ['count' => $model->party_size]) }}</span>
             </div>
+        @endif
+        @if ($nextChargeAt)
+            {{-- Not shown, but kept: when it reaches zero panel.js reloads once so a
+                 block-billed bill steps up to the next hour's amount from the server. --}}
+            <span hidden data-ls-countdown="{{ $nextChargeAt->toIso8601String() }}" data-ls-template="" data-ls-done=""></span>
         @endif
     @elseif ($needsCheckIn)
         <div class="ls-session-meta">
-            <span class="ls-trunc">
-                {{ __('app.ui.sessions.since', ['time' => $startedAt->translatedFormat('g:i A')]) }}@if ($model->party_size > 1) · {{ __('app.session.party_of', ['count' => $model->party_size]) }}@endif
-            </span>
+            <span class="ls-trunc">@if ($model->party_size > 1){{ __('app.session.party_of', ['count' => $model->party_size]) }}@endif</span>
             <span class="ls-faint ls-trunc {{ $endingSoon ? 'is-soon' : '' }}">{{ __('app.ui.sessions.ends_at', ['time' => $endsAt->translatedFormat('g:i A')]) }}</span>
         </div>
     @else
@@ -212,10 +196,11 @@
         @endif
     </div>
 
-    @if ($canSell && $quickProducts->isNotEmpty() && ! $needsCheckIn)
+    @php $cardQuickProducts = ($quickProductsByWorkspace ?? [])[$row->room->workspace_id] ?? $quickProducts; @endphp
+    @if ($canSell && $cardQuickProducts->isNotEmpty() && ! $needsCheckIn)
         <div class="ls-session-quick">
             <span class="ls-session-quick-label">{{ __('app.ui.sessions.quick_add') }}</span>
-            @foreach ($quickProducts as $p)
+            @foreach ($cardQuickProducts as $p)
                 <button type="button" class="ls-qa" title="{{ __('app.ui.sessions.add_to_bill') }}: {{ $p->name }}"
                         data-qa-kind="{{ $isShared ? 'shared' : 'booking' }}" data-qa-id="{{ $model->id }}"
                         data-qa-product="{{ $p->id }}" data-qa-name="{{ $p->name }}" data-qa-customer="{{ $customer->name }}"><span class="ls-qa-plus" aria-hidden="true">+</span><x-ui.product-icon :name="$p->iconName()" size="sm" />{{ $p->name }}</button>

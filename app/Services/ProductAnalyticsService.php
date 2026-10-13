@@ -6,6 +6,7 @@ use App\Models\Owner;
 use App\Models\Product;
 use App\Models\Sale;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Product/inventory analytics for the Owner Dashboard's Products section — a
@@ -276,6 +277,58 @@ class ProductAnalyticsService
         }
 
         return $insights;
+    }
+
+    /**
+     * Best sellers (by units sold, all time) among the given products, ranked
+     * per workspace and overall, for the Active Sessions quick-add chips.
+     * Completed sales of this owner only. A sale belongs to the workspace of
+     * the room it was rung up on (via its booking or shared session); walk-in
+     * sales with neither count toward the overall ranking only. Services are
+     * included — unlike the dashboard methods above — because a quick-add
+     * chip is just as useful for "Printing" as for "Coffee".
+     *
+     * @param  array<int>  $productIds  the active catalog the chips may show
+     * @return array{byWorkspace: array<int, array<int>>, overall: array<int>} product ids, best first
+     */
+    public function bestSellersByWorkspace(Owner $owner, array $productIds, int $limit = 3): array
+    {
+        if ($productIds === []) {
+            return ['byWorkspace' => [], 'overall' => []];
+        }
+
+        // 'sales.status', not Sale::completed(): bookings and shared_sessions
+        // also have a status column once joined (see productSpendByRoomType()).
+        $rows = Sale::where('sales.owner_id', $owner->id)
+            ->where('sales.status', 'completed')
+            ->join('sale_items', 'sale_items.sale_id', '=', 'sales.id')
+            ->whereIn('sale_items.product_id', $productIds)
+            ->leftJoin('bookings', 'bookings.id', '=', 'sales.booking_id')
+            ->leftJoin('shared_sessions', 'shared_sessions.id', '=', 'sales.shared_session_id')
+            ->leftJoin('rooms', fn ($join) => $join
+                ->on('rooms.id', '=', DB::raw('COALESCE(bookings.room_id, shared_sessions.room_id)'))
+                ->where('rooms.owner_id', '=', $owner->id))
+            ->selectRaw('rooms.workspace_id as workspace_id, sale_items.product_id as product_id, SUM(sale_items.quantity) as units')
+            ->groupBy('rooms.workspace_id', 'sale_items.product_id')
+            ->get();
+
+        $rank = fn (Collection $group) => $group->groupBy('product_id')
+            ->map(fn (Collection $r) => (int) $r->sum('units'))
+            ->filter(fn (int $units) => $units > 0)
+            ->sortDesc()
+            ->keys()
+            ->map(fn ($id) => (int) $id)
+            ->take($limit)
+            ->values()
+            ->all();
+
+        return [
+            'byWorkspace' => $rows->whereNotNull('workspace_id')
+                ->groupBy('workspace_id')
+                ->map($rank)
+                ->all(),
+            'overall' => $rank($rows),
+        ];
     }
 
     /** Sale::completed() joined down to sale_items/products, scoped to this owner/period/type — the one query shape every method above builds on. */

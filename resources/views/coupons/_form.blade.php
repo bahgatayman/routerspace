@@ -31,7 +31,7 @@
     <button type="submit" class="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
         {{ __('app.common.save') }}
     </button>
-    <a href="{{ route('coupons.index') }}" class="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition">
+    <a href="{{ $cancelUrl ?? route('coupons.index') }}" class="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition">
         {{ __('app.common.cancel') }}
     </a>
 </div>

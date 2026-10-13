@@ -308,57 +308,90 @@
         <x-ui.button onclick="retryPreview()">{{ __('app.ui.sessions.try_again') }}</x-ui.button>
     </div>
 
-    <div id="modal-content" hidden style="display:grid;gap:18px">
-        <dl class="ls-kv">
-            <dt>{{ __('app.session.user') }}</dt><dd id="modal-user"></dd>
-            <dt>{{ __('app.session.room') }}</dt><dd id="modal-room"></dd>
-            <dt id="modal-party-label" hidden>{{ __('app.session.party_size') }}</dt><dd id="modal-party-row" hidden><span id="modal-party"></span></dd>
-            <dt>{{ __('app.session.time') }}</dt><dd><bdi id="modal-time" class="ls-num" dir="ltr"></bdi></dd>
-            <dt>{{ __('app.session.duration') }}</dt><dd><span id="modal-duration"></span><span id="modal-billed-row" hidden class="ls-faint" style="display:block;font-size:12px;font-weight:400"><span id="modal-billed"></span></span></dd>
-            <dt>{{ __('app.session.rate') }}</dt><dd id="modal-rate"></dd>
-            <dt id="modal-pkg-label" hidden>{{ __('app.packages.covered_by') }}</dt><dd id="modal-pkg-row" hidden><span id="modal-pkg"></span></dd>
+    {{--
+        Layout: one compact strip of session facts → the bill (lines, then a
+        searchable product picker) → summary + actions pinned in the footer so the
+        total and "Collect" are always in view. Who/where lives only in the title
+        and subtitle (no repeated User/Room rows).
+    --}}
+    <div id="modal-content" hidden class="ls-co">
+        <dl class="ls-co-facts">
+            <div>
+                <dt>{{ __('app.session.duration') }}</dt>
+                <dd><span id="modal-duration" class="ls-num"></span><small id="modal-billed-row" hidden><span id="modal-billed"></span></small></dd>
+            </div>
+            <div>
+                <dt>{{ __('app.session.rate') }}</dt>
+                <dd id="modal-rate"></dd>
+            </div>
+            <div>
+                <dt>{{ __('app.session.time') }}</dt>
+                <dd><bdi id="modal-time" class="ls-num" dir="ltr"></bdi></dd>
+            </div>
         </dl>
 
+        <p id="modal-pkg-row" class="ls-co-pkg" hidden><x-ui.icon name="clock" /><span><b>{{ __('app.packages.covered_by') }}</b> <span id="modal-pkg"></span></span></p>
+
         @if ($canSell)
-            <div>
-                <div class="ls-label" style="margin-bottom:4px">{{ __('app.ui.sessions.on_the_bill') }}</div>
-                <div id="modal-items" class="ls-lines"></div>
+            <section class="ls-co-bill" aria-labelledby="modal-bill-title">
+                <div class="ls-co-head">
+                    <h4 id="modal-bill-title">{{ __('app.ui.sessions.on_the_bill') }}</h4>
+                    <span id="modal-items-empty" class="ls-faint">{{ __('app.ui.sessions.co_nothing_yet') }}</span>
+                </div>
+                <div id="modal-items" class="ls-lines ls-co-lines"></div>
+
                 @if ($products->isNotEmpty())
-                    <div class="ls-add-row" style="margin-top:12px">
-                        <div class="ls-field">
-                            <label class="ls-label" for="modal-product">{{ __('app.ui.sessions.product') }}</label>
-                            <select id="modal-product" class="ls-select">
-                                @foreach ($products as $p)
-                                    <option value="{{ $p->id }}">{{ $p->name }} — {{ number_format($p->price, 2) }}</option>
-                                @endforeach
-                            </select>
+                    {{-- Checkout: collapsed behind one button so the bill and total lead.
+                         Add-products mode opens it straight away (see openSessionModal). --}}
+                    <button type="button" id="modal-picker-toggle" class="ls-co-toggle" aria-expanded="false" aria-controls="modal-picker">
+                        <x-ui.icon name="plus" /><span>{{ __('app.session.add_products') }}</span>
+                    </button>
+                    <div id="modal-picker" class="ls-co-picker" hidden>
+                        <div class="ls-search ls-co-search">
+                            <x-ui.icon name="search" />
+                            <input type="search" id="modal-product-search" class="ls-input" placeholder="{{ __('app.ui.sessions.co_search') }}"
+                                   aria-label="{{ __('app.ui.sessions.co_search') }}" aria-controls="modal-product-list" autocomplete="off">
                         </div>
-                        <div class="ls-field">
-                            <label class="ls-label" for="modal-qty">{{ __('app.ui.sessions.quantity') }}</label>
-                            <div class="ls-stepper"><button type="button" onclick="stepQty('modal-qty',-1)" aria-label="-">−</button><input type="number" id="modal-qty" value="1" min="1" max="1000"><button type="button" onclick="stepQty('modal-qty',1)" aria-label="+">+</button></div>
-                        </div>
-                        <x-ui.button id="modal-add-btn" icon="plus" onclick="sessionAddItem()">{{ __('app.ui.sessions.add_to_bill') }}</x-ui.button>
+                        {{-- One click adds one unit; quantities are then adjusted on the bill line. --}}
+                        <ul id="modal-product-list" class="ls-co-products" aria-label="{{ __('app.ui.sessions.product') }}">
+                            @foreach ($products as $p)
+                                <li class="ls-co-product" data-name="{{ mb_strtolower($p->name) }}">
+                                    <x-ui.product-icon :name="$p->iconName()" size="sm" />
+                                    <span class="ls-co-product-name ls-trunc">{{ $p->name }}</span>
+                                    <span class="ls-num ls-co-product-price"><x-ui.money :amount="$p->price" /></span>
+                                    <button type="button" class="ls-co-add" data-add-product="{{ $p->id }}" data-label="{{ $p->name }}"
+                                            aria-label="{{ __('app.ui.sessions.co_add_one', ['product' => $p->name]) }}" title="{{ __('app.ui.sessions.co_add') }}">
+                                        <x-ui.icon name="plus" />
+                                    </button>
+                                </li>
+                            @endforeach
+                            <li id="modal-product-none" class="ls-hint ls-co-none" hidden>{{ __('app.ui.sessions.co_no_match') }}</li>
+                        </ul>
                     </div>
                 @else
-                    <p class="ls-hint" style="margin-top:8px">{{ __('app.ui.sessions.no_catalog') }} <a class="ls-link" href="{{ route('products.create') }}">{{ __('app.ui.sessions.add_catalog_product') }}</a></p>
+                    <p class="ls-hint">{{ __('app.ui.sessions.no_catalog') }} <a class="ls-link" href="{{ route('products.create') }}">{{ __('app.ui.sessions.add_catalog_product') }}</a></p>
                 @endif
-            </div>
-
-            <div class="ls-paper">
-                <div style="display:flex;justify-content:space-between"><span class="ls-muted">{{ __('app.ui.sessions.room_time') }}</span><span id="modal-total" class="ls-num"></span></div>
-                <div style="display:flex;justify-content:space-between"><span class="ls-muted">{{ __('app.ui.sessions.products') }}</span><span id="modal-items-total" class="ls-num"></span></div>
-                <div class="ls-total"><span>{{ __('app.ui.sessions.total_to_collect') }}</span><b id="modal-grand-total"></b></div>
-            </div>
-        @else
-            <div class="ls-total"><span>{{ __('app.ui.sessions.total_to_collect') }}</span><b id="modal-total"></b></div>
+            </section>
         @endif
     </div>
 
-    <x-slot:note><span id="session-modal-note"></span></x-slot:note>
     <x-slot:footer>
-        <x-ui.button variant="ghost" id="session-modal-dismiss-btn" onclick="closeSessionModal()">{{ __('app.ui.sessions.keep_open') }}</x-ui.button>
-        <div class="ls-push">
-            <x-ui.button variant="primary" id="confirm-close-btn" disabled>{{ __('app.session.confirm_save') }}</x-ui.button>
+        <div class="ls-co-foot">
+            <div class="ls-co-summary" id="modal-summary" hidden>
+                @if ($canSell)
+                    <dl class="ls-co-sub">
+                        <div><dt>{{ __('app.ui.sessions.room_time') }}</dt><dd id="modal-total" class="ls-num"></dd></div>
+                        <div><dt>{{ __('app.ui.sessions.products') }}</dt><dd id="modal-items-total" class="ls-num"></dd></div>
+                    </dl>
+                    <div class="ls-co-total"><span>{{ __('app.ui.sessions.total_to_collect') }}</span><b id="modal-grand-total" class="ls-num"></b></div>
+                @else
+                    <div class="ls-co-total"><span>{{ __('app.ui.sessions.total_to_collect') }}</span><b id="modal-total" class="ls-num"></b></div>
+                @endif
+            </div>
+            <div class="ls-co-actions">
+                <x-ui.button variant="secondary" id="session-modal-dismiss-btn" onclick="closeSessionModal()">{{ __('app.ui.sessions.keep_open') }}</x-ui.button>
+                <x-ui.button variant="primary" id="confirm-close-btn" disabled>{{ __('app.session.confirm_save') }}</x-ui.button>
+            </div>
         </div>
     </x-slot:footer>
 </x-ui.modal>
@@ -424,7 +457,7 @@
     const PKG_COVERED = @json(__('app.packages.covered_total'));
     const S = @json(__('app.ui.sessions'));
     const L = {
-        usedVsBilled: @json(__('app.session.used_vs_billed')),
+        partyOf: @json(__('app.session.party_of')),
         noItems: @json(__('app.sales.no_items_yet')),
         remove: @json(__('app.common.delete')),
         decrease: @json(__('app.sales.decrease_quantity')),
@@ -438,15 +471,21 @@
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const $ = (id) => document.getElementById(id);
     const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
+    // Display only: "1h 0m" → "1h" (the server's text is otherwise kept as is).
+    const tidyDuration = (d) => String(d || '').replace(/^(\d+h) 0m$/, '$1');
 
     window.stepQty = (id, d) => { const i = $(id); i.value = Math.max(1, Math.min(1000, (parseInt(i.value, 10) || 1) + d)); };
 
-    function renderLines(boxId, items, removeFn, updateFn) {
+    // emptyId: an element shown instead of an in-list "no items" message (the
+    // checkout modal uses a quiet inline hint so it doesn't compete with the picker).
+    function renderLines(boxId, items, removeFn, updateFn, emptyId) {
         const box = $(boxId);
-        if (!items || !items.length) { box.innerHTML = `<p class="ls-hint" style="margin:6px 0 0">${esc(L.noItems)}</p>`; return; }
+        const empty = !items || !items.length;
+        if (emptyId) show(emptyId, empty);
+        if (empty) { box.innerHTML = emptyId ? '' : `<p class="ls-hint" style="margin:6px 0 0">${esc(L.noItems)}</p>`; return; }
         box.innerHTML = items.map(it => `
             <div class="ls-line" data-id="${esc(it.id)}" data-qty="${esc(it.quantity)}">
-                <span class="ls-line-main ls-trunc">${esc(it.name)}</span>
+                <span class="ls-line-main"><span class="ls-line-name ls-trunc">${esc(it.name)}</span>${it.unit_price ? `<small class="ls-line-each ls-num">${esc(fill(S.co_each, { price: money(it.unit_price) }))}</small>` : ''}</span>
                 <div class="ls-stepper ls-stepper--sm">
                     <button type="button" class="ls-qty-dec" aria-label="${esc(L.decrease)} ${esc(it.name)}">−</button>
                     <span class="ls-qty-val">${esc(it.quantity)}</span>
@@ -460,7 +499,7 @@
         box.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => removeFn(b.dataset.remove, b.dataset.name, b)));
         if (updateFn) {
             box.querySelectorAll('.ls-line').forEach(line => {
-                const id = line.dataset.id, name = line.querySelector('.ls-line-main').textContent;
+                const id = line.dataset.id, name = line.querySelector('.ls-line-name').textContent;
                 line.querySelector('.ls-qty-dec').addEventListener('click', (e) => updateFn(id, parseInt(line.dataset.qty, 10) - 1, name, e.currentTarget));
                 line.querySelector('.ls-qty-inc').addEventListener('click', (e) => updateFn(id, parseInt(line.dataset.qty, 10) + 1, name, e.currentTarget));
             });
@@ -484,9 +523,10 @@
         const confirmBtn = $('confirm-close-btn');
         confirmBtn.hidden = mode === 'products';
         confirmBtn.disabled = true;
+        delete confirmBtn.dataset.busy;
         $('session-modal-dismiss-btn').querySelector('span').textContent = mode === 'products' ? S.done : S.keep_open;
-        $('session-modal-note').closest('.ls-dialog-note').hidden = mode === 'products';
-        show('modal-loading', true); show('modal-content', false); show('modal-error', false);
+        resetPicker();
+        show('modal-loading', true); show('modal-content', false); show('modal-error', false); show('modal-summary', false);
         LS.open('session-modal');
         loadPreview();
     };
@@ -495,31 +535,32 @@
     function loadPreview() {
         return fetch(`${sessionBaseUrl()}/close-preview`, { headers: { 'Accept': 'application/json' } })
             .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-            .then(data => { populatePreview(data); show('modal-loading', false); show('modal-error', false); show('modal-content', true); })
-            .catch(() => { show('modal-loading', false); show('modal-content', false); show('modal-error', true); });
+            .then(data => { populatePreview(data); show('modal-loading', false); show('modal-error', false); show('modal-content', true); show('modal-summary', true); })
+            .catch(() => { show('modal-loading', false); show('modal-content', false); show('modal-summary', false); show('modal-error', true); });
     }
 
     function populatePreview(data) {
         lastPreview = data;
         const title = currentMode === 'products' ? S.products_title : S.checkout_title;
         $('session-modal-title').textContent = fill(title, { name: data.user_name });
-        $('session-modal-sub').textContent = `${data.room_name} · ${data.user_phone}`;
-        $('modal-user').textContent = data.user_name;
-        $('modal-room').textContent = data.room_name;
-        const party = data.party_size > 1;
-        show('modal-party-label', party); show('modal-party-row', party);
-        $('modal-party').textContent = data.party_size;
+        // Who is in the title, where (and party size) in the subtitle — once each.
+        // The phone isn't needed to check out, so it's not repeated here.
+        $('session-modal-sub').textContent = data.party_size > 1
+            ? `${data.room_name} · ${fill(L.partyOf, { count: data.party_size })}`
+            : data.room_name;
         $('modal-time').textContent = data.start_time + ' → ' + data.end_time;
-        $('modal-duration').textContent = data.duration;
+        // Duration shown once ("7m"), with the billed time beside it only when it
+        // differs ("1h billed") — previously "7m" then "7m used · billed 1h 0m".
+        $('modal-duration').textContent = tidyDuration(data.duration);
+        show('modal-billed-row', !!data.billed_duration);
+        if (data.billed_duration) $('modal-billed').textContent = fill(S.co_billed, { time: tidyDuration(data.billed_duration) });
         // Rule-priced rooms explain the matched package/tier instead of a flat rate.
         $('modal-rate').textContent = data.pricing_note || fill(S.rate_per_hour, { rate: money(data.price_per_hour) });
         $('modal-total').textContent = money(data.total_price);
-        show('modal-billed-row', !!data.billed_duration);
-        if (data.billed_duration) $('modal-billed').textContent = fill(L.usedVsBilled, { used: data.duration, billed: data.billed_duration });
 
         // Hour package chosen at open: covers the room time, or says why it can't.
         const pkg = data.package;
-        show('modal-pkg-label', !!pkg); show('modal-pkg-row', !!pkg);
+        show('modal-pkg-row', !!pkg);
         if (pkg) {
             $('modal-pkg').textContent = pkg.message;
             if (pkg.covers) $('modal-total').textContent = PKG_COVERED.replace(':time', pkg.hours);
@@ -529,29 +570,88 @@
         if (SALES_ENABLED) {
             $('modal-items-total').textContent = money(data.items_total);
             $('modal-grand-total').textContent = money(data.grand_total);
-            renderLines('modal-items', data.items, sessionRemoveItem, sessionUpdateItemQty);
+            renderLines('modal-items', data.items, sessionRemoveItem, sessionUpdateItemQty, 'modal-items-empty');
         }
-        $('session-modal-note').textContent = fill(S.closes_note, { room: data.room_name });
         const confirmBtn = $('confirm-close-btn');
         confirmBtn.querySelector('span').textContent = fill(S.collect, { amount: money(total) });
         confirmBtn.disabled = false;
     }
 
-    window.sessionAddItem = () => {
-        const btn = $('modal-add-btn');
-        const select = $('modal-product');
-        const name = select.options[select.selectedIndex].text.split(' — ')[0];
-        if (btn.dataset.busy) return; // a second click while the first add is in flight
+    /* Product picker: collapsed behind "Add products" on checkout, open in
+       add-products mode. Type to filter; each row's + adds one unit (quantity is
+       then adjusted on the bill line). Enter adds the only match. */
+    const pickerBox = $('modal-picker');
+    const pickerToggle = $('modal-picker-toggle');
+    const pickerList = $('modal-product-list');
+    const pickerSearch = $('modal-product-search');
+    function setPicker(open, focus) {
+        if (!pickerBox) return;
+        pickerBox.hidden = !open;
+        pickerToggle.hidden = open;
+        pickerToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open && focus) setTimeout(() => { pickerBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); pickerSearch.focus({ preventScroll: true }); }, 30);
+    }
+    function filterPicker() {
+        if (!pickerList) return;
+        const q = pickerSearch.value.trim().toLowerCase();
+        let shown = 0;
+        pickerList.querySelectorAll('.ls-co-product').forEach(row => {
+            const on = !q || row.dataset.name.includes(q);
+            row.hidden = !on;
+            if (on) shown++;
+        });
+        show('modal-product-none', shown === 0);
+    }
+    function resetPicker() {
+        if (!pickerList) return;
+        pickerSearch.value = '';
+        filterPicker();
+        setPicker(currentMode === 'products', false);
+    }
+    if (pickerList) {
+        pickerToggle.addEventListener('click', () => setPicker(true, true));
+        pickerSearch.addEventListener('input', filterPicker);
+        pickerSearch.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            const visible = [...pickerList.querySelectorAll('.ls-co-product:not([hidden]) [data-add-product]')];
+            if (visible.length === 1) sessionAddItem(visible[0]);
+        });
+        pickerList.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-add-product]');
+            if (btn) sessionAddItem(btn);
+        });
+    }
+
+    window.sessionAddItem = (btn) => {
+        if (!btn || btn.dataset.busy) return; // a second click while this product's add is in flight
+        const name = btn.dataset.label;
         btn.dataset.busy = '1';
         LS.busy(btn, true);
-        // Items go to THIS session's own invoice: /bookings/{id} for an Open
-        // Session booking, /shared-sessions/{id} for a shared tab.
-        fetch(`${sessionBaseUrl()}/items`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Idempotency-Key': idemKey() },
-            body: JSON.stringify({ product_id: select.value, quantity: $('modal-qty').value || 1 }),
-        }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(() => { itemsChanged = true; $('modal-qty').value = 1; LS.toast(fill(S.added_to_bill, { product: name, name: lastPreview ? lastPreview.user_name : '' })); return loadPreview(); })
+        // Already on the bill → +1 on that line (the same PATCH the line's own +
+        // uses), so a product never shows up as two lines. Otherwise add a new
+        // line. Items go to THIS session's own invoice: /bookings/{id} for an
+        // Open Session booking, /shared-sessions/{id} for a shared tab.
+        const line = (lastPreview && lastPreview.items || []).filter(i => String(i.product_id) === btn.dataset.addProduct).pop();
+        const request = line
+            ? fetch(`${sessionBaseUrl()}/items/${line.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                body: JSON.stringify({ quantity: Number(line.quantity) + 1 }),
+            })
+            : fetch(`${sessionBaseUrl()}/items`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Idempotency-Key': idemKey() },
+                body: JSON.stringify({ product_id: btn.dataset.addProduct, quantity: 1 }),
+            });
+        request.then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(() => {
+              itemsChanged = true;
+              btn.closest('.ls-co-product').classList.add('is-added');
+              setTimeout(() => btn.closest('.ls-co-product').classList.remove('is-added'), 900);
+              LS.toast(fill(S.added_to_bill, { product: name, name: lastPreview ? lastPreview.user_name : '' }));
+              return loadPreview();
+          })
           .catch(() => LS.toast(S.action_failed, { tone: 'danger' }))
           .finally(() => { LS.busy(btn, false); delete btn.dataset.busy; });
     };
@@ -585,6 +685,8 @@
     $('confirm-close-btn').addEventListener('click', function () {
         if (!currentSessionId) return;
         const btn = this, preview = lastPreview;
+        if (btn.dataset.busy) return; // one collect per click, even on a fast double-click
+        btn.dataset.busy = '1';
         LS.busy(btn, true);
         fetch(`${sessionBaseUrl()}/close`, {
             method: 'POST',
@@ -592,11 +694,11 @@
         })
         .then(r => r.json())
         .then(data => {
-            if (!data.success) { LS.busy(btn, false); LS.toast(data.message || L.closeFailed, { tone: 'danger' }); return; }
+            if (!data.success) { delete btn.dataset.busy; LS.busy(btn, false); LS.toast(data.message || L.closeFailed, { tone: 'danger' }); return; }
             const amount = preview ? preview.collect : '';
             LS.reloadWithToast(fill(S.settled, { amount: money(amount), name: preview ? preview.user_name : '' }));
         })
-        .catch(() => { LS.busy(btn, false); LS.toast(L.closeFailed, { tone: 'danger' }); });
+        .catch(() => { delete btn.dataset.busy; LS.busy(btn, false); LS.toast(L.closeFailed, { tone: 'danger' }); });
     });
 
     /* ---------------- Exclusive room: add products ---------------- */

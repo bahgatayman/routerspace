@@ -97,10 +97,12 @@ class ActiveSessionsTest extends TestCase
         $this->assertTrue($rows->first()->isShared());
         $this->assertFalse($rows->first()->isFromBooking());
 
+        // The card no longer shows the "Since … · Walk-in" or "Billed per minute" lines.
         $this->actingAs($owner, 'owner')->get('/active-sessions')
             ->assertOk()
             ->assertSee($user->name)
-            ->assertSee(__('app.sales.walk_in'));
+            ->assertDontSee(__('app.sales.walk_in'))
+            ->assertDontSee(__('app.session.billed_per.minute'));
     }
 
     public function test_checking_in_a_booking_appears_as_from_booking_and_snapshots_billing(): void

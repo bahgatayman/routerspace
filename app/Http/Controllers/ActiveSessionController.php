@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\Room;
-use App\Models\SaleItem;
+use App\Services\ProductAnalyticsService;
 use App\Services\RoomPricingService;
 use App\Support\ActiveSessionsQuery;
 use App\Support\TenantContext;
@@ -49,22 +49,20 @@ class ActiveSessionController extends Controller
             ? Product::where('owner_id', $owner->id)->where('is_active', true)->orderBy('name')->get()
             : collect();
 
-        // Quick-add chips on each card: the owner's best sellers among active
-        // products (by quantity sold), falling back to catalog order. Read-only.
+        // Quick-add chips on each card: up to 3 real best sellers (completed
+        // sales, by units) for the card's own workspace, topped up from the
+        // owner's overall best sellers. Only an owner with no sales at all
+        // gets plain catalog order, so quick-add still works from day one.
         $quickProducts = collect();
+        $quickProductsByWorkspace = [];
         if ($products->isNotEmpty()) {
-            $ranked = SaleItem::query()
-                ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-                ->where('sales.owner_id', $owner->id)
-                ->whereIn('sale_items.product_id', $products->pluck('id'))
-                ->groupBy('sale_items.product_id')
-                ->orderByRaw('SUM(sale_items.quantity) DESC')
-                ->limit(3)
-                ->pluck('sale_items.product_id');
-            $quickProducts = $ranked->map(fn ($id) => $products->firstWhere('id', $id))->filter()
-                ->concat($products->whereNotIn('id', $ranked))
-                ->take(3)
-                ->values();
+            $best = app(ProductAnalyticsService::class)->bestSellersByWorkspace($owner, $products->pluck('id')->all());
+            $toProducts = fn (array $ids) => collect($ids)->map(fn ($id) => $products->firstWhere('id', $id))->filter()->values();
+
+            $quickProducts = $best['overall'] !== [] ? $toProducts($best['overall']) : $products->take(3)->values();
+            foreach ($best['byWorkspace'] as $workspaceId => $ids) {
+                $quickProductsByWorkspace[$workspaceId] = $toProducts(array_values(array_unique(array_merge($ids, $best['overall']))))->take(3)->values();
+            }
         }
 
         // Running-bill estimate for each open shared session AND each open
@@ -90,6 +88,7 @@ class ActiveSessionController extends Controller
             'sharedRooms' => $sharedRooms,
             'products' => $products,
             'quickProducts' => $quickProducts,
+            'quickProductsByWorkspace' => $quickProductsByWorkspace,
             'estimates' => $estimates,
         ]);
     }

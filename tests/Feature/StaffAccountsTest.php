@@ -449,6 +449,32 @@ class StaffAccountsTest extends TestCase
         $this->actingAs($owner, 'owner')->get("/staff/{$staff->id}/edit")->assertOk()->assertSee($staff->email);
     }
 
+    public function test_staff_badge_cards_show_identity_status_and_actions_only_for_this_owners_team(): void
+    {
+        $owner = $this->owner();
+        $active = $this->staff($owner);
+        $disabled = $this->staff($owner);
+        $disabled->update(['is_active' => false]);
+        $foreign = $this->staff($this->owner());
+        $foreign->update(['name' => 'Other Tenant Cashier']);
+
+        $response = $this->actingAs($owner, 'owner')->get('/staff');
+
+        $response->assertOk()
+            ->assertSee('#'.str_pad((string) $active->id, 4, '0', STR_PAD_LEFT))
+            ->assertSee($active->name)
+            ->assertSee(__('app.status.active'))
+            ->assertSee(__('app.staff.disabled'))
+            ->assertSee("/staff/{$active->id}/edit#permissions", false)
+            ->assertSee("/staff/{$active->id}/activity", false)
+            ->assertSee("/staff/{$disabled->id}/toggle-status", false)
+            ->assertSee(__('app.staff.manage_permissions'))
+            ->assertDontSee($foreign->name)
+            ->assertDontSee($foreign->email);
+
+        $this->actingAs($owner, 'owner')->get("/staff/{$active->id}/edit")->assertSee('id="permissions"', false);
+    }
+
     /**
      * Regression test for a reported bug: the create/edit permissions grid
      * only ever renders the rows present in the `permissions` table, and on

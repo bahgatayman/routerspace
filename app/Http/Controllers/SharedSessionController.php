@@ -444,6 +444,7 @@ class SharedSessionController extends Controller
 
         return $session->sale->items->map(fn (SaleItem $item) => [
             'id' => $item->id,
+            'product_id' => $item->product_id,
             'name' => $item->name,
             'quantity' => $item->quantity,
             'unit_price' => number_format($item->unit_price, 2),
