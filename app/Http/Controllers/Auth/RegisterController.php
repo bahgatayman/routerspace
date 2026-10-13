@@ -42,13 +42,16 @@ class RegisterController extends Controller
             'mikrotik_password' => $validated['mikrotik_password'] ?? null,
         ]);
 
-        // Start every new owner on the default (free) plan with a 2-week trial so
-        // they land in the panel instead of the subscription-expired wall.
+        // Start every new owner on the default (free) plan with a full one-month
+        // trial from their actual registration moment, so they land in the panel
+        // instead of the subscription-expired wall. addMonthNoOverflow() (not
+        // addMonth()) is required here: this app's Carbon config overflows short
+        // months by default (Jan 31 + 1 month would land on Mar 3, not Feb 28).
         if ($plan = Plan::defaultForSignup()) {
             $owner->update([
                 'plan_id' => $plan->id,
                 'subscription_starts_at' => now(),
-                'subscription_expires_at' => now()->addWeeks(2),
+                'subscription_expires_at' => now()->addMonthNoOverflow(),
                 'is_active' => true,
             ]);
             $owner->applyPlanFeatures();
