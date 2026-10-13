@@ -331,7 +331,10 @@ html[dir="rtl"] .ls-collapse svg { transform: scaleX(-1); }
 .ls-lang button { border: 0; background: transparent; height: 32px; min-width: 36px; padding: 0 var(--space-2); border-radius: var(--ls-r-ctl); font-size: 13px; font-weight: var(--fw-medium); color: var(--color-text-muted); cursor: pointer; font-family: var(--ls-font-ar); transition: background var(--ls-t-fast) var(--ls-ease), color var(--ls-t-fast) var(--ls-ease); }
 .ls-lang button:hover { background: var(--color-hover); color: var(--color-text); }
 .ls-lang button.is-on { color: var(--color-text); font-weight: var(--fw-strong); }
-.ls-main { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-7) var(--space-8) var(--space-9); }
+/* position: relative makes .ls-main the containing block for stray absolutely
+   positioned content (e.g. visually hidden inputs), so it can never stretch the
+   document past the fixed-height shell and scroll the whole app, sidebar included. */
+.ls-main { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-7) var(--space-8) var(--space-9); }
 .ls-page { max-width: 1220px; margin: 0 auto; }
 .ls-menu-btn { display: none !important; }
 .ls-side-scrim { display: none; }
@@ -799,6 +802,113 @@ html[dir="rtl"] .ls-staff-email { text-align: right; } /* the address stays LTR,
 .ls-product.is-inactive .ls-product-name, .ls-product.is-inactive .ls-product-price { color: var(--color-text-secondary); }
 .ls-product.is-inactive .ls-product-icon, .ls-product.is-inactive .ls-picon { opacity: .6; }
 @media (max-width: 640px) { .ls-product-grid { grid-template-columns: 1fr; gap: var(--space-3); } .ls-product { padding: var(--space-4); } }
+
+/* ---------- 10a*. Room cards + photo gallery (workspaces/rooms) ---------- */
+/* Status filter tabs: the stat strip's counts are the filter (index page). */
+.ls-strip--tabs > a { position: relative; text-decoration: none; cursor: pointer; border-radius: var(--ls-r-sm); transition: color var(--ls-t-fast) var(--ls-ease); }
+.ls-strip--tabs > a:hover .ls-strip-label { color: var(--color-text); }
+.ls-strip--tabs > a:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-strip--tabs > a.is-active .ls-strip-label { color: var(--color-primary-text); font-weight: var(--fw-medium); }
+.ls-strip--tabs > a.is-active::after { content: ""; position: absolute; inset-inline: var(--space-6) var(--space-6); bottom: calc(-1 * var(--space-6) - 1px); height: 2px; border-radius: 2px; background: var(--color-primary); }
+.ls-strip--tabs > a:first-child.is-active::after { inset-inline-start: 0; }
+.ls-rooms-toolbar { margin-bottom: var(--space-5); }
+.ls-rooms-sort { margin: 0; }
+.ls-rooms-sort .ls-select { min-width: 176px; }
+
+.ls-rooms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: var(--space-5); }
+/* No overflow:hidden here — it would clip the ⋯ menu; the photo carries the top rounding instead. */
+.ls-room { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--ls-r-card); transition: border-color var(--ls-t-fast) var(--ls-ease), box-shadow var(--ls-t-med) var(--ls-ease), transform var(--ls-t-med) var(--ls-ease); }
+.ls-room:hover { border-color: var(--color-border-hover); box-shadow: var(--shadow-hover); transform: translateY(-2px); }
+.ls-room:has(.ls-pop:not([hidden])) { z-index: 5; }
+.ls-room.is-unavailable { background: var(--color-surface-subtle); }
+.ls-room.is-unavailable .ls-room-photo img { filter: grayscale(.6); opacity: .8; }
+
+/* Always LTR regardless of page direction — a horizontal photo carousel has no
+   reading direction of its own, and forcing it avoids scrollLeft/scroll-snap
+   sign ambiguity across browsers in RTL contexts (same technique already used
+   for the dashboard's revenue-hero row). */
+.ls-room-photo { position: relative; aspect-ratio: 16 / 10; background: var(--color-surface-subtle); overflow: hidden; direction: ltr; border-radius: calc(var(--ls-r-card) - 1px) calc(var(--ls-r-card) - 1px) 0 0; }
+.ls-room-photo-track { display: flex; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; scroll-behavior: smooth; }
+.ls-room-photo-track::-webkit-scrollbar { display: none; }
+.ls-room-photo-slide { display: block; flex: none; width: 100%; height: 100%; scroll-snap-align: start; }
+.ls-room-photo-slide img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s var(--ls-ease); }
+.ls-room:hover .ls-room-photo-slide img { transform: scale(1.03); }
+.ls-room-photo-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: var(--space-2); color: var(--color-text-muted); background: radial-gradient(120% 90% at 50% 30%, var(--color-surface) 0%, transparent 70%), linear-gradient(160deg, var(--color-surface-brand) 0%, var(--color-primary-soft) 100%); text-decoration: none; font-size: 13px; font-weight: var(--fw-medium); }
+.ls-room-photo-placeholder svg { width: 32px; height: 32px; opacity: .55; }
+.ls-room-photo-placeholder.is-action { color: var(--color-text-secondary); transition: color var(--ls-t-fast) var(--ls-ease); }
+.ls-room-photo-placeholder.is-action span { padding: 4px 12px; border-radius: 99px; border: 1px dashed var(--color-border-strong); background: var(--color-surface); }
+.ls-room-photo-placeholder.is-action:hover, .ls-room-photo-placeholder.is-action:focus-visible { color: var(--color-primary-text); outline: none; }
+.ls-room-photo-placeholder.is-action:hover span, .ls-room-photo-placeholder.is-action:focus-visible span { border-color: var(--color-accent); }
+
+/* Status pill over the photo — always on a solid surface so it reads on any image. */
+.ls-room-badge { position: absolute; top: var(--space-3); inset-inline-start: var(--space-3); z-index: 2; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 99px; background: var(--color-surface); box-shadow: var(--shadow-btn); font-size: 12px; font-weight: var(--fw-medium); color: var(--color-text); }
+.ls-room-badge .ls-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--color-success); box-shadow: 0 0 0 3px var(--color-success-soft); }
+.ls-room-badge.is-occupied .ls-dot { background: var(--color-info); box-shadow: 0 0 0 3px var(--color-info-soft); }
+.ls-room-badge.is-unavailable { color: var(--color-text-secondary); }
+.ls-room-badge.is-unavailable .ls-dot { background: var(--color-text-muted); box-shadow: none; }
+html[dir="rtl"] .ls-room-badge { padding: 3px 8px 3px 10px; }
+.ls-room-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 30px; height: 30px; border-radius: 50%; border: 0; display: grid; place-items: center; background: rgba(20, 24, 32, .55); color: #fff; cursor: pointer; opacity: 0; transition: opacity var(--ls-t-fast) var(--ls-ease), background var(--ls-t-fast) var(--ls-ease); }
+.ls-room-photo:hover .ls-room-nav, .ls-room-nav:focus-visible { opacity: 1; }
+.ls-room-nav:hover { background: rgba(20, 24, 32, .75); }
+.ls-room-nav.is-prev { left: var(--space-2); }
+.ls-room-nav.is-next { right: var(--space-2); }
+.ls-room-nav svg { width: 16px; height: 16px; }
+.ls-room-nav.is-prev svg { transform: scaleX(-1); }
+.ls-room-dots { position: absolute; bottom: var(--space-2); inset-inline: 0; z-index: 2; display: flex; justify-content: center; gap: 5px; }
+.ls-room-dot { width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .55); cursor: pointer; }
+.ls-room-dot.is-active { background: #fff; width: 16px; border-radius: 3px; }
+
+.ls-room-body { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-5) var(--space-4); flex: 1; }
+.ls-room-head { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.ls-room-name { flex: 1; min-width: 0; font-size: 16px; font-weight: var(--fw-strong); color: var(--color-text); line-height: 1.35; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-room-name:hover { color: var(--color-primary-text); }
+.ls-room-name:focus-visible { outline: none; text-decoration: underline; }
+.ls-room-menu { margin-top: -6px; margin-inline-end: -10px; }
+.ls-room-menu .ls-pop { min-width: 200px; }
+.ls-room-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; font-size: 13px; color: var(--color-text-muted); }
+.ls-room-meta > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ls-room-meta svg { width: 14px; height: 14px; }
+/* Room type is a category -> categorical hue, never a status colour. */
+.ls-room-type { padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: var(--fw-medium); background: var(--color-primary-soft); color: var(--color-primary-text); }
+.ls-room-type.is-shared { background: var(--color-teal-soft); color: var(--color-teal); }
+.ls-room-type.is-training, .ls-room-type.is-studio { background: var(--color-violet-soft); color: var(--color-violet); }
+.ls-room-seats .ls-meter { height: 5px; }
+.ls-room-price { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-top: auto; font-size: 18px; font-weight: var(--fw-figure); letter-spacing: -.015em; color: var(--color-text); }
+.ls-room-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; font-size: 12px; letter-spacing: 0; }
+.ls-room-foot { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-5) var(--space-4); }
+.ls-room-foot .ls-btn { flex: 1; justify-content: center; }
+.ls-room.is-unavailable .ls-room-name, .ls-room.is-unavailable .ls-room-price { color: var(--color-text-secondary); }
+@media (max-width: 640px) {
+  .ls-rooms-grid { grid-template-columns: 1fr; gap: var(--space-4); }
+  .ls-room-nav { opacity: 1; }
+  .ls-rooms-sort, .ls-rooms-sort .ls-select { width: 100%; }
+  .ls-strip--tabs > a.is-active::after { display: none; }
+  .ls-strip--tabs > a.is-active { box-shadow: inset 3px 0 0 var(--color-primary); padding-inline-start: var(--space-3) !important; }
+  html[dir="rtl"] .ls-strip--tabs > a.is-active { box-shadow: inset -3px 0 0 var(--color-primary); }
+}
+@media (prefers-reduced-motion: reduce) { .ls-room:hover { transform: none; } .ls-room:hover .ls-room-photo-slide img { transform: none; } .ls-room-photo-track { scroll-behavior: auto; } }
+
+/* Room photo manager (rooms/edit — upload, reorder, set cover, remove) */
+.ls-room-dropzone { position: relative; display: grid; place-items: center; gap: var(--space-2); padding: var(--space-6) var(--space-4); border: 2px dashed var(--color-border-strong); border-radius: var(--ls-r-ctl); text-align: center; color: var(--color-text-muted); cursor: pointer; transition: border-color var(--ls-t-fast) var(--ls-ease), background var(--ls-t-fast) var(--ls-ease); }
+.ls-room-dropzone:hover, .ls-room-dropzone.is-dragover { border-color: var(--color-accent); background: var(--color-surface-brand); }
+.ls-room-dropzone svg { width: 28px; height: 28px; opacity: .6; }
+.ls-room-dropzone input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.ls-room-pending { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--space-2); margin-top: var(--space-3); }
+.ls-room-pending-item { position: relative; aspect-ratio: 1; border-radius: var(--ls-r-ctl); overflow: hidden; background: var(--color-surface-subtle); }
+.ls-room-pending-item img { width: 100%; height: 100%; object-fit: cover; }
+.ls-room-pending-item button { position: absolute; top: 4px; inset-inline-end: 4px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: rgba(20, 24, 32, .6); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.ls-room-pending-item button svg { width: 11px; height: 11px; }
+
+.ls-room-gallery-manager { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: var(--space-3); }
+.ls-room-image { position: relative; aspect-ratio: 1; border-radius: var(--ls-r-ctl); overflow: hidden; border: 1px solid var(--color-border); cursor: grab; background: var(--color-surface-subtle); }
+.ls-room-image:active { cursor: grabbing; }
+.ls-room-image.is-dragging { opacity: .4; }
+.ls-room-image img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.ls-room-image-cover-tag { position: absolute; top: 6px; inset-inline-start: 6px; padding: 1px 7px; border-radius: 99px; background: var(--color-primary-soft); color: var(--color-primary-text); font-size: 10.5px; font-weight: var(--fw-medium); }
+.ls-room-image-actions { position: absolute; inset-inline: 0; bottom: 0; display: flex; gap: 4px; padding: 6px; background: linear-gradient(0deg, rgba(0, 0, 0, .55), transparent); opacity: 0; transition: opacity var(--ls-t-fast) var(--ls-ease); }
+.ls-room-image:hover .ls-room-image-actions, .ls-room-image:focus-within .ls-room-image-actions { opacity: 1; }
+.ls-room-image-actions button { flex: 1; min-height: 24px; padding: 0 6px; border: 0; border-radius: var(--ls-r-sm); background: rgba(255, 255, 255, .92); color: var(--color-text); font-size: 10.5px; font-weight: var(--fw-medium); cursor: pointer; }
+.ls-room-image-actions button.is-danger { background: var(--color-danger-solid); color: var(--color-on-solid); }
 
 /* ---------- 10a+. EXPERIMENT — quick booking modal (bookings/_quick-modal) ---------- */
 .ls-qb.ls-dialog { width: min(600px, 100%); }

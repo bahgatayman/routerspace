@@ -372,6 +372,115 @@
     input.value = ''; applySearch(input); input.focus();
   });
 
+  /* ------------------------------------------------------ fetch helper (JSON, same-origin) */
+  function lsFetch(url, options = {}) {
+    const token = document.querySelector('meta[name="csrf-token"]')?.content;
+    return fetch(url, Object.assign({
+      headers: Object.assign({ 'Accept': 'application/json', 'X-CSRF-TOKEN': token || '' }, options.headers || {}),
+    }, options)).then((res) => res.json().catch(() => ({})).then((body) => {
+      if (!res.ok || body.success === false) throw new Error(body.message || 'Request failed');
+      return body;
+    }));
+  }
+  LS.fetch = lsFetch;
+
+  /* ------------------------------------------------------ room photo gallery (card + details) */
+  function initRoomGallery(el) {
+    const track = el.querySelector('.ls-room-photo-track');
+    if (!track) return;
+    const slides = Array.from(track.children);
+    const dots = Array.from(el.querySelectorAll('.ls-room-dot'));
+    const goTo = (i) => { i = Math.max(0, Math.min(slides.length - 1, i)); track.scrollTo({ left: slides[i].offsetLeft, behavior: 'smooth' }); };
+    el.querySelector('.ls-room-nav.is-prev')?.addEventListener('click', (e) => { e.preventDefault(); goTo(activeIndex() - 1); });
+    el.querySelector('.ls-room-nav.is-next')?.addEventListener('click', (e) => { e.preventDefault(); goTo(activeIndex() + 1); });
+    dots.forEach((dot, i) => dot.addEventListener('click', (e) => { e.preventDefault(); goTo(i); }));
+    function activeIndex() {
+      let best = 0, bestDist = Infinity;
+      slides.forEach((s, i) => { const d = Math.abs(s.offsetLeft - track.scrollLeft); if (d < bestDist) { bestDist = d; best = i; } });
+      return best;
+    }
+    let raf = null;
+    track.addEventListener('scroll', () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        const i = activeIndex();
+        dots.forEach((dot, di) => dot.classList.toggle('is-active', di === i));
+        raf = null;
+      });
+    });
+  }
+
+  /* ------------------------------------------------------ room photo manager (rooms/edit) */
+  function initRoomPhotoManager(el) {
+    const input = el.querySelector('input[type="file"]');
+    const dropzone = el.querySelector('[data-ls-dropzone]');
+    const pendingBox = el.querySelector('[data-ls-pending]');
+    const submitBtn = el.querySelector('[data-ls-upload-submit]');
+    if (input && dropzone) {
+      dropzone.addEventListener('click', () => input.click());
+      ['dragover', 'dragenter'].forEach((ev) => dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add('is-dragover'); }));
+      ['dragleave', 'dragend'].forEach((ev) => dropzone.addEventListener(ev, () => dropzone.classList.remove('is-dragover')));
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('is-dragover');
+        if (e.dataTransfer?.files?.length) { input.files = e.dataTransfer.files; renderPending(); }
+      });
+      input.addEventListener('change', renderPending);
+    }
+    function renderPending() {
+      if (!pendingBox || !input) return;
+      pendingBox.innerHTML = '';
+      const files = Array.from(input.files || []);
+      files.forEach((file) => {
+        const item = document.createElement('div');
+        item.className = 'ls-room-pending-item';
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        item.appendChild(img);
+        pendingBox.appendChild(item);
+      });
+      if (submitBtn) submitBtn.disabled = files.length === 0;
+    }
+
+    // Existing images: drag-to-reorder + set cover / remove, all via fetch so a
+    // success just reloads with a toast (LS.reloadWithToast) rather than hand-
+    // patching the DOM — consistent with how the rest of this app round-trips.
+    const grid = el.querySelector('[data-ls-room-images]');
+    if (!grid) return;
+    let dragged = null;
+    grid.querySelectorAll('.ls-room-image').forEach((tile) => {
+      tile.addEventListener('dragstart', () => { dragged = tile; tile.classList.add('is-dragging'); });
+      tile.addEventListener('dragend', () => { dragged?.classList.remove('is-dragging'); dragged = null; });
+      tile.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (!dragged || dragged === tile) return;
+        const tiles = Array.from(grid.querySelectorAll('.ls-room-image'));
+        const draggedIdx = tiles.indexOf(dragged), overIdx = tiles.indexOf(tile);
+        tile.insertAdjacentElement(draggedIdx < overIdx ? 'afterend' : 'beforebegin', dragged);
+      });
+      tile.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const order = Array.from(grid.querySelectorAll('.ls-room-image')).map((t) => t.dataset.imageId);
+        lsFetch(grid.dataset.reorderUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) })
+          .catch((err) => LS.toast(err.message, { tone: 'danger' }));
+      });
+    });
+    grid.addEventListener('click', (e) => {
+      const coverBtn = e.target.closest('[data-ls-set-cover]');
+      const removeBtn = e.target.closest('[data-ls-remove-image]');
+      if (coverBtn) {
+        lsFetch(coverBtn.dataset.lsSetCover, { method: 'POST' })
+          .then((body) => LS.reloadWithToast(body.message, 'ok'))
+          .catch((err) => LS.toast(err.message, { tone: 'danger' }));
+      } else if (removeBtn) {
+        if (!confirm(removeBtn.dataset.confirm || 'Remove this photo?')) return;
+        lsFetch(removeBtn.dataset.lsRemoveImage, { method: 'DELETE' })
+          .then((body) => LS.reloadWithToast(body.message, 'ok'))
+          .catch((err) => LS.toast(err.message, { tone: 'danger' }));
+      }
+    });
+  }
+
   /* ------------------------------------------------------ boot */
   document.addEventListener('DOMContentLoaded', () => {
     LS.theme.apply();
@@ -383,5 +492,7 @@
       if (pending) { sessionStorage.removeItem('ls-toast'); const t = JSON.parse(pending); LS.toast(t.msg, { tone: t.tone }); }
     } catch (e) { /* storage blocked */ }
     document.querySelectorAll('[data-ls-flash]').forEach((el) => LS.toast(el.dataset.lsFlash, { tone: el.dataset.lsTone || 'ok' }));
+    document.querySelectorAll('[data-ls-gallery]').forEach(initRoomGallery);
+    document.querySelectorAll('[data-ls-photo-manager]').forEach(initRoomPhotoManager);
   });
 })();

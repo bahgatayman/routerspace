@@ -237,10 +237,19 @@ class RoomController extends Controller
             ->with('success', 'Room added successfully.');
     }
 
+    /** Read-only gallery + info view — gated by workspaces.view, not .manage, since it changes nothing. */
+    public function show(int $workspaceId, int $roomId): View
+    {
+        $workspace = $this->getWorkspace($workspaceId);
+        $room = $this->getRoom($workspace, $roomId)->load('images');
+
+        return view('workspaces.rooms.show', compact('workspace', 'room'));
+    }
+
     public function edit(int $workspaceId, int $roomId): View
     {
         $workspace = $this->getWorkspace($workspaceId);
-        $room = $this->getRoom($workspace, $roomId);
+        $room = $this->getRoom($workspace, $roomId)->load('images');
 
         $roomTypes = $this->roomTypeOptions();
 

@@ -34,6 +34,7 @@ use App\Http\Controllers\PackageTemplateController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoomController;
+use App\Http\Controllers\RoomImageController;
 use App\Http\Controllers\RouterSyncTaskController;
 use App\Http\Controllers\SaleController;
 use App\Http\Controllers\SessionController;
@@ -134,6 +135,12 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
     Route::middleware('feature:workspace')->group(function () {
         Route::get('/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index')->middleware('permission:workspaces.view');
 
+        // Read-only — same gate as the Rooms page itself, not the .manage one below.
+        // whereNumber('room') is required: without it this wildcard would swallow
+        // the literal /rooms/create path below it (both are GET, registered first).
+        Route::get('/workspaces/{workspace}/rooms/{room}', [RoomController::class, 'show'])
+            ->whereNumber('room')->name('rooms.show')->middleware('permission:workspaces.view');
+
         Route::middleware('permission:workspaces.manage')->group(function () {
             Route::get('/workspaces/create', [WorkspaceController::class, 'create'])->name('workspaces.create');
             Route::post('/workspaces', [WorkspaceController::class, 'store'])->name('workspaces.store');
@@ -152,6 +159,12 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
             Route::put('/workspaces/{workspace}/rooms/{room}', [RoomController::class, 'update'])->name('rooms.update');
             Route::delete('/workspaces/{workspace}/rooms/{room}', [RoomController::class, 'destroy'])->name('rooms.destroy');
             Route::post('/workspaces/{workspace}/rooms/{room}/toggle', [RoomController::class, 'toggleAvailable'])->name('rooms.toggle');
+
+            // Room photo gallery
+            Route::post('/workspaces/{workspace}/rooms/{room}/images', [RoomImageController::class, 'store'])->name('rooms.images.store');
+            Route::delete('/workspaces/{workspace}/rooms/{room}/images/{image}', [RoomImageController::class, 'destroy'])->name('rooms.images.destroy');
+            Route::post('/workspaces/{workspace}/rooms/{room}/images/{image}/cover', [RoomImageController::class, 'setCover'])->name('rooms.images.cover');
+            Route::post('/workspaces/{workspace}/rooms/{room}/images/reorder', [RoomImageController::class, 'reorder'])->name('rooms.images.reorder');
         });
     });
 

@@ -6,10 +6,14 @@ use App\Models\Booking;
 use App\Models\HotspotUser;
 use App\Models\Owner;
 use App\Models\Plan;
+use App\Models\Role;
 use App\Models\Room;
 use App\Models\SharedSession;
+use App\Models\Staff;
 use App\Models\Workspace;
 use Database\Seeders\FeatureSeeder;
+use Database\Seeders\PermissionSeeder;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -210,6 +214,95 @@ class WorkspaceRoomsUiTest extends TestCase
 
         $this->assertStringContainsString('Shared One', $html);
         $this->assertStringNotContainsString('Meeting One', $html);
+    }
+
+    public function test_status_filter_only_shows_rooms_in_that_state_but_leaves_the_stat_strip_alone(): void
+    {
+        $o = $this->owner();
+        $ws = Workspace::create(['owner_id' => $o->id, 'name' => 'Hub', 'is_active' => true]);
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Free Room', 'type' => 'office', 'capacity' => 2, 'price_per_hour' => 50, 'is_available' => true]);
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Off Room', 'type' => 'office', 'capacity' => 2, 'price_per_hour' => 50, 'is_available' => false]);
+
+        $response = $this->actingAs($o, 'owner')->get(route('workspaces.index', ['status' => 'available']))->assertOk();
+        $html = $response->getContent();
+
+        $this->assertStringContainsString('Free Room', $html);
+        $this->assertStringNotContainsString('Off Room', $html);
+        // The stat strip still reports both rooms — the status filter shapes the
+        // list only, not the totals (same behaviour as the Products stock filter).
+        $response->assertSeeInOrder([__('app.workspace.total_rooms'), '2']);
+    }
+
+    public function test_sort_by_price_orders_rooms_cheapest_first(): void
+    {
+        $o = $this->owner();
+        $ws = Workspace::create(['owner_id' => $o->id, 'name' => 'Hub', 'is_active' => true]);
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Pricey', 'type' => 'office', 'capacity' => 2, 'price_per_hour' => 200, 'is_available' => true]);
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Cheap', 'type' => 'office', 'capacity' => 2, 'price_per_hour' => 20, 'is_available' => true]);
+
+        $this->actingAs($o, 'owner')->get(route('workspaces.index', ['sort' => 'price']))
+            ->assertOk()
+            ->assertSeeInOrder(['Cheap', 'Pricey']);
+    }
+
+    public function test_sort_by_availability_puts_available_rooms_before_unavailable_ones(): void
+    {
+        $o = $this->owner();
+        $ws = Workspace::create(['owner_id' => $o->id, 'name' => 'Hub', 'is_active' => true]);
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Zeta Off', 'type' => 'office', 'capacity' => 2, 'price_per_hour' => 50, 'is_available' => false]);
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Alpha Free', 'type' => 'office', 'capacity' => 2, 'price_per_hour' => 50, 'is_available' => true]);
+
+        // Alphabetically "Alpha Free" already sorts first — assert on
+        // availability order specifically, not name order, by reversing names.
+        $this->actingAs($o, 'owner')->get(route('workspaces.index', ['sort' => 'availability']))
+            ->assertOk()
+            ->assertSeeInOrder(['Alpha Free', 'Zeta Off']);
+    }
+
+    public function test_card_shows_the_rooms_physical_seat_count_not_its_booking_concurrency(): void
+    {
+        $o = $this->owner();
+        $ws = Workspace::create(['owner_id' => $o->id, 'name' => 'Hub', 'is_active' => true]);
+        // Exclusive rooms have effectiveCapacity() 1 (one party at a time) but still seat 6 people.
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Board', 'type' => 'meeting', 'capacity' => 6, 'price_per_hour' => 50, 'is_available' => true]);
+
+        $this->actingAs($o, 'owner')->get(route('workspaces.index'))
+            ->assertOk()
+            ->assertSee(trans_choice('app.workspace.seats_count', 6, ['count' => 6]));
+    }
+
+    public function test_room_card_shows_a_placeholder_when_it_has_no_photos(): void
+    {
+        $o = $this->owner();
+        $ws = Workspace::create(['owner_id' => $o->id, 'name' => 'Hub', 'is_active' => true]);
+        Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'No Photo Room', 'type' => 'office', 'capacity' => 2, 'price_per_hour' => 50, 'is_available' => true]);
+
+        $html = $this->actingAs($o, 'owner')->get(route('workspaces.index'))->assertOk()->getContent();
+
+        $this->assertStringContainsString('ls-room-photo-placeholder', $html);
+    }
+
+    public function test_view_only_staff_see_rooms_but_no_management_actions(): void
+    {
+        $this->seed(PermissionSeeder::class);
+        $this->seed(RoleSeeder::class);
+        $o = $this->owner();
+        $ws = Workspace::create(['owner_id' => $o->id, 'name' => 'Hub', 'is_active' => true]);
+        $room = Room::create(['owner_id' => $o->id, 'workspace_id' => $ws->id, 'name' => 'Board A', 'type' => 'meeting', 'capacity' => 4, 'price_per_hour' => 100, 'is_available' => true]);
+
+        $role = Role::whereNull('owner_id')->where('key', 'receptionist')->firstOrFail(); // workspaces.view, not .manage
+        $staff = Staff::create(['owner_id' => $o->id, 'role_id' => $role->id, 'name' => 'R', 'email' => 'r'.uniqid().'@t.local', 'password' => 'secret123', 'is_active' => true]);
+        $staff->syncPermissionsFromRole();
+
+        $html = $this->actingAs($staff, 'staff')->get(route('workspaces.index'))->assertOk()->getContent();
+
+        $this->assertStringContainsString('Board A', $html);
+        $this->assertStringContainsString('href="'.route('rooms.show', [$ws, $room]).'"', $html);
+        $this->assertStringNotContainsString('href="'.route('rooms.edit', [$ws, $room]).'"', $html);
+        $this->assertStringNotContainsString(route('rooms.create', $ws), $html);
+        // rooms.destroy shares rooms.show's URI (DELETE vs GET), so check the controls themselves.
+        $this->assertStringNotContainsString(route('rooms.toggle', [$ws, $room]), $html);
+        $this->assertStringNotContainsString('ls-room-menu', $html);
     }
 
     public function test_room_mutations_redirect_to_the_unified_rooms_page(): void

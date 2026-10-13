@@ -224,4 +224,29 @@ class Room extends Model
     {
         return $this->availableSharedSlots() === 0;
     }
+
+    /** Gallery, in display order. */
+    public function images(): HasMany
+    {
+        return $this->hasMany(RoomImage::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /** The cover photo if one's set, else the first uploaded image (by sort_order) — null if the room has none. */
+    public function coverImage(): ?RoomImage
+    {
+        $images = $this->relationLoaded('images') ? $this->images : $this->images()->get();
+
+        return $images->firstWhere('is_cover', true) ?? $images->first();
+    }
+
+    public function hasImages(): bool
+    {
+        return $this->relationLoaded('images') ? $this->images->isNotEmpty() : $this->images()->exists();
+    }
+
+    /** The cover photo's URL, or null when the room has no images (caller shows a placeholder). */
+    public function coverImageUrl(): ?string
+    {
+        return $this->coverImage()?->thumbnailUrl();
+    }
 }

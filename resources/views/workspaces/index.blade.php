@@ -15,7 +15,7 @@
         :subtitle="$activeWorkspace ? __('app.workspace.rooms_subtitle', ['workspace' => $activeWorkspace->name]) : null"
         :count="$roomStats['total'] ?? null">
         <x-slot:actions>
-            @if ($activeWorkspace)
+            @if ($activeWorkspace && $canManage)
                 <x-ui.button variant="primary" icon="plus" :href="route('rooms.create', $activeWorkspace)">
                     {{ __('app.workspace.add_room') }}
                 </x-ui.button>
@@ -63,34 +63,38 @@
         {{-- The only case where creating a workspace is the page's primary content. --}}
         <div class="ls-card">
             <x-ui.empty-state illustration="box" :title="__('app.workspace.create_workspace')" :text="__('app.empty.no_workspaces')">
-                <x-ui.button variant="primary" icon="plus" :href="route('workspaces.create')">
-                    {{ __('app.btn.create_workspace') }}
-                </x-ui.button>
+                @if ($canManage)
+                    <x-ui.button variant="primary" icon="plus" :href="route('workspaces.create')">
+                        {{ __('app.btn.create_workspace') }}
+                    </x-ui.button>
+                @endif
             </x-ui.empty-state>
         </div>
     @else
-        <div class="ls-strip">
-            <div>
-                <span class="ls-strip-label">{{ __('app.workspace.total_rooms') }}</span>
-                <span class="ls-strip-value is-brand">{{ $roomStats['total'] }}</span>
-            </div>
-            <div>
-                <span class="ls-strip-label">{{ __('app.workspace.available') }}</span>
-                <span class="ls-strip-value">{{ $roomStats['available'] }}</span>
-            </div>
-            <div>
-                <span class="ls-strip-label">{{ __('app.workspace.occupied') }}</span>
-                <span class="ls-strip-value">{{ $roomStats['occupied'] }}</span>
-            </div>
-            @if ($roomStats['unavailable'])
-                <div class="ls-hide-sm">
-                    <span class="ls-strip-label">{{ __('app.workspace.unavailable') }}</span>
-                    <span class="ls-strip-value is-warn">{{ $roomStats['unavailable'] }}</span>
-                </div>
-            @endif
-        </div>
+        @php
+            $status = in_array(request('status'), ['available', 'occupied', 'unavailable'], true) ? request('status') : null;
+            $filtered = request('type') || $status;
+            $statusTiles = [
+                null => ['label' => __('app.workspace.all_rooms'), 'value' => $roomStats['total'], 'tone' => 'is-brand'],
+                'available' => ['label' => __('app.workspace.available'), 'value' => $roomStats['available'], 'tone' => ''],
+                'occupied' => ['label' => __('app.workspace.occupied'), 'value' => $roomStats['occupied'], 'tone' => ''],
+                'unavailable' => ['label' => __('app.workspace.unavailable'), 'value' => $roomStats['unavailable'], 'tone' => $roomStats['unavailable'] ? 'is-warn' : ''],
+            ];
+        @endphp
 
-        <div class="ls-toolbar" style="margin-bottom: var(--space-5)">
+        {{-- The stat strip doubles as the status filter: each count is the tab
+             that shows those rooms, so status is never shown twice on the page. --}}
+        <nav class="ls-strip ls-strip--tabs" aria-label="{{ __('app.workspace.filter_by_status') }}">
+            @foreach ($statusTiles as $key => $tile)
+                @php $on = $status === ($key ?: null); @endphp
+                <a href="{{ request()->fullUrlWithQuery(['status' => $key ?: null]) }}" class="{{ $on ? 'is-active' : '' }}" @if ($on) aria-current="page" @endif>
+                    <span class="ls-strip-label">{{ $tile['label'] }}</span>
+                    <span class="ls-strip-value {{ $tile['tone'] }}">{{ $tile['value'] }}</span>
+                </a>
+            @endforeach
+        </nav>
+
+        <div class="ls-toolbar ls-rooms-toolbar">
             <nav class="ls-chips is-scroll" aria-label="{{ __('app.workspace.type') }}">
                 <a href="{{ request()->fullUrlWithQuery(['type' => null]) }}" class="ls-chip {{ ! request('type') ? 'is-active' : '' }}" @unless (request('type')) aria-current="page" @endunless>
                     {{ __('app.inventory.filter_all') }}
@@ -103,20 +107,39 @@
             </nav>
             <div class="ls-toolbar-spacer"></div>
             <x-ui.search group="rooms" :placeholder="__('app.ui.search_rooms')" />
+            <form method="GET" class="ls-rooms-sort">
+                <input type="hidden" name="workspace" value="{{ $activeWorkspace->id }}">
+                @if (request('type')) <input type="hidden" name="type" value="{{ request('type') }}"> @endif
+                @if ($status) <input type="hidden" name="status" value="{{ $status }}"> @endif
+                <select name="sort" class="ls-select" aria-label="{{ __('app.workspace.sort_by') }}" title="{{ __('app.workspace.sort_by') }}"
+                        onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
+                    <option value="name" @selected(! request('sort') || request('sort') === 'name')>{{ __('app.workspace.sort_name') }}</option>
+                    <option value="price" @selected(request('sort') === 'price')>{{ __('app.workspace.sort_price') }}</option>
+                    <option value="availability" @selected(request('sort') === 'availability')>{{ __('app.workspace.sort_availability') }}</option>
+                </select>
+            </form>
         </div>
 
         @if ($rooms->isEmpty())
             <div class="ls-card">
-                <x-ui.empty-state illustration="box" :title="__('app.empty.no_rooms')" :text="__('app.workspace.no_rooms_hint')">
-                    <x-ui.button variant="primary" icon="plus" :href="route('rooms.create', $activeWorkspace)">
-                        {{ __('app.workspace.add_room') }}
-                    </x-ui.button>
-                </x-ui.empty-state>
+                @if ($filtered)
+                    <x-ui.empty-state illustration="search" :title="__('app.ui.no_rooms_match_title')" :text="__('app.ui.no_rooms_match_text')">
+                        <x-ui.button :href="route('workspaces.index', ['workspace' => $activeWorkspace->id])">{{ __('app.workspace.clear_filters') }}</x-ui.button>
+                    </x-ui.empty-state>
+                @else
+                    <x-ui.empty-state illustration="box" :title="__('app.empty.no_rooms')" :text="__('app.workspace.no_rooms_hint')">
+                        @if ($canManage)
+                            <x-ui.button variant="primary" icon="plus" :href="route('rooms.create', $activeWorkspace)">
+                                {{ __('app.workspace.add_room') }}
+                            </x-ui.button>
+                        @endif
+                    </x-ui.empty-state>
+                @endif
             </div>
         @else
-            <div class="ls-product-grid">
+            <div class="ls-rooms-grid">
                 @foreach ($rooms as $room)
-                    @include('workspaces.rooms._card', ['workspace' => $activeWorkspace, 'room' => $room])
+                    @include('workspaces.rooms._card', ['workspace' => $activeWorkspace, 'room' => $room, 'canManage' => $canManage])
                 @endforeach
             </div>
             <div class="ls-card" data-ls-empty="rooms" hidden>

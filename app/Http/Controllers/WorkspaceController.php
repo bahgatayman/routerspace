@@ -31,12 +31,17 @@ class WorkspaceController extends Controller
             ->orderBy('name')
             ->get();
 
+        // View-only staff (workspaces.view without .manage) never see buttons that would just be refused.
+        $staff = auth('staff')->user();
+        $canManage = ! $staff || $staff->hasPermission('workspaces.manage');
+
         if ($workspaces->isEmpty()) {
             return view('workspaces.index', [
                 'workspaces' => $workspaces,
                 'activeWorkspace' => null,
                 'rooms' => collect(),
                 'roomStats' => null,
+                'canManage' => $canManage,
             ]);
         }
 
@@ -49,17 +54,24 @@ class WorkspaceController extends Controller
 
         [$rooms, $roomStats] = $this->roomsForWorkspace($activeWorkspace, $request, $availability);
 
-        return view('workspaces.index', compact('workspaces', 'activeWorkspace', 'rooms', 'roomStats'));
+        return view('workspaces.index', compact('workspaces', 'activeWorkspace', 'rooms', 'roomStats', 'canManage'));
     }
 
     /**
-     * Room list + stat strip for one workspace, in a fixed 2 queries
+     * Room list + stat strip for one workspace, in a fixed 3 queries
      * regardless of room count: one for the rooms themselves (with Custom
-     * Plans counts and shared-room live seat sums folded in via
-     * withCount/withSum), one for every exclusive room's live occupancy
+     * Plans counts, shared-room live seat sums, and cover-photo images
+     * eager-loaded), one for every exclusive room's live occupancy
      * (AvailabilityService::usedCapacityNowBulk — the batched counterpart
-     * to usedCapacityNow()). Search is deliberately not handled here — it's
+     * to usedCapacityNow()), one for all their gallery images (a plain
+     * whereIn, not N+1). Search is deliberately not handled here — it's
      * 100% client-side (<x-ui.search>), matching every other list page.
+     *
+     * status/sort apply after occupancy is computed, since availability is a
+     * derived value (Room::statusKey()), not a stored column — consistent
+     * with how the existing `type` filter already shapes both the list and
+     * the stat strip together (filtering is never faked with a hardcoded
+     * status; it reads the same statusKey() every badge/stat already uses).
      *
      * @return array{0: Collection<int, Room>, 1: array{total: int, available: int, occupied: int, unavailable: int}}
      */
@@ -72,6 +84,7 @@ class WorkspaceController extends Controller
             ->when($type, fn ($q) => $q->where('type', $type))
             ->withCount(['plans', 'activePricingProfiles as pricing_profiles_count'])
             ->withSum(['sharedSessions as occupied_seats' => fn ($q) => $q->where('status', 'open')], 'party_size')
+            ->with('images')
             ->orderBy('name')
             ->get();
 
@@ -84,12 +97,29 @@ class WorkspaceController extends Controller
                 : (int) ($exclusiveUsage[$room->id] ?? 0);
         });
 
+        // Stats reflect the type filter (as before) but never the status filter
+        // below — same "counts stay put while you switch tabs" behaviour as the
+        // stock filter on the Products page, so the strip stays a stable total.
         $roomStats = [
             'total' => $rooms->count(),
             'available' => $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === 'available')->count(),
             'occupied' => $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === 'occupied')->count(),
             'unavailable' => $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === 'unavailable')->count(),
         ];
+
+        $status = $request->query('status');
+        if (in_array($status, ['available', 'occupied', 'unavailable'], true)) {
+            $rooms = $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === $status)->values();
+        }
+
+        $sort = $request->query('sort');
+        $rooms = match ($sort) {
+            'price' => $rooms->sortBy(fn (Room $r) => (float) $r->price_per_hour)->values(),
+            'availability' => $rooms->sortBy(fn (Room $r) => match ($r->statusKey($r->occupied_seats)) {
+                'available' => 0, 'occupied' => 1, default => 2,
+            })->values(),
+            default => $rooms->sortBy(fn (Room $r) => mb_strtolower($r->name))->values(),
+        };
 
         return [$rooms, $roomStats];
     }
