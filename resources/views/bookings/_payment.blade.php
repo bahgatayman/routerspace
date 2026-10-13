@@ -1,14 +1,24 @@
 {{--
-    Deposit collection — compact by design: Total, presets, the amount field,
-    Remaining. Paid/Status/Total in full are shown once, in the sticky
-    confirmation panel (_confirm-summary.blade.php), not repeated here.
-    Hidden entirely for shared rooms (billed at checkout, via a flow this
-    form doesn't touch) or before a room is picked — see #payment-section's
-    display toggle in the page script. The server (BookingController::
-    store/update) re-validates and re-derives payment_status regardless of
-    anything computed here.
+    Payment: an explicit choice (No / Partial / Full payment), the amount field
+    only for Partial, then a Total · Paid now · Remaining summary. Always
+    visible; before a room is picked the figures read "—" with a hint, and for
+    shared rooms (billed at checkout) the choice gives way to a note.
+    payment_choice is only a statement of intent — nothing is recorded until
+    the booking itself saves. The server (BookingController::store/update)
+    re-derives the amount from it (none → 0, full → its own quoted total,
+    partial → must be > 0 and ≤ total) and the payment_status from that.
 --}}
-@php $amountPaid = $amountPaid ?? ''; $memberPackageId = $memberPackageId ?? ''; @endphp
+@php
+    $amountPaid = $amountPaid ?? '';
+    $memberPackageId = $memberPackageId ?? '';
+    // No default: the choice is required on a new booking (edit passes the current one).
+    $paymentChoice = in_array($paymentChoice ?? null, ['none', 'partial', 'full'], true) ? $paymentChoice : null;
+    $choices = [
+        'none' => __('app.booking.payment.choice_none_hint'),
+        'partial' => __('app.booking.payment.choice_partial_hint'),
+        'full' => __('app.booking.payment.choice_full_hint'),
+    ];
+@endphp
 <section class="ls-plain-section" id="payment-section">
     <h2 class="ls-section-label">{{ __('app.booking.payment.title') }}</h2>
 
@@ -28,30 +38,35 @@
         <div class="ls-pkg-covered" id="pkg-covered" hidden><x-ui.icon name="check-circle" /><span></span></div>
     </div>
 
-    <div id="pay-deposit">
-    <div class="ls-pay-total-row">
-        <span>{{ __('app.booking.payment.total') }}</span>
-        <span class="ls-num" id="pay-total">&mdash;</span>
-    </div>
+    <div id="pay-deposit" class="ls-pay">
+        <div class="ls-pay-choices" role="radiogroup" aria-label="{{ __('app.booking.payment.choice_label') }}">
+            @foreach ($choices as $value => $hint)
+                <label class="ls-pay-choice">
+                    <input type="radio" name="payment_choice" value="{{ $value }}" data-pay-choice @checked($paymentChoice === $value)>
+                    <span class="ls-pay-choice-body">
+                        <span class="ls-pay-choice-title">{{ __('app.booking.payment.choice_'.$value) }}</span>
+                        <span class="ls-pay-choice-hint">{{ $hint }}</span>
+                    </span>
+                </label>
+            @endforeach
+        </div>
+        @error('payment_choice') <span class="ls-error"><x-ui.icon name="alert" />{{ $message }}</span> @enderror
 
-    <div class="ls-chips" id="pay-presets" role="group" aria-label="{{ __('app.booking.payment.title') }}">
-        <button type="button" class="ls-chip" data-pay-preset="0">{{ __('app.booking.payment.no_deposit') }}</button>
-        <button type="button" class="ls-chip" data-pay-preset="0.25">{{ __('app.booking.payment.percent', ['p' => 25]) }}</button>
-        <button type="button" class="ls-chip" data-pay-preset="0.5">{{ __('app.booking.payment.percent', ['p' => 50]) }}</button>
-        <button type="button" class="ls-chip" data-pay-preset="1">{{ __('app.booking.payment.full') }}</button>
-        <button type="button" class="ls-chip" id="pay-custom-focus">{{ __('app.booking.custom') }}</button>
-    </div>
+        <div id="pay-amount-field" @if ($paymentChoice !== 'partial') hidden @endif>
+            <x-ui.input name="amount_paid" type="number" :label="__('app.booking.payment.amount_received')"
+                        :value="old('amount_paid', $amountPaid)" min="0" step="0.01" inputmode="decimal" />
+            <span class="ls-error" id="pay-amount-error" hidden><x-ui.icon name="alert" /><span></span></span>
+        </div>
 
-    <x-ui.input name="amount_paid" type="number" :label="__('app.booking.payment.paid_now')"
-                :value="old('amount_paid', $amountPaid)" min="0" step="0.01" inputmode="decimal" />
-
-    <div class="ls-pay-remaining-row">
-        <span>{{ __('app.booking.payment.remaining') }}</span>
-        <span>
-            <span class="ls-num" id="pay-remaining">&mdash;</span>
+        <dl class="ls-pay-summary" aria-live="polite">
+            <div><dt>{{ __('app.booking.payment.total') }}</dt><dd class="ls-num" id="pay-total">&mdash;</dd></div>
+            <div><dt>{{ __('app.booking.payment.paid_now') }}</dt><dd class="ls-num" id="pay-paid">&mdash;</dd></div>
+            <div><dt>{{ __('app.booking.payment.remaining') }}</dt><dd class="ls-num" id="pay-remaining">&mdash;</dd></div>
+        </dl>
+        <div class="ls-pay-foot">
             <span class="ls-status" id="pay-status-text">&mdash;</span>
-        </span>
-    </div>
+            <span class="ls-hint" id="pay-pick-room">{{ __('app.booking.payment.pick_room_first') }}</span>
+        </div>
     </div>
 
     <p class="ls-hint" id="pay-shared-note" hidden>{{ __('app.booking.payment.shared_estimate_note') }}</p>

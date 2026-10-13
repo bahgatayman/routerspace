@@ -232,4 +232,103 @@ class BookingPaymentTest extends TestCase
         $this->assertSame(100.0, (float) $booking->amount_paid);
         $this->assertSame(Booking::PAYMENT_PARTIAL, $booking->payment_status);
     }
+
+    // --- explicit payment choice (No / Partial / Full) ---
+
+    public function test_full_payment_choice_records_the_servers_own_total_not_a_stale_client_amount(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, pricePerHour: 100); // 2 hours => 200
+        $user = $this->member($owner);
+
+        $this->actingAs($owner, 'owner')->post('/bookings', $this->bookingPayload($room, $user, [
+            'payment_choice' => 'full', 'amount_paid' => 150, // stale figure from an older total
+        ]));
+
+        $booking = Booking::sole();
+        $this->assertSame(200.0, (float) $booking->amount_paid);
+        $this->assertSame(Booking::PAYMENT_PAID, $booking->payment_status);
+    }
+
+    public function test_no_payment_choice_records_zero_even_if_an_amount_was_left_in_the_field(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, pricePerHour: 100);
+        $user = $this->member($owner);
+
+        $this->actingAs($owner, 'owner')->post('/bookings', $this->bookingPayload($room, $user, [
+            'payment_choice' => 'none', 'amount_paid' => 80,
+        ]));
+
+        $booking = Booking::sole();
+        $this->assertSame(0.0, (float) $booking->amount_paid);
+        $this->assertSame(Booking::PAYMENT_UNPAID, $booking->payment_status);
+    }
+
+    public function test_partial_payment_choice_records_the_typed_amount(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, pricePerHour: 100);
+        $user = $this->member($owner);
+
+        $this->actingAs($owner, 'owner')->post('/bookings', $this->bookingPayload($room, $user, [
+            'payment_choice' => 'partial', 'amount_paid' => 75.5,
+        ]));
+
+        $booking = Booking::sole();
+        $this->assertSame(75.5, (float) $booking->amount_paid);
+        $this->assertSame(Booking::PAYMENT_PARTIAL, $booking->payment_status);
+    }
+
+    public function test_partial_payment_choice_rejects_zero_and_amounts_above_the_total_without_creating_a_booking(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, pricePerHour: 100);
+        $user = $this->member($owner);
+
+        $this->actingAs($owner, 'owner')->post('/bookings', $this->bookingPayload($room, $user, [
+            'payment_choice' => 'partial', 'amount_paid' => 0,
+        ]))->assertSessionHasErrors();
+
+        $this->actingAs($owner, 'owner')->post('/bookings', $this->bookingPayload($room, $user, [
+            'payment_choice' => 'partial', 'amount_paid' => 250,
+        ]))->assertSessionHas('error');
+
+        $this->assertSame(0, Booking::count());
+    }
+
+    public function test_full_payment_choice_on_update_follows_a_changed_total(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner, pricePerHour: 100);
+        $user = $this->member($owner);
+
+        $this->actingAs($owner, 'owner')->post('/bookings', $this->bookingPayload($room, $user, ['payment_choice' => 'full']));
+        $booking = Booking::sole();
+
+        // Extended to 3 hours while "Full payment" stays selected: the full new total is recorded.
+        $this->actingAs($owner, 'owner')->put("/bookings/{$booking->id}", $this->bookingPayload($room, $user, [
+            'end_time' => '13:00', 'payment_choice' => 'full', 'amount_paid' => 200,
+        ]));
+
+        $booking->refresh();
+        $this->assertSame(300.0, (float) $booking->amount_paid);
+        $this->assertSame(Booking::PAYMENT_PAID, $booking->payment_status);
+    }
+
+    public function test_booking_form_shows_payment_choices_and_notes_without_expanding(): void
+    {
+        $owner = $this->owner();
+        $this->room($owner);
+
+        $html = $this->actingAs($owner, 'owner')->get('/bookings/create')->assertOk()->getContent();
+
+        foreach (['none', 'partial', 'full'] as $choice) {
+            $this->assertStringContainsString('name="payment_choice" value="'.$choice.'"', $html);
+        }
+        $this->assertDoesNotMatchRegularExpression('/name="payment_choice" value="[a-z]+"[^>]*checked/', $html, 'no payment option is pre-selected — the choice is required');
+        $this->assertStringContainsString(json_encode(__('app.booking.payment.choice_required')), $html);
+        $this->assertStringContainsString('id="f-notes"', $html);
+        $this->assertStringNotContainsString('ls-notes-details', $html);
+    }
 }

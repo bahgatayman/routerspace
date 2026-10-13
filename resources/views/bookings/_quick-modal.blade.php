@@ -7,7 +7,8 @@
 
     Sensible defaults do most of the work: today, the next half hour, 1 hour.
     Rooms appear with their live price for exactly that choice, unavailable
-    ones say why. Payment and notes stay folded away. There is one total and
+    ones say why. Payment (No / Partial / Full) and the note are always on
+    screen — nothing to expand. There is one total and
     one button — no separate summary.
 
     Nothing is priced or decided here: prices + availability come from
@@ -58,6 +59,10 @@
         'pkgLeft' => __('app.packages.left'),
         'pkgCovered' => __('app.packages.covered_total'),
         'pkgCta' => __('app.packages.cta_covered'),
+        'choiceRequired' => __('app.booking.payment.choice_required'),
+        'partialRequired' => __('app.booking.payment.partial_required'),
+        'exceedsTotal' => __('app.booking.payment.exceeds_total', ['total' => ':total']),
+        'payStatus' => ['paid' => __('app.booking.payment.status_paid'), 'partial' => __('app.booking.payment.status_partial'), 'unpaid' => __('app.booking.payment.status_unpaid')],
     ];
     $qbCanAddMember = ! ($actingStaff ?? null) || $actingStaff->hasPermission('members.create');
 @endphp
@@ -174,24 +179,40 @@
             </div>
         </section>
 
-        {{-- Optional extras stay folded away. --}}
-        <details class="ls-qb-more">
-            <summary>{{ __('app.quick_booking.more') }}</summary>
-            <div class="ls-qb-more-body">
-                <div class="ls-qb-field" id="qb-paid-wrap">
-                    <label class="ls-qb-field-label" for="qb-paid">{{ __('app.quick_booking.paid_now') }}</label>
-                    <div class="ls-qb-paid">
-                        <input type="number" id="qb-paid" class="ls-input" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
-                        <button type="button" class="ls-chip" data-qb-paid="none">{{ __('app.quick_booking.paid_none') }}</button>
-                        <button type="button" class="ls-chip" data-qb-paid="full">{{ __('app.quick_booking.paid_full') }}</button>
-                    </div>
-                </div>
-                <div class="ls-qb-field">
-                    <label class="ls-qb-field-label" for="qb-notes">{{ __('app.quick_booking.note') }}</label>
-                    <textarea id="qb-notes" class="ls-textarea" rows="2" maxlength="500" placeholder="{{ __('app.quick_booking.note_placeholder') }}"></textarea>
-                </div>
+        {{--
+            Payment + note: always on screen, nothing to expand. One click picks
+            No / Partial / Full; Partial reveals the amount field. The server
+            re-derives the amount from payment_choice (BookingController::
+            applyPaymentChoice). Hidden for an hour package (it covers the
+            booking); shared rooms are billed at checkout, so a note replaces it.
+        --}}
+        <div class="ls-qb-pay" id="qb-paid-wrap">
+            <div class="ls-pay-choices" id="qb-pay-choices" role="radiogroup" aria-label="{{ __('app.booking.payment.choice_label') }}">
+                @foreach (['none', 'partial', 'full'] as $choice)
+                    <label class="ls-pay-choice">
+                        <input type="radio" name="qb-payment-choice" value="{{ $choice }}" data-qb-pay-choice>
+                        <span class="ls-pay-choice-body"><span class="ls-pay-choice-title">{{ __('app.booking.payment.choice_'.$choice) }}</span></span>
+                    </label>
+                @endforeach
             </div>
-        </details>
+            <div class="ls-qb-field" id="qb-paid-field" hidden>
+                <label class="ls-qb-field-label" for="qb-paid">{{ __('app.booking.payment.amount_received') }}</label>
+                <input type="number" id="qb-paid" class="ls-input" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+                <span class="ls-error" id="qb-paid-error" hidden><x-ui.icon name="alert" /><span></span></span>
+            </div>
+            <dl class="ls-pay-summary" aria-live="polite">
+                <div><dt>{{ __('app.booking.payment.total') }}</dt><dd class="ls-num" id="qb-pay-total">&mdash;</dd></div>
+                <div><dt>{{ __('app.booking.payment.paid_now') }}</dt><dd class="ls-num" id="qb-pay-paid">&mdash;</dd></div>
+                <div><dt>{{ __('app.booking.payment.remaining') }}</dt><dd class="ls-num" id="qb-pay-remaining">&mdash;</dd></div>
+            </dl>
+            <span class="ls-status" id="qb-pay-status" hidden></span>
+        </div>
+        <p class="ls-hint" id="qb-pay-shared" hidden>{{ __('app.booking.payment.shared_estimate_note') }}</p>
+
+        <div class="ls-qb-field">
+            <label class="ls-qb-field-label" for="qb-notes">{{ __('app.quick_booking.note') }}</label>
+            <textarea id="qb-notes" class="ls-textarea" rows="2" maxlength="500" placeholder="{{ __('app.quick_booking.note_placeholder') }}"></textarea>
+        </div>
 
         <a href="/bookings/create" class="ls-link ls-qb-fullpage" id="qb-fullpage" data-qb-bypass>{{ __('app.quick_booking.full_page') }}</a>
     </form>
@@ -594,27 +615,83 @@
         $('qb-hint').textContent = missing || (plan ? plan.note : room && room.price_note) || '';
         submit.disabled = !!missing;
         submit.textContent = room ? fill(T.cta, { total: plan ? plan.price_display : room.total_price_display }) : T.ctaIdle;
-        const paid = $('qb-paid');
-        if (room) paid.max = plan ? plan.price : room.total_price;
-
         // Covered by an hour package: no deposit, one clear total.
         const pkg = room && !missing ? currentPkg() : null;
-        $('qb-paid-wrap').hidden = !!pkg;
+        updatePayment(room, plan, pkg);
+        // Payment is required (no default) — Book waits for a choice, the hint says why.
+        if (!missing && !pkg && !room.is_shared && !payChoice()) {
+            submit.disabled = true;
+            $('qb-hint').textContent = T.choiceRequired;
+        }
         if (pkg) {
             $('qb-total').textContent = fill(T.pkgCovered, { time: S.pkgMinutesLabel || '' });
             $('qb-hint').textContent = pkg.name;
             submit.textContent = T.pkgCta;
         }
     }
-    document.querySelectorAll('[data-qb-paid]').forEach((b) => b.addEventListener('click', () => {
-        const room = currentRoom(), plan = currentChoice();
-        $('qb-paid').value = b.dataset.qbPaid === 'full' && room ? (plan ? plan.price : room.total_price) : '';
+
+    // ---------- payment: No / Partial / Full, always visible ----------
+    const payChoice = () => (document.querySelector('[data-qb-pay-choice]:checked') || {}).value || '';
+    const money = (n) => {
+        const s = (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return document.documentElement.dir === 'rtl' ? `${s} ج.م` : `EGP ${s}`;
+    };
+    let payError = '';
+    // No payment → 0 · Full → the live total (follows every price change) ·
+    // Partial → what was typed, never silently clamped: out of range blocks Book.
+    function updatePayment(room, plan, pkg) {
+        const shared = !!(room && room.is_shared);
+        const total = room ? Number(plan ? plan.price : room.total_price) || 0 : null;
+        $('qb-paid-wrap').hidden = !!pkg || shared;
+        $('qb-pay-shared').hidden = !shared || !!pkg;
+        const fullRadio = document.querySelector('[data-qb-pay-choice][value="full"]');
+        fullRadio.disabled = total === null;
+        if (fullRadio.checked && fullRadio.disabled) fullRadio.checked = false;
+
+        const choice = payChoice(), input = $('qb-paid');
+        $('qb-paid-field').hidden = choice !== 'partial';
+        if (choice === 'none') input.value = '';
+        if (choice === 'full') input.value = total !== null ? Math.round(total * 100) / 100 : '';
+        const typed = parseFloat(input.value || '0') || 0;
+        payError = '';
+        if (choice === 'partial' && total !== null && !pkg && !shared) {
+            if (typed <= 0) payError = T.partialRequired;
+            else if (typed > total + 0.004) payError = fill(T.exceedsTotal, { total: money(total) });
+        }
+        const showErr = !!payError && input.value !== '';
+        $('qb-paid-error').hidden = !showErr;
+        $('qb-paid-error').querySelector('span').textContent = payError;
+        input.classList.toggle('is-invalid', showErr);
+
+        const pending = !choice || !!payError; // required: nothing settled until one is picked
+        const paid = total === null ? 0 : Math.max(0, Math.min(choice === 'none' ? 0 : typed, total));
+        $('qb-pay-total').textContent = total === null ? '—' : money(total);
+        $('qb-pay-paid').textContent = total === null || !choice ? '—' : money(payError ? typed : paid);
+        $('qb-pay-remaining').textContent = total === null || pending ? '—' : money(total - paid);
+        const status = paid <= 0 ? 'unpaid' : (paid >= total ? 'paid' : 'partial');
+        const st = $('qb-pay-status');
+        st.hidden = total === null || pending;
+        st.textContent = T.payStatus[status];
+        st.className = 'ls-status ls-status--' + ({ paid: 'ok', partial: 'warn', unpaid: 'neutral' })[status];
+    }
+    document.querySelectorAll('[data-qb-pay-choice]').forEach((r) => r.addEventListener('change', () => {
+        if (payChoice() === 'partial') $('qb-paid').value = '';
+        update();
+        if (payChoice() === 'partial') $('qb-paid').focus();
     }));
+    $('qb-paid').addEventListener('input', update);
 
     $('qb-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const room = currentRoom(); if (submit.disabled || !room) return;
         const err = $('qb-error'); err.hidden = true;
+        if (payError && !currentPkg()) {
+            $('qb-paid-error').querySelector('span').textContent = payError;
+            $('qb-paid-error').hidden = false;
+            $('qb-paid').classList.add('is-invalid');
+            $('qb-paid').focus();
+            return;
+        }
         const body = new FormData();
         body.append('_token', CSRF);
         body.append('hotspot_user_id', S.user.id);
@@ -626,7 +703,10 @@
         if (currentPlan()) body.append('room_plan_id', S.planId);
         if (currentProfile()) body.append('room_pricing_profile_id', S.profileId);
         if (currentPkg()) body.append('member_package_id', S.pkgId);
-        else if ($('qb-paid').value) body.append('amount_paid', $('qb-paid').value);
+        else if (!room.is_shared) {
+            body.append('payment_choice', payChoice());
+            if (payChoice() === 'partial') body.append('amount_paid', $('qb-paid').value);
+        }
         if ($('qb-notes').value.trim()) body.append('notes', $('qb-notes').value.trim());
         LS.busy(submit);
         fetch('/bookings', { method: 'POST', body, headers: { Accept: 'application/json', 'X-CSRF-TOKEN': CSRF } })
@@ -652,7 +732,7 @@
     function open(prefill = {}) {
         $('qb-error').hidden = true;
         $('qb-paid').value = ''; $('qb-notes').value = '';
-        document.querySelector('.ls-qb-more').open = false;
+        document.querySelectorAll('[data-qb-pay-choice]').forEach((r) => { r.checked = false; });
         if ($('qb-newcust')) $('qb-newcust').hidden = true;
         $('qb-picked-name').textContent = ''; $('qb-picked-phone').textContent = '';
         S.user = null; S.roomId = null; S.planId = null; S.profileId = null; S.rooms = []; S.people = 1; peopleInput.value = 1;

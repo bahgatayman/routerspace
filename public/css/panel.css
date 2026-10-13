@@ -1100,14 +1100,14 @@ html[data-theme="dark"] .ls-qb-datechip input::-webkit-calendar-picker-indicator
 .ls-qb-room.is-off { cursor: not-allowed; background: var(--color-surface-subtle); border-style: dashed; }
 .ls-qb-room.is-off .ls-qb-room-main b { color: var(--color-text-secondary); }
 .ls-qb-room.is-off .ls-qb-room-price small { color: var(--color-warning); font-weight: var(--fw-medium); }
-.ls-qb-more { border-top: 1px solid var(--color-border-subtle); padding-top: var(--space-3); }
-.ls-qb-more summary { cursor: pointer; font-size: 13.5px; font-weight: var(--fw-medium); color: var(--color-accent); list-style: none; }
-.ls-qb-more summary::-webkit-details-marker { display: none; }
-.ls-qb-more summary::before { content: "+ "; }
-.ls-qb-more[open] summary::before { content: "− "; }
-.ls-qb-more-body { display: grid; gap: var(--space-4); margin-top: var(--space-3); }
-.ls-qb-paid { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
-.ls-qb-paid .ls-input { width: 140px; }
+/* Payment (always visible): compact No / Partial / Full cards — shared with the
+   full booking page (.ls-pay-*) — then the amount for Partial and a summary. */
+.ls-qb-pay { display: grid; gap: var(--space-3); border-top: 1px solid var(--color-border-subtle); padding-top: var(--space-4); }
+.ls-qb-pay .ls-pay-choice-body { padding: var(--space-2) var(--space-3); min-height: 40px; align-content: center; }
+.ls-qb-pay .ls-pay-summary { padding: var(--space-2) 0; }
+.ls-qb-pay .ls-pay-summary dd { font-size: 14.5px; }
+.ls-qb-pay #qb-paid { max-width: 220px; }
+.ls-qb-pay .ls-status { margin-inline-start: 0; margin-top: calc(var(--space-1) * -1); }
 .ls-qb-fullpage { justify-self: start; font-size: 13px; font-weight: var(--fw-regular); color: var(--color-text-muted); }
 .ls-qb .ls-dialog-foot { gap: var(--space-4); }
 .ls-qb-total { display: grid; min-width: 0; flex: 1; }
@@ -1478,6 +1478,13 @@ html[dir="rtl"] .ls-pkg-usage-chev { transform: scaleX(-1); }
 /* ---------- 10g. Check availability (single day / date range) ---------- */
 .ls-av-form { margin-bottom: var(--space-6); }
 .ls-av-form .ls-card-body { display: grid; gap: var(--space-4); }
+/* Pop-up version (bookings._availability-modal): no card around the form; the
+   form, then the results, scroll inside the dialog body. */
+.ls-dialog.ls-av-modal { width: min(880px, 100%); }
+.ls-av-form--modal { margin-bottom: 0; }
+.ls-av-form-body { display: grid; gap: var(--space-4); }
+.ls-av-modal .ls-av-results { padding-top: var(--space-5); border-top: 1px solid var(--color-border-subtle); }
+.ls-av-modal .ls-av-rooms { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 .ls-av-mode { max-width: 360px; }
 .ls-av-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3) var(--space-4); align-items: end; }
 .ls-av-grid [hidden] { display: none; }
@@ -1781,8 +1788,6 @@ html.ls-theme-switching *, html.ls-theme-switching *::before, html.ls-theme-swit
 summary.ls-section-label { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; }
 summary.ls-section-label::-webkit-details-marker { display: none; }
 summary.ls-section-label::after { content: "+"; font-size: 14px; }
-.ls-notes-details[open] summary.ls-section-label::after { content: "\2212"; }
-.ls-notes-details[open] summary.ls-section-label { margin-bottom: var(--space-3); }
 
 /* Reservation: date + duration + start time on one row on desktop, with the
    resulting slot spelled out underneath once both ends are known. */
@@ -1840,16 +1845,49 @@ summary.ls-section-label::after { content: "+"; font-size: 14px; }
 .ls-room-card-price-duration { color: var(--color-text-muted); }
 .ls-room-card-price-value { font-weight: var(--fw-figure); color: var(--color-text); }
 
-/* Payment — one compact block: total, presets, the amount field, remaining
-   (with a subtle inline status word, not a competing badge). */
-.ls-pay-total-row, .ls-pay-remaining-row { display: flex; align-items: center; justify-content: space-between; font-size: 13.5px; color: var(--color-text-secondary); }
-.ls-pay-total-row .ls-num { font-size: 17px; font-weight: var(--fw-figure); color: var(--color-text); }
-.ls-pay-remaining-row .ls-num { font-weight: var(--fw-medium); color: var(--color-text); }
+/* Payment — an explicit No / Partial / Full choice (radio cards), the amount
+   field only for Partial, then a Total · Paid now · Remaining summary with a
+   subtle inline status word (not a competing badge). */
+.ls-pay { display: grid; gap: var(--space-4); }
+.ls-pay-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.ls-pay-choice { position: relative; display: block; cursor: pointer; }
+.ls-pay-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.ls-pay-choice-body { display: grid; gap: 2px; height: 100%; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--ls-r-ctl); background: var(--color-surface); transition: border-color var(--ls-t-fast) var(--ls-ease), background var(--ls-t-fast) var(--ls-ease), box-shadow var(--ls-t-fast) var(--ls-ease); }
+.ls-pay-choice:hover .ls-pay-choice-body { border-color: var(--color-border-hover); }
+.ls-pay-choice-title { display: flex; align-items: center; gap: var(--space-2); font-size: 14px; font-weight: var(--fw-medium); color: var(--color-text); }
+.ls-pay-choice-title::before { content: ""; flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--color-border-strong); background: var(--color-surface); transition: border var(--ls-t-fast) var(--ls-ease); }
+.ls-pay-choice-hint { font-size: 12.5px; color: var(--color-text-muted); padding-inline-start: calc(16px + var(--space-2)); }
+.ls-pay-choice input:checked + .ls-pay-choice-body { border-color: var(--color-primary); background: var(--color-surface-brand); box-shadow: 0 0 0 1px var(--color-primary); }
+.ls-pay-choice input:checked + .ls-pay-choice-body .ls-pay-choice-title::before { border: 5px solid var(--color-primary); }
+.ls-pay-choice input:focus-visible + .ls-pay-choice-body { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-pay-choice input:disabled + .ls-pay-choice-body { opacity: .5; cursor: not-allowed; }
+.ls-pay-choice:has(input:disabled) { cursor: not-allowed; }
+#pay-amount-field .ls-field { max-width: 280px; }
+#pay-amount-field .ls-error { margin-top: var(--space-1); }
+.ls-pay-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: var(--space-3) 0; border-top: 1px solid var(--color-border-subtle); border-bottom: 1px solid var(--color-border-subtle); }
+.ls-pay-summary > div { display: grid; gap: 2px; min-width: 0; padding-inline: var(--space-3); }
+.ls-pay-summary > div:first-child { padding-inline-start: 0; }
+.ls-pay-summary > div + div { border-inline-start: 1px solid var(--color-border-subtle); }
+.ls-pay-summary dt { font-size: 12.5px; color: var(--color-text-muted); }
+.ls-pay-summary dd { margin: 0; font-size: 16px; font-weight: var(--fw-figure); color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-pay-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 18px; margin-top: calc(var(--space-2) * -1); }
+.ls-pay-foot .ls-status { margin-inline-start: 0; }
 .ls-status { font-size: 12.5px; font-weight: var(--fw-medium); margin-inline-start: var(--space-2); }
 .ls-status--ok { color: var(--color-success); }
 .ls-status--warn { color: var(--color-warning); }
 .ls-status--neutral { color: var(--color-text-muted); }
-#payment-section .ls-chips { margin: var(--space-3) 0; }
+.ls-notes-section .ls-section-label { display: block; }
+@media (max-width: 560px) {
+  .ls-pay-choices { grid-template-columns: 1fr; }
+  .ls-qb-pay .ls-pay-choices { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ls-qb-pay .ls-pay-choice-body { display: grid; grid-template-columns: none; padding: var(--space-2); }
+  .ls-qb-pay .ls-pay-choice-title { font-size: 13px; gap: 6px; }
+  .ls-qb-pay #qb-paid { max-width: none; }
+  .ls-pay-choice-body { grid-template-columns: auto 1fr; align-items: center; gap: var(--space-2); padding: var(--space-3); }
+  .ls-pay-choice-hint { padding-inline-start: 0; text-align: end; }
+  #pay-amount-field .ls-field { max-width: none; }
+  .ls-pay-summary dd { font-size: 14.5px; }
+}
 #payment-section .ls-field { margin-bottom: var(--space-3); }
 
 /* Confirmation summary — a checkout-style receipt, sticky on desktop, the

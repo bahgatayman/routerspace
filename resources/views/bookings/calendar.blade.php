@@ -13,7 +13,7 @@
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <h1 class="text-2xl font-bold text-gray-900">{{ __('app.booking.calendar_view') }}</h1>
         <div class="flex gap-2">
-            <a href="/bookings/availability" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition text-sm font-medium">
+            <a href="/bookings/availability" data-ls-open="availability-modal" aria-haspopup="dialog" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition text-sm font-medium">
                 {{ __('app.booking.quick_availability') }}
             </a>
             <a href="/bookings" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition text-sm font-medium">
@@ -219,4 +219,6 @@
             @endif
         </div>
     @endif
+
+    @include('bookings._availability-modal')
 @endsection

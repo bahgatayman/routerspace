@@ -38,6 +38,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\View\View;
@@ -66,7 +67,7 @@ class BookingController extends Controller
 
         $rooms = Room::where('owner_id', $ownerId)->get();
 
-        return view('bookings.index', compact('bookings', 'rooms', 'status', 'date', 'roomId'));
+        return view('bookings.index', array_merge(compact('bookings', 'rooms', 'status', 'date', 'roomId'), $this->availabilityPanelData()));
     }
 
     public function create(Request $request): View
@@ -127,6 +128,7 @@ class BookingController extends Controller
             'party_size' => 'nullable|integer|min:1',
             'guest_count' => 'nullable|integer|min:1|max:999',
             'amount_paid' => 'nullable|numeric|min:0',
+            'payment_choice' => 'nullable|in:none,partial,full',
             'member_package_id' => 'nullable|integer',
             'notes' => 'nullable|string|max:500',
         ];
@@ -189,6 +191,13 @@ class BookingController extends Controller
 
         // A package-covered booking takes no cash deposit.
         $amountPaid = ($room->isShared() || $package) ? 0.0 : round((float) ($validated['amount_paid'] ?? 0), 2);
+
+        if (! $room->isShared() && ! $package) {
+            [$amountPaid, $choiceError] = $this->applyPaymentChoice($validated['payment_choice'] ?? null, $amountPaid, $quote->totalPrice);
+            if ($choiceError) {
+                return $request->wantsJson() ? $fail($choiceError) : back()->withInput()->withErrors(['amount_paid' => $choiceError]);
+            }
+        }
 
         if ($amountPaid > $quote->totalPrice) {
             return $fail(__('app.booking.payment.exceeds_total', ['total' => number_format($quote->totalPrice, 2)]));
@@ -402,6 +411,25 @@ class BookingController extends Controller
      *
      * @return array{0: ?MemberPackage, 1: ?string}
      */
+    /**
+     * The booking form's explicit payment choice, resolved against the
+     * server's own quote: none → 0, full → the quoted total (never a stale
+     * client figure), partial → the typed amount, which must be > 0 (the
+     * caller's existing "exceeds total" check still applies). Without a
+     * choice (older clients, the quick-booking modal) the amount is untouched.
+     *
+     * @return array{0: float, 1: ?string} [amount, error]
+     */
+    private function applyPaymentChoice(?string $choice, float $amount, float $total): array
+    {
+        return match ($choice) {
+            'none' => [0.0, null],
+            'full' => [round($total, 2), null],
+            'partial' => $amount > 0 ? [$amount, null] : [$amount, __('app.booking.payment.partial_required')],
+            default => [$amount, null],
+        };
+    }
+
     private function resolvePackage(HourPackageService $packages, int $packageId, int $memberId, Room $room, array $validated, PriceQuote $quote, int $partySize, ?Booking $ignore = null): array
     {
         $package = MemberPackage::where('owner_id', $room->owner_id)
@@ -596,6 +624,7 @@ class BookingController extends Controller
             'party_size' => 'nullable|integer|min:1',
             'guest_count' => 'nullable|integer|min:1|max:999',
             'amount_paid' => 'nullable|numeric|min:0',
+            'payment_choice' => 'nullable|in:none,partial,full',
             'member_package_id' => 'nullable|integer',
             'notes' => 'nullable|string|max:500',
         ]);
@@ -643,6 +672,13 @@ class BookingController extends Controller
         // deposit — switching it back to normal payment starts from 0.
         $amountPaid = ($room->isShared() || $package) ? 0.0
             : round((float) ($validated['amount_paid'] ?? ($wasCovered ? 0 : $booking->amount_paid)), 2);
+
+        if (! $room->isShared() && ! $package) {
+            [$amountPaid, $choiceError] = $this->applyPaymentChoice($validated['payment_choice'] ?? null, $amountPaid, $quote->totalPrice);
+            if ($choiceError) {
+                return back()->withInput()->withErrors(['amount_paid' => $choiceError]);
+            }
+        }
 
         if ($amountPaid > $quote->totalPrice) {
             return back()->withInput()->with('error', __('app.booking.payment.exceeds_total', ['total' => number_format($quote->totalPrice, 2)]));
@@ -1337,7 +1373,7 @@ class BookingController extends Controller
             $data['dayRooms'] = $this->roomDayAvailability($rooms, $carbon->format('Y-m-d'), $availability);
         }
 
-        return view('bookings.calendar', $data);
+        return view('bookings.calendar', array_merge($data, $this->availabilityPanelData()));
     }
 
     /**
@@ -1373,17 +1409,26 @@ class BookingController extends Controller
      */
     public function availabilityLookup(Request $request): View
     {
-        $ownerId = TenantContext::id();
+        return view('bookings.availability', $this->availabilityPanelData());
+    }
 
-        $rooms = Room::where('owner_id', $ownerId)
-            ->where('is_available', true)
-            ->with('workspace')
-            ->orderBy('name')
-            ->get();
-
-        $timeSlots = $this->generateTimeSlots();
-
-        return view('bookings.availability', compact('rooms', 'timeSlots'));
+    /**
+     * What the Check-availability panel needs — the standalone page and the
+     * pop-up on the Bookings list and Calendar render the same partial
+     * (bookings._availability-panel). Rooms are this business's only.
+     *
+     * @return array{avRooms: Collection, avTimeSlots: array<string, string>}
+     */
+    private function availabilityPanelData(): array
+    {
+        return [
+            'avRooms' => Room::where('owner_id', TenantContext::id())
+                ->where('is_available', true)
+                ->with('workspace')
+                ->orderBy('name')
+                ->get(),
+            'avTimeSlots' => $this->generateTimeSlots(),
+        ];
     }
 
     /**

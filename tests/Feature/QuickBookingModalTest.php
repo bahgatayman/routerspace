@@ -120,6 +120,42 @@ class QuickBookingModalTest extends TestCase
             ->assertStatus(422)->assertJson(['success' => false])->assertJsonStructure(['message', 'errors' => ['hotspot_user_id', 'booking_date']]);
     }
 
+    public function test_modal_shows_payment_choices_and_note_without_anything_to_expand(): void
+    {
+        $owner = $this->owner();
+
+        $html = $this->actingAs($owner, 'owner')->get('/dashboard')->assertOk()->getContent();
+        $modal = substr($html, strpos($html, 'id="quick-book"'));
+
+        foreach (['none', 'partial', 'full'] as $choice) {
+            $this->assertStringContainsString('name="qb-payment-choice" value="'.$choice.'"', $modal);
+        }
+        $this->assertDoesNotMatchRegularExpression('/name="qb-payment-choice" value="[a-z]+"[^>]*checked/', $modal, 'no payment option is pre-selected — the choice is required');
+        $this->assertStringContainsString('id="qb-notes"', $modal);
+        $this->assertStringNotContainsString('ls-qb-more', $modal);
+        $this->assertStringNotContainsString('<details', substr($modal, 0, strpos($modal, '</form>')));
+    }
+
+    public function test_json_store_honours_the_modals_payment_choice(): void
+    {
+        $owner = $this->owner();
+        $member = $this->member($owner);
+        $room = $this->room($owner);
+
+        // Full → the server's own quoted total.
+        $full = $this->actingAs($owner, 'owner')
+            ->postJson('/bookings', $this->payload($room, $member, ['payment_choice' => 'full']))
+            ->assertOk()->json('booking_id');
+        $this->assertSame('paid', Booking::findOrFail($full)->payment_status);
+        $this->assertSame((float) Booking::findOrFail($full)->total_price, (float) Booking::findOrFail($full)->amount_paid);
+
+        // Partial with nothing entered → a JSON message, no booking.
+        $this->actingAs($owner, 'owner')
+            ->postJson('/bookings', $this->payload($room, $member, ['start_time' => '14:00', 'end_time' => '15:00', 'payment_choice' => 'partial']))
+            ->assertStatus(422)->assertJson(['success' => false, 'message' => __('app.booking.payment.partial_required')]);
+        $this->assertSame(1, Booking::count());
+    }
+
     public function test_full_page_form_post_still_redirects(): void
     {
         $owner = $this->owner();

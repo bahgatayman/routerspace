@@ -26,6 +26,9 @@
     $initialEnd = $isEdit ? \Carbon\Carbon::parse($booking->end_time)->format('H:i') : old('end_time', $selectedEndTime ?? '');
     $initialAmountPaid = $isEdit ? old('amount_paid', (float) $booking->amount_paid) : old('amount_paid', '');
     $initialNotes = $isEdit ? old('notes', $booking->notes) : old('notes');
+    // Payment choice: required and unselected on a new booking; on edit, read back from what was already paid.
+    $initialPaymentChoice = old('payment_choice', ! $isEdit ? null
+        : ((float) $booking->amount_paid <= 0 ? 'none' : ((float) $booking->amount_paid >= (float) $booking->total_price ? 'full' : 'partial')));
     // People the booking is priced for (RoomPricingService). Exclusive rooms
     // keep party_size = 1 for availability; the headcount travels as guest_count.
     $initialGuests = (int) ($isEdit ? old('guest_count', $booking->guest_count ?? $booking->party_size ?? 1) : old('guest_count', 1));
@@ -206,7 +209,7 @@
         </div>
 
         {{-- 4. Payment --}}
-        @include('bookings._payment', ['amountPaid' => $initialAmountPaid, 'memberPackageId' => $isEdit ? $booking->member_package_id : ''])
+        @include('bookings._payment', ['amountPaid' => $initialAmountPaid, 'paymentChoice' => $initialPaymentChoice, 'memberPackageId' => $isEdit ? $booking->member_package_id : ''])
         </div>{{-- /#fixed-time-sections --}}
 
         @unless ($isEdit)
@@ -243,11 +246,11 @@
             <script id="open-room-profiles-data" type="application/json">{!! $exclusiveRooms->mapWithKeys(fn ($r) => [$r->id => $r->activePricingProfiles->map(fn ($p) => ['id' => $p->id, 'label' => $p->name.' — '.$p->rateLabel()])->values()])->toJson() !!}</script>
         @endunless
 
-        <details class="ls-plain-section ls-notes-details">
-            <summary class="ls-section-label">{{ __('app.placeholder.notes_optional') }}</summary>
-            <textarea name="notes" rows="2" class="ls-textarea" placeholder="{{ __('app.placeholder.special_requests') }}">{{ $initialNotes }}</textarea>
+        <section class="ls-plain-section ls-notes-section">
+            <label class="ls-section-label" for="f-notes">{{ __('app.placeholder.notes_optional') }}</label>
+            <textarea name="notes" id="f-notes" rows="2" class="ls-textarea" placeholder="{{ __('app.placeholder.special_requests') }}">{{ $initialNotes }}</textarea>
             @error('notes') <span class="ls-error"><x-ui.icon name="alert" />{{ $message }}</span> @enderror
-        </details>
+        </section>
     </form>
 
     {{-- 5. Confirmation --}}
@@ -276,10 +279,11 @@
     const roomGrid      = document.getElementById('room-grid');
     const roomCards     = [...document.querySelectorAll('[data-room-card]')];
     const amountInput   = document.getElementById('f-amount_paid');
-    const payPresets    = [...document.querySelectorAll('[data-pay-preset]')];
-    const payCustomBtn  = document.getElementById('pay-custom-focus');
+    const payChoices    = [...document.querySelectorAll('[data-pay-choice]')];
+    const payAmountField = document.getElementById('pay-amount-field');
+    const payAmountError = document.getElementById('pay-amount-error');
+    const payI18n = { choiceRequired: @json(__('app.booking.payment.choice_required')), partialRequired: @json(__('app.booking.payment.partial_required')), exceedsTotal: @json(__('app.booking.payment.exceeds_total', ['total' => ':total'])) };
     const payStatusText = document.getElementById('pay-status-text');
-    const paymentSection = document.getElementById('payment-section');
     const endPlaceholder = @json(__('app.common.select').' '.__('app.booking.end_time'));
     const roomStateLabels = @json($roomStateLabels);
     const paymentStatusLabels = @json($paymentStatusLabels);
@@ -669,6 +673,8 @@
 
     const toneFor = { paid: 'ok', partial: 'warn', unpaid: 'neutral' };
 
+    const payChoice = () => (payChoices.find(r => r.checked) || {}).value || '';
+
     // --- Hour packages (Normal payment · Use hour package) ---
     // The server decides eligibility (/bookings/package-options) and re-checks
     // everything on submit; this only renders the choice.
@@ -748,29 +754,57 @@
         const isShared = opt ? opt.is_shared : false;
         const pkg = opt && !isShared ? pkgChosen() : null;
 
-        paymentSection.style.display = (opt && !isShared) ? '' : 'none';
+        // Always visible; shared rooms are billed at checkout, so the choice gives way to a note.
         // A package covers the whole booking: hide the deposit inputs.
-        document.getElementById('pay-deposit').hidden = !!pkg;
+        document.getElementById('pay-deposit').hidden = !!pkg || isShared;
         pkgCovered.hidden = !pkg;
         if (pkg) pkgCovered.querySelector('span').textContent = PK.covered.replace(':time', pkgMinutesLabel || '');
         document.getElementById('pay-shared-note').hidden = !(opt && isShared);
+        document.getElementById('pay-pick-room').hidden = !!opt;
+
+        // No payment → 0 · Full → follows the current total (so a price change
+        // can't leave a stale "full" amount) · Partial → what staff typed, never
+        // silently clamped: an out-of-range amount blocks submit with a message.
+        // Full payment needs a total to pay — off until a room is priced.
+        const fullRadio = payChoices.find(r => r.value === 'full');
+        fullRadio.disabled = !opt;
+        if (fullRadio.checked && !opt) fullRadio.checked = false;
+        const choice = payChoice();
+        payAmountField.hidden = choice !== 'partial';
+        if (choice === 'none') amountInput.value = 0;
+        if (choice === 'full') amountInput.value = opt ? Math.round(total * 100) / 100 : '';
+        const typed = parseFloat(amountInput.value || '0') || 0;
+        let payError = '';
+        if (choice === 'partial' && opt && !isShared && !pkg) {
+            if (typed <= 0) payError = payI18n.partialRequired;
+            else if (typed > total + 0.004) payError = payI18n.exceedsTotal.replace(':total', formatMoney(total));
+        }
+        amountInput.setCustomValidity(payError);
+        amountInput.classList.toggle('is-invalid', !!payError && amountInput.value !== '');
+        payAmountError.hidden = !(payError && amountInput.value !== '');
+        payAmountError.querySelector('span').textContent = payError;
+
+        // Required: no default. Blocks submit (with a message) until one is picked —
+        // unless a package or a shared room means there's nothing to pay now.
+        const needsChoice = !choice && !isShared && !pkg;
+        payChoices[0].setCustomValidity(needsChoice ? payI18n.choiceRequired : '');
+        const pending = needsChoice || !!payError; // nothing settled to show yet
 
         let paid = 0;
         if (opt && !isShared) {
-            paid = Math.max(0, Math.min(parseFloat(amountInput.value || '0') || 0, total));
+            paid = Math.max(0, Math.min(typed, total));
         }
         const remaining = Math.max(0, total - paid);
         const status = opt ? paymentStatusFor(paid, total) : 'unpaid';
 
         document.getElementById('pay-total').textContent = opt ? opt.total_price_display : '—';
-        document.getElementById('pay-remaining').textContent = opt ? formatMoney(remaining) : '—';
-        if (payStatusText) setStatusText(payStatusText, toneFor[status], opt ? paymentStatusLabels[status] : '—');
-
-        payPresets.forEach(btn => {
-            btn.disabled = !opt || isShared;
-            btn.classList.toggle('is-active', !!opt && Math.abs(parseFloat(amountInput.value || '0') - Math.round(total * parseFloat(btn.dataset.payPreset) * 100) / 100) < 0.005);
-        });
-        if (payCustomBtn) payCustomBtn.disabled = !opt || isShared;
+        // An out-of-range partial amount is shown as typed, never as a clamped "Paid" figure.
+        document.getElementById('pay-paid').textContent = !opt || needsChoice ? '—' : formatMoney(payError ? typed : paid);
+        document.getElementById('pay-remaining').textContent = opt && !pending ? formatMoney(remaining) : '—';
+        if (payStatusText) {
+            payStatusText.hidden = !opt || pending;
+            setStatusText(payStatusText, toneFor[status], opt ? paymentStatusLabels[status] : '—');
+        }
 
         // --- Confirmation summary (the one place totals/paid/remaining/status are spelled out) ---
         const customerDisplay = document.getElementById('selected-user-display');
@@ -786,9 +820,9 @@
         const pricingRow = document.getElementById('confirm-pricing-row');
         pricingRow.hidden = !(opt && opt.price_note);
         document.getElementById('confirm-pricing').textContent = opt && opt.price_note ? opt.price_note : '';
-        document.getElementById('confirm-paid').textContent = opt ? formatMoney(paid) : '—';
-        document.getElementById('confirm-remaining').textContent = opt ? formatMoney(remaining) : '—';
-        setBadge(document.getElementById('confirm-status-badge'), toneFor[status], paymentStatusLabels[status]);
+        document.getElementById('confirm-paid').textContent = opt && !pending ? formatMoney(paid) : '—';
+        document.getElementById('confirm-remaining').textContent = opt && !pending ? formatMoney(remaining) : '—';
+        setBadge(document.getElementById('confirm-status-badge'), pending ? 'neutral' : toneFor[status], pending ? '—' : paymentStatusLabels[status]);
 
         const cta = document.getElementById('confirm-cta');
         cta.textContent = ctaTemplate.replace(':total', opt ? opt.total_price_display : '—');
@@ -827,31 +861,18 @@
         return parts.join(' ') || ('0' + toHours);
     }
 
-    amountInput.addEventListener('input', () => {
-        const opt = currentRoomOption();
-        if (opt) {
-            const clamped = Math.max(0, Math.min(parseFloat(amountInput.value || '0') || 0, opt.total_price));
-            if (String(clamped) !== amountInput.value) amountInput.value = clamped;
+    amountInput.addEventListener('input', updateSummaryAndPayment);
+
+    payChoices.forEach(radio => radio.addEventListener('change', () => {
+        // Partial starts empty (not a leftover 0 or the full total) and takes focus.
+        if (payChoice() === 'partial') {
+            const opt = currentRoomOption();
+            const v = parseFloat(amountInput.value || '0') || 0;
+            if (v <= 0 || (opt && v >= opt.total_price)) amountInput.value = '';
         }
         updateSummaryAndPayment();
-    });
-
-    payPresets.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const opt = currentRoomOption();
-            if (!opt) return;
-            amountInput.value = Math.round(opt.total_price * parseFloat(btn.dataset.payPreset) * 100) / 100;
-            updateSummaryAndPayment();
-        });
-    });
-
-    if (payCustomBtn) {
-        payCustomBtn.addEventListener('click', () => {
-            if (payCustomBtn.disabled) return;
-            amountInput.focus();
-            amountInput.select();
-        });
-    }
+        if (payChoice() === 'partial') amountInput.focus();
+    }));
 
     dateInput.addEventListener('change', () => {
         updateSummaryAndPayment();

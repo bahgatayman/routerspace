@@ -27,7 +27,8 @@
   /* ------------------------------------------------------------- theme */
   const media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
   LS.theme = {
-    pref() { const p = store.get('ls-theme'); return p === 'light' || p === 'dark' ? p : 'system'; },
+    // Light by default; Dark or System only when the user picked it in the theme menu.
+    pref() { const p = store.get('ls-theme'); return p === 'dark' || p === 'system' ? p : 'light'; },
     resolved(pref = this.pref()) { return pref === 'system' ? (media && media.matches ? 'dark' : 'light') : pref; },
     apply() {
       // A page can pin its theme (the Super Admin shell is light-only): <html data-theme-lock="light">.
