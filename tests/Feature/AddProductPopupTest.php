@@ -101,6 +101,25 @@ class AddProductPopupTest extends TestCase
         $this->assertStringContainsString(route('products.toggle', $p), $html);
     }
 
+    public function test_new_product_form_starts_with_empty_price_cost_and_stock(): void
+    {
+        $owner = $this->owner();
+        $html = $this->actingAs($owner, 'owner')->get('/products')->assertOk()->getContent();
+
+        $this->assertMatchesRegularExpression('/name="purchase_price"[^>]*value=""/', $html);
+        $this->assertMatchesRegularExpression('/name="stock_quantity"[^>]*value=""/', $html);
+        $this->assertMatchesRegularExpression('/name="price"[^>]*value=""/', $html);
+
+        // Left empty, cost saves as 0 and a tracked product opens with 0 units.
+        $this->actingAs($owner, 'owner')->from('/products')->post('/products', [
+            'name' => 'Tea', 'type' => 'product', 'price' => '10', 'purchase_price' => '', 'track_stock' => '1', 'stock_quantity' => '', 'is_active' => '1',
+        ])->assertRedirect('/products')->assertSessionHasNoErrors();
+
+        $tea = Product::where('owner_id', $owner->id)->where('name', 'Tea')->firstOrFail();
+        $this->assertSame(0.0, (float) $tea->purchase_price);
+        $this->assertSame(0, (int) $tea->stock_quantity);
+    }
+
     public function test_full_create_page_still_works_as_fallback(): void
     {
         $this->actingAs($this->owner(), 'owner')->get('/products/create')->assertOk();

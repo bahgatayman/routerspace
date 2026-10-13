@@ -64,7 +64,7 @@
                 <label class="ls-label" for="p-cost">{{ __('app.inventory.purchase_price') }}</label>
                 <div class="ls-input-affix"><span aria-hidden="true">{{ $currency }}</span>
                     <input type="number" step="0.01" min="0" id="p-cost" name="purchase_price" class="ls-input" inputmode="decimal"
-                           value="{{ old('purchase_price', $product->purchase_price ?? '0.00') }}" aria-describedby="p-cost-hint">
+                           value="{{ old('purchase_price', $product->purchase_price ?? '') }}" placeholder="0.00" aria-describedby="p-cost-hint">
                 </div>
                 <p class="ls-hint" id="p-cost-hint">{{ __('app.inventory.purchase_hint') }}</p>
                 @error('purchase_price') <p class="ls-error">{{ $message }}</p> @enderror
@@ -73,7 +73,7 @@
                 <label class="ls-label" for="p-price">{{ __('app.inventory.selling_price') }} <span class="ls-req" aria-hidden="true">*</span></label>
                 <div class="ls-input-affix"><span aria-hidden="true">{{ $currency }}</span>
                     <input type="number" step="0.01" min="0.01" id="p-price" name="price" class="ls-input" inputmode="decimal" required
-                           value="{{ old('price', $product->price ?? '') }}">
+                           value="{{ old('price', $product->price ?? '') }}" placeholder="0.00">
                 </div>
                 @error('price') <p class="ls-error">{{ $message }}</p> @enderror
             </div>
@@ -103,7 +103,7 @@
                     <p class="ls-hint">{{ __('app.inventory.stock_locked_hint') }}</p>
                 @else
                     <input type="number" min="0" step="1" id="p-stock" name="stock_quantity" class="ls-input" inputmode="numeric"
-                           value="{{ old('stock_quantity', $product->stock_quantity ?? 0) }}">
+                           value="{{ old('stock_quantity', $product->stock_quantity ?? '') }}" placeholder="0">
                 @endif
                 @error('stock_quantity') <p class="ls-error">{{ $message }}</p> @enderror
             </div>
