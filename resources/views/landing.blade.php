@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-@php $locale = app()->getLocale(); $isRtl = $locale === 'ar'; @endphp
+@php $locale = app()->getLocale(); $isRtl = $locale === 'ar'; $otherLangName = $isRtl ? 'English' : 'العربية'; @endphp
 <html lang="{{ $locale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}">
 <head>
     <meta charset="UTF-8">
@@ -49,33 +49,6 @@
             box-shadow: 0 12px 40px -12px rgba(0,0,0,0.08);
             transform: translateY(-2px);
         }
-
-        .screen-tab {
-            padding: 10px 16px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: #78716c;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: none;
-            background: none;
-        }
-        .screen-tab:hover { color: #1c1917; background: #f5f5f4; }
-        .screen-tab.active { color: #163c85; background: #eef3fb; }
-
-        .screen-panel { display: none; }
-        .screen-panel.active { display: block; }
-
-        .mockup-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 14px;
-            border-radius: 10px;
-            transition: background 0.15s;
-        }
-        .mockup-row:hover { background: #f5f5f4; }
 
         .mockup-stat {
             padding: 16px;
@@ -146,13 +119,44 @@
         .cta-btn svg { transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
         .cta-primary:hover svg, .cta-secondary:hover svg { transform: translateX(3px); }
 
-        /* Nav elevation on scroll */
-        nav.nav-scrolled { box-shadow: 0 6px 24px -14px rgba(28, 25, 23, 0.22); }
+        /* ── Landing navbar: links grouped in the middle, actions on the end,
+           full-width sheet + backdrop below 900px. ── */
+        .ls-lnav { position: fixed; inset-inline: 0; top: 0; z-index: 50; background: rgba(255,255,255,0.72); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); border-bottom: 1px solid transparent; transition: background-color .25s ease, border-color .25s ease, box-shadow .25s ease; }
+        .ls-lnav.nav-scrolled, .ls-lnav.is-open { background: rgba(255,255,255,0.94); border-bottom-color: #ecebea; box-shadow: 0 6px 24px -14px rgba(28, 25, 23, 0.22); }
+        .ls-lnav-bar { max-width: 72rem; margin: 0 auto; padding: 0 1.25rem; height: 4rem; display: flex; align-items: center; gap: 1rem; }
+        .ls-lnav-logo { display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 10px; }
+        .ls-lnav-links { display: none; align-items: center; gap: 2px; margin-inline: auto; padding: 4px; border-radius: 999px; background: rgba(245,245,244,0.75); border: 1px solid rgba(231,229,228,0.9); }
+        .ls-lnav-link { padding: 7px 16px; border-radius: 999px; font-size: 0.875rem; font-weight: 500; color: #57534e; white-space: nowrap; transition: color .2s ease, background-color .2s ease, box-shadow .2s ease; }
+        .ls-lnav-link:hover { color: #1c1917; background: rgba(255,255,255,0.85); }
+        .ls-lnav-link.nav-active { color: #123068; background: #fff; box-shadow: 0 1px 3px rgba(28,25,23,0.08), 0 0 0 1px rgba(22,60,133,0.08); }
+        .ls-lnav-actions { display: none; align-items: center; gap: 0.375rem; }
+        .ls-lnav-sep { width: 1px; height: 20px; background: #e7e5e4; margin-inline: 4px; }
+        .ls-lnav-lang, .ls-lnav-signin { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 12px; border-radius: 10px; font-weight: 600; white-space: nowrap; transition: color .2s ease, background-color .2s ease; }
+        .ls-lnav-lang { font-size: 0.8125rem; color: #57534e; }
+        .ls-lnav-lang svg { width: 16px; height: 16px; }
+        .ls-lnav-signin { font-size: 0.875rem; color: #292524; }
+        .ls-lnav-lang:hover, .ls-lnav-signin:hover { color: #163c85; background: rgba(22,60,133,0.06); }
+        .ls-lnav-cta { padding: 9px 16px !important; font-size: 0.875rem !important; border-radius: 10px !important; margin-inline-start: 4px; }
+        .ls-lnav-burger { margin-inline-start: auto; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; color: #44403c; transition: background-color .2s ease; }
+        .ls-lnav-burger:hover, .ls-lnav.is-open .ls-lnav-burger { background: rgba(28,25,23,0.06); }
+        .ls-lnav a:focus-visible, .ls-lnav button:focus-visible { outline: 2px solid #6f96d1; outline-offset: 2px; }
 
-        /* Scroll-spy active nav link — a dedicated class rather than juggling
-           Tailwind color utilities, since desktop and mobile nav links start
-           from different base colors (surface-500 vs surface-600). */
-        [data-nav-link].nav-active { color: #123068; }
+        .ls-lnav-sheet { border-top: 1px solid #ecebea; background: #fff; max-height: calc(100dvh - 4rem); overflow-y: auto; animation: lnavIn .22s cubic-bezier(0.16, 1, 0.3, 1); }
+        .ls-lnav-sheet-links { padding: 0.25rem 1.25rem; }
+        .ls-lnav-row { display: flex; align-items: center; justify-content: space-between; min-height: 52px; font-size: 1rem; font-weight: 600; color: #292524; border-bottom: 1px solid #f5f5f4; }
+        .ls-lnav-row svg { color: #a8a29e; }
+        .ls-lnav-row.nav-active, .ls-lnav-row.nav-active svg { color: #163c85; }
+        .ls-lnav-sheet-foot { display: grid; gap: 10px; padding: 1rem 1.25rem 1.25rem; }
+        .ls-lnav-backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(28,25,23,0.35); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: lnavFade .2s ease; }
+        @keyframes lnavIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+        @keyframes lnavFade { from { opacity: 0; } to { opacity: 1; } }
+
+        @media (min-width: 900px) {
+            .ls-lnav-bar { padding: 0 2rem; }
+            .ls-lnav-links, .ls-lnav-actions { display: flex; }
+            .ls-lnav-burger, .ls-lnav-sheet, .ls-lnav-backdrop { display: none !important; }
+        }
+        @media (prefers-reduced-motion: reduce) { .ls-lnav-sheet, .ls-lnav-backdrop { animation: none; } }
 
         .modal-overlay { background: rgba(28, 25, 23, 0.4); -webkit-backdrop-filter: blur(14px) saturate(150%); backdrop-filter: blur(14px) saturate(150%); }
 
@@ -211,53 +215,64 @@
     <!-- ═══════════════════════════════════════════
          NAVIGATION
          ═══════════════════════════════════════════ -->
-    <nav id="site-nav" class="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-surface-100 transition-shadow duration-300">
-        <div class="max-w-6xl mx-auto px-5 sm:px-8">
-            <div class="flex items-center justify-between h-16">
-                <a href="/" class="flex items-center gap-3 shrink-0">
-                    <img src="/logo.webp"
-                         alt="Link Space Panel"
-                         class="h-10 w-auto">
-                </a>
+    <nav id="site-nav" class="ls-lnav" aria-label="{{ __('app.landing.main_nav') }}">
+        <div class="ls-lnav-bar">
+            <a href="/" class="ls-lnav-logo" aria-label="Link Space Panel">
+                <img src="/logo.webp" alt="Link Space Panel" class="h-9 w-auto">
+            </a>
 
-                <div class="hidden sm:flex items-center gap-8">
-                    <a href="#product" data-nav-link class="text-sm font-medium text-surface-500 hover:text-surface-900 transition">{{ __('app.landing.product') }}</a>
-                    <a href="#how-it-works" data-nav-link class="text-sm font-medium text-surface-500 hover:text-surface-900 transition">{{ __('app.landing.how_it_works') }}</a>
-                    <a href="#pricing" data-nav-link class="text-sm font-medium text-surface-500 hover:text-surface-900 transition">{{ __('app.landing.pricing') }}</a>
-                    <a href="/login" class="text-sm font-medium text-surface-500 hover:text-surface-900 transition">{{ __('app.landing.sign_in') }}</a>
-                    <a href="/register" class="cta-btn cta-primary !py-2.5 !px-5 text-sm">{{ __('app.landing.get_started') }}</a>
-                    <form method="POST" action="{{ route('language.switch', $isRtl ? 'en' : 'ar') }}" class="flex items-center gap-1.5 ml-2">
-                        @csrf
-                        <button type="submit" class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none {{ $isRtl ? 'bg-brand-600' : 'bg-gray-300' }}" role="switch" aria-checked="{{ $isRtl ? 'true' : 'false' }}">
-                            <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out {{ $isRtl ? 'translate-x-[18px]' : 'translate-x-[3px]' }}"></span>
-                        </button>
-                        <span class="text-xs font-medium {{ $isRtl ? 'text-brand-600' : 'text-surface-500' }}">{{ $isRtl ? 'AR' : 'EN' }}</span>
-                    </form>
-                </div>
-
-                <button id="mobile-menu-btn" class="sm:hidden p-2 text-surface-600" onclick="toggleMobile()" aria-expanded="false" aria-controls="mobile-menu" aria-label="{{ __('app.landing.toggle_menu') }}">
-                    <svg id="mobile-menu-icon-open" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-                    <svg id="mobile-menu-icon-close" class="w-5 h-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                </button>
+            <div class="ls-lnav-links">
+                <a href="#product" data-nav-link class="ls-lnav-link">{{ __('app.landing.product') }}</a>
+                <a href="#how-it-works" data-nav-link class="ls-lnav-link">{{ __('app.landing.how_it_works') }}</a>
+                <a href="#pricing" data-nav-link class="ls-lnav-link">{{ __('app.landing.pricing') }}</a>
             </div>
-        </div>
-        <div id="mobile-menu" class="hidden sm:hidden border-t border-surface-100 bg-white">
-            <div class="px-5 py-4 space-y-3">
-                <a href="#product" data-nav-link class="block text-sm font-medium text-surface-600 py-2">{{ __('app.landing.product') }}</a>
-                <a href="#how-it-works" data-nav-link class="block text-sm font-medium text-surface-600 py-2">{{ __('app.landing.how_it_works') }}</a>
-                <a href="#pricing" data-nav-link class="block text-sm font-medium text-surface-600 py-2">{{ __('app.landing.pricing') }}</a>
-                <a href="/login" class="block text-sm font-medium text-brand-600 py-2">{{ __('app.landing.sign_in') }}</a>
-                <a href="/register" class="block w-full cta-btn cta-primary text-sm">{{ __('app.landing.get_started') }}</a>
-                <form method="POST" action="{{ route('language.switch', $isRtl ? 'en' : 'ar') }}" class="flex items-center gap-1.5 pt-2">
+
+            <div class="ls-lnav-actions">
+                {{-- The button names the language it switches TO, written in that language. --}}
+                <form method="POST" action="{{ route('language.switch', $isRtl ? 'en' : 'ar') }}">
                     @csrf
-                    <button type="submit" class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none {{ $isRtl ? 'bg-brand-600' : 'bg-gray-300' }}" role="switch" aria-checked="{{ $isRtl ? 'true' : 'false' }}">
-                        <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out {{ $isRtl ? 'translate-x-[18px]' : 'translate-x-[3px]' }}"></span>
+                    <button type="submit" class="ls-lnav-lang" aria-label="{{ __('app.landing.switch_language') }}: {{ $otherLangName }}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg>
+                        <span lang="{{ $isRtl ? 'en' : 'ar' }}">{{ $otherLangName }}</span>
                     </button>
-                    <span class="text-xs font-medium {{ $isRtl ? 'text-brand-600' : 'text-surface-500' }}">{{ $isRtl ? 'العربية' : 'English' }}</span>
+                </form>
+                <span class="ls-lnav-sep" aria-hidden="true"></span>
+                <a href="/login" class="ls-lnav-signin">{{ __('app.landing.sign_in') }}</a>
+                <a href="/register" class="cta-btn cta-primary ls-lnav-cta">
+                    {{ __('app.landing.get_started') }}
+                    <svg class="w-4 h-4 {{ $isRtl ? 'rotate-180' : '' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5-5 5M6 12h12"/></svg>
+                </a>
+            </div>
+
+            <button id="mobile-menu-btn" type="button" class="ls-lnav-burger" onclick="toggleMobile()" aria-expanded="false" aria-controls="mobile-menu" aria-label="{{ __('app.landing.toggle_menu') }}">
+                <svg id="mobile-menu-icon-open" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <svg id="mobile-menu-icon-close" class="w-5 h-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <div id="mobile-menu" class="ls-lnav-sheet hidden">
+            <div class="ls-lnav-sheet-links">
+                @foreach (['product' => 'product', 'how-it-works' => 'how_it_works', 'pricing' => 'pricing'] as $anchor => $key)
+                    <a href="#{{ $anchor }}" data-nav-link class="ls-lnav-row">
+                        <span>{{ __('app.landing.'.$key) }}</span>
+                        <svg class="w-4 h-4 {{ $isRtl ? 'rotate-180' : '' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    </a>
+                @endforeach
+            </div>
+            <div class="ls-lnav-sheet-foot">
+                <a href="/register" class="cta-btn cta-primary w-full">{{ __('app.landing.get_started') }}</a>
+                <a href="/login" class="cta-btn cta-secondary w-full">{{ __('app.landing.sign_in') }}</a>
+                <form method="POST" action="{{ route('language.switch', $isRtl ? 'en' : 'ar') }}" class="flex justify-center">
+                    @csrf
+                    <button type="submit" class="ls-lnav-lang" aria-label="{{ __('app.landing.switch_language') }}: {{ $otherLangName }}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg>
+                        <span lang="{{ $isRtl ? 'en' : 'ar' }}">{{ $otherLangName }}</span>
+                    </button>
                 </form>
             </div>
         </div>
     </nav>
+    <div id="mobile-menu-backdrop" class="ls-lnav-backdrop hidden" aria-hidden="true"></div>
 
     <main id="main-content">
 
@@ -369,256 +384,11 @@
             <div class="text-center mb-16 fade-in">
                 <span class="inline-block text-xs font-semibold text-brand-600 bg-brand-50 px-3 py-1 rounded-full mb-4">{{ __('app.landing.product_experience') }}</span>
                 <h2 class="text-3xl sm:text-4xl font-bold tracking-tight text-surface-900">{{ __('app.landing.explore_the_system') }}</h2>
-                <p class="mt-3 text-surface-500 text-base sm:text-lg">Click through each module to see how Link Space Panel works.</p>
+                <p class="mt-3 text-surface-500 text-base sm:text-lg">{{ __('app.landing.demo.hint') }}</p>
             </div>
 
-            <div class="product-screen fade-in">
-                <!-- Screen Header -->
-                <div class="flex items-center justify-between px-5 py-4 border-b border-surface-100">
-                    <div class="flex items-center gap-2">
-                        <img src="/logo.webp"
-                             alt="Link Space Panel"
-                             class="h-8 w-auto">
-                        <span class="text-xs font-medium text-surface-400 hidden sm:inline">·</span>
-                        <span class="text-xs font-medium text-surface-400 hidden sm:inline">{{ __('app.landing.product_demo') }}</span>
-                    </div>
-                    <div class="flex items-center gap-1 bg-surface-50 rounded-lg p-1">
-                        <button class="screen-tab active" onclick="switchTab(0)">{{ __('app.landing.wifi_tab') }}</button>
-                        <button class="screen-tab" onclick="switchTab(1)">{{ __('app.landing.rooms_tab') }}</button>
-                        <button class="screen-tab" onclick="switchTab(2)">{{ __('app.landing.bookings_tab') }}</button>
-                    </div>
-                </div>
-
-                <!-- Screen Content -->
-                <div class="p-5 sm:p-8">
-                    <!-- Tab 0: Wi-Fi Management -->
-                    <div class="screen-panel active" id="tab-0">
-                        <div class="grid sm:grid-cols-5 gap-6">
-                            <div class="sm:col-span-3">
-                                <div class="bg-surface-50 rounded-2xl p-5 sm:p-6">
-                                    <!-- Mockup: Hotspot Users List -->
-                                    <div class="flex items-center justify-between mb-4">
-                                        <h4 class="text-sm font-semibold text-surface-900">Hotspot Users</h4>
-                                        <span class="text-[0.65rem] font-medium text-surface-400 bg-white px-2.5 py-1 rounded-md border border-surface-200">128 active</span>
-                                    </div>
-
-                                    <div class="space-y-2">
-                                        <div class="mockup-row bg-white border border-surface-200">
-                                            <div class="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-[0.6rem] font-bold text-brand-700">AA</div>
-                                            <div class="flex-1 min-w-0">
-                                                <p class="text-sm font-medium text-surface-900 truncate">Ahmed Ali</p>
-                                                <p class="text-[0.65rem] text-surface-400">+20 100 000 0001</p>
-                                            </div>
-                                            <span class="text-[0.6rem] font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Active</span>
-                                        </div>
-                                        <div class="mockup-row bg-white border border-surface-200">
-                                            <div class="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-[0.6rem] font-bold text-brand-700">SM</div>
-                                            <div class="flex-1 min-w-0">
-                                                <p class="text-sm font-medium text-surface-900 truncate">Sara Mahmoud</p>
-                                                <p class="text-[0.65rem] text-surface-400">+20 101 000 0002</p>
-                                            </div>
-                                            <span class="text-[0.6rem] font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Active</span>
-                                        </div>
-                                        <div class="mockup-row bg-white border border-surface-200">
-                                            <div class="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-[0.6rem] font-bold text-amber-700">MK</div>
-                                            <div class="flex-1 min-w-0">
-                                                <p class="text-sm font-medium text-surface-900 truncate">Mohamed Khaled</p>
-                                                <p class="text-[0.65rem] text-surface-400">+20 102 000 0003</p>
-                                            </div>
-                                            <span class="text-[0.6rem] font-medium text-surface-400 bg-surface-100 px-2 py-0.5 rounded-full">Offline</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="sm:col-span-2 space-y-4">
-                                <div class="mockup-stat">
-                                    <p class="text-[0.65rem] font-medium text-surface-400 uppercase tracking-wider">Active Sessions</p>
-                                    <p class="text-2xl font-bold text-surface-900 mt-1">24</p>
-                                    <div class="flex items-center gap-1.5 mt-2">
-                                        <span class="flex items-center gap-1 text-[0.6rem] text-green-600 font-medium">
-                                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>
-                                            +12%
-                                        </span>
-                                        <span class="text-[0.6rem] text-surface-400">vs last week</span>
-                                    </div>
-                                </div>
-                                <div class="mockup-stat">
-                                    <p class="text-[0.65rem] font-medium text-surface-400 uppercase tracking-wider">Bandwidth Usage</p>
-                                    <p class="text-2xl font-bold text-surface-900 mt-1">240 <span class="text-sm font-normal text-surface-400">Mbps</span></p>
-                                    <div class="mt-3 h-1.5 bg-surface-200 rounded-full overflow-hidden">
-                                        <div class="h-full bg-gradient-to-r from-brand-400 to-brand-600 rounded-full" style="width:24%"></div>
-                                    </div>
-                                </div>
-                                <div class="mockup-stat">
-                                    <p class="text-[0.65rem] font-medium text-surface-400 uppercase tracking-wider">Speed Profile</p>
-                                    <p class="text-lg font-bold text-surface-900 mt-1">50 Mbps</p>
-                                    <p class="text-[0.65rem] text-surface-400 mt-0.5">Standard Plan</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 1: Room Management -->
-                    <div class="screen-panel" id="tab-1">
-                        <div class="grid sm:grid-cols-3 gap-4">
-                            <div class="bg-surface-50 rounded-xl p-5 border border-surface-100 hover:border-brand-200 transition">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="w-9 h-9 rounded-lg bg-brand-50 flex items-center justify-center">
-                                        <svg class="w-4 h-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-                                    </div>
-                                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                                </div>
-                                <h4 class="text-sm font-semibold text-surface-900">Meeting Room A</h4>
-                                <p class="text-[0.7rem] text-surface-400 mt-1">Capacity: 8 · ج.م 150/hr</p>
-                                <div class="mt-3 pt-3 border-t border-surface-200">
-                                    <p class="text-[0.65rem] text-surface-500">Next: <span class="font-medium text-surface-700">10:00 - 12:00</span></p>
-                                </div>
-                            </div>
-                            <div class="bg-surface-50 rounded-xl p-5 border border-surface-100 hover:border-brand-200 transition">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="w-9 h-9 rounded-lg bg-brand-50 flex items-center justify-center">
-                                        <svg class="w-4 h-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-                                    </div>
-                                    <span class="w-2 h-2 bg-amber-500 rounded-full"></span>
-                                </div>
-                                <h4 class="text-sm font-semibold text-surface-900">Private Office B</h4>
-                                <p class="text-[0.7rem] text-surface-400 mt-1">Capacity: 4 · ج.م 200/hr</p>
-                                <div class="mt-3 pt-3 border-t border-surface-200">
-                                    <p class="text-[0.65rem] text-surface-500">Now: <span class="font-medium text-green-600">Sara M. · Active</span></p>
-                                </div>
-                            </div>
-                            <div class="bg-surface-50 rounded-xl p-5 border border-surface-100 hover:border-brand-200 transition">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center">
-                                        <svg class="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-                                    </div>
-                                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                                </div>
-                                <h4 class="text-sm font-semibold text-surface-900">Hot Desk Area</h4>
-                                <p class="text-[0.7rem] text-surface-400 mt-1">Capacity: 20 · ج.م 50/hr</p>
-                                <div class="mt-3 pt-3 border-t border-surface-200">
-                                    <p class="text-[0.65rem] text-surface-500">Available: <span class="font-medium text-green-600">12 seats open</span></p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="mt-6 p-5 bg-surface-50 rounded-xl">
-                            <div class="flex items-center justify-between mb-4">
-                                <h4 class="text-sm font-semibold text-surface-900">Today's Room Schedule</h4>
-                                <span class="text-[0.65rem] text-surface-400">3 rooms · 8 bookings</span>
-                            </div>
-                            <div class="space-y-2">
-                                <div class="flex items-center gap-4 p-3 bg-white rounded-lg border border-surface-200">
-                                    <span class="text-xs font-mono text-surface-500 w-20 shrink-0">10:00-12:00</span>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-sm font-medium text-surface-900">Meeting Room A</p>
-                                        <p class="text-[0.65rem] text-surface-400">Ahmed Ali</p>
-                                    </div>
-                                    <span class="text-[0.6rem] font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Confirmed</span>
-                                </div>
-                                <div class="flex items-center gap-4 p-3 bg-white rounded-lg border border-surface-200">
-                                    <span class="text-xs font-mono text-surface-500 w-20 shrink-0">14:00-16:00</span>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-sm font-medium text-surface-900">Private Office B</p>
-                                        <p class="text-[0.65rem] text-surface-400">Sara Mahmoud</p>
-                                    </div>
-                                    <span class="text-[0.6rem] font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Active</span>
-                                </div>
-                                <div class="flex items-center gap-4 p-3 bg-white rounded-lg border border-surface-200">
-                                    <span class="text-xs font-mono text-surface-500 w-20 shrink-0">16:00-18:00</span>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-sm font-medium text-surface-900">Hot Desk Area</p>
-                                        <p class="text-[0.65rem] text-surface-400">Omar Youssef</p>
-                                    </div>
-                                    <span class="text-[0.6rem] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Pending</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 2: Booking Engine -->
-                    <div class="screen-panel" id="tab-2">
-                        <div class="grid sm:grid-cols-2 gap-6">
-                            <div>
-                                <h4 class="text-sm font-semibold text-surface-900 mb-4">New Booking</h4>
-                                <div class="space-y-3">
-                                    <div>
-                                        <label class="block text-[0.7rem] font-medium text-surface-500 mb-1">Customer</label>
-                                        <div class="w-full bg-white border border-surface-200 rounded-lg px-3 py-2.5 text-sm text-surface-900">Ahmed Ali</div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-[0.7rem] font-medium text-surface-500 mb-1">Room</label>
-                                        <div class="w-full bg-white border border-surface-200 rounded-lg px-3 py-2.5 text-sm text-surface-900">Meeting Room A</div>
-                                    </div>
-                                    <div class="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label class="block text-[0.7rem] font-medium text-surface-500 mb-1">Start Time</label>
-                                            <div class="bg-white border border-surface-200 rounded-lg px-3 py-2.5 text-sm text-surface-900">10:00</div>
-                                        </div>
-                                        <div>
-                                            <label class="block text-[0.7rem] font-medium text-surface-500 mb-1">End Time</label>
-                                            <div class="bg-white border border-surface-200 rounded-lg px-3 py-2.5 text-sm text-surface-900">12:00</div>
-                                        </div>
-                                    </div>
-                                    <div class="pt-2">
-                                        <div class="flex items-center justify-between text-sm">
-                                            <span class="text-surface-500">Total</span>
-                                            <span class="font-bold text-surface-900">ج.م 300</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h4 class="text-sm font-semibold text-surface-900 mb-4">Conflict Prevention</h4>
-                                <div class="bg-green-50 border border-green-100 rounded-xl p-4 mb-4">
-                                    <div class="flex items-start gap-3">
-                                        <svg class="w-4 h-4 text-green-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                        <div>
-                                            <p class="text-sm font-medium text-green-800">No conflicts found</p>
-                                            <p class="text-[0.7rem] text-green-600 mt-0.5">Meeting Room A is available for this time slot</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="bg-surface-50 rounded-xl p-4">
-                                    <p class="text-[0.7rem] font-medium text-surface-500 mb-3">Today's Availability</p>
-                                    <div class="space-y-2">
-                                        <div class="flex items-center gap-3">
-                                            <span class="text-[0.65rem] font-mono text-surface-400 w-16">08:00</span>
-                                            <div class="flex-1 h-2 bg-surface-200 rounded-full overflow-hidden">
-                                                <div class="h-full bg-green-400 rounded-full" style="width:100%"></div>
-                                            </div>
-                                            <span class="text-[0.6rem] text-surface-400 w-12 text-right">Open</span>
-                                        </div>
-                                        <div class="flex items-center gap-3">
-                                            <span class="text-[0.65rem] font-mono text-surface-400 w-16">10:00</span>
-                                            <div class="flex-1 h-2 bg-surface-200 rounded-full overflow-hidden">
-                                                <div class="h-full bg-brand-400 rounded-full" style="width:40%"></div>
-                                            </div>
-                                            <span class="text-[0.6rem] text-surface-400 w-12 text-right">Booked</span>
-                                        </div>
-                                        <div class="flex items-center gap-3">
-                                            <span class="text-[0.65rem] font-mono text-surface-400 w-16">14:00</span>
-                                            <div class="flex-1 h-2 bg-surface-200 rounded-full overflow-hidden">
-                                                <div class="h-full bg-amber-400 rounded-full" style="width:30%"></div>
-                                            </div>
-                                            <span class="text-[0.6rem] text-surface-400 w-12 text-right">Active</span>
-                                        </div>
-                                        <div class="flex items-center gap-3">
-                                            <span class="text-[0.65rem] font-mono text-surface-400 w-16">16:00</span>
-                                            <div class="flex-1 h-2 bg-surface-200 rounded-full overflow-hidden">
-                                                <div class="h-full bg-green-400 rounded-full" style="width:100%"></div>
-                                            </div>
-                                            <span class="text-[0.6rem] text-surface-400 w-12 text-right">Open</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="fade-in">
+                @include('landing._demo')
             </div>
         </div>
     </section>
@@ -993,16 +763,6 @@
          JavaScript
          ═══════════════════════════════════════════ -->
     <script>
-        // Tab switching
-        function switchTab(index) {
-            document.querySelectorAll('.screen-tab').forEach((tab, i) => {
-                tab.classList.toggle('active', i === index);
-            });
-            document.querySelectorAll('.screen-panel').forEach((panel, i) => {
-                panel.classList.toggle('active', i === index);
-            });
-        }
-
         // Modal
         function openDemoModal() {
             const modal = document.getElementById('demo-modal');
@@ -1034,19 +794,27 @@
         const mobileIconOpen   = document.getElementById('mobile-menu-icon-open');
         const mobileIconClose  = document.getElementById('mobile-menu-icon-close');
 
-        function toggleMobile() {
-            const willOpen = mobileMenu.classList.contains('hidden');
-            mobileMenu.classList.toggle('hidden');
+        const mobileBackdrop   = document.getElementById('mobile-menu-backdrop');
+
+        function toggleMobile(force) {
+            const willOpen = typeof force === 'boolean' ? force : mobileMenu.classList.contains('hidden');
+            mobileMenu.classList.toggle('hidden', !willOpen);
+            mobileBackdrop.classList.toggle('hidden', !willOpen);
+            document.getElementById('site-nav').classList.toggle('is-open', willOpen);
             mobileIconOpen.classList.toggle('hidden', willOpen);
             mobileIconClose.classList.toggle('hidden', !willOpen);
             mobileMenuBtn.setAttribute('aria-expanded', String(willOpen));
             document.body.style.overflow = willOpen ? 'hidden' : '';
         }
+        mobileBackdrop.addEventListener('click', () => toggleMobile(false));
+        // Growing the window past the breakpoint hides the sheet via CSS; also
+        // release the scroll lock it left on <body>.
+        window.matchMedia('(min-width: 900px)').addEventListener('change', e => { if (e.matches) toggleMobile(false); });
 
         // Tapping any link inside the mobile menu should close it — a plain
         // anchor click otherwise leaves the menu open, covering the section
         // it just scrolled the page to.
-        mobileMenu.addEventListener('click', e => { if (e.target.tagName === 'A') toggleMobile(); });
+        mobileMenu.addEventListener('click', e => { if (e.target.closest('a')) toggleMobile(false); });
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape' && !mobileMenu.classList.contains('hidden')) toggleMobile();
         });
@@ -1062,7 +830,11 @@
         // Nav elevation on scroll
         const siteNav = document.getElementById('site-nav');
         if (siteNav) {
-            const onScroll = () => siteNav.classList.toggle('nav-scrolled', window.scrollY > 8);
+            const onScroll = () => {
+                siteNav.classList.toggle('nav-scrolled', window.scrollY > 8);
+                // Back at the hero: no section is "current" any more.
+                if (window.scrollY < 200) document.querySelectorAll('a[data-nav-link].nav-active').forEach(l => l.classList.remove('nav-active'));
+            };
             onScroll();
             window.addEventListener('scroll', onScroll, { passive: true });
         }
