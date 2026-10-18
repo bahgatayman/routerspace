@@ -36,6 +36,19 @@
         .btn-primary:hover { box-shadow: 0 14px 28px -10px rgba(22,60,133,.65); transform: translateY(-1px); }
         .btn-primary svg { transition: transform .2s; }
         .btn-primary:hover svg { transform: translateX(3px); }
+        [dir="rtl"] .btn-primary svg { transform: scaleX(-1); }
+        [dir="rtl"] .btn-primary:hover svg { transform: scaleX(-1) translateX(3px); }
+        .btn-primary:disabled { opacity: .75; cursor: progress; transform: none; }
+        .btn-spin { width: 1rem; height: 1rem; border-radius: 50%; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; animation: auth-spin .7s linear infinite; }
+        @keyframes auth-spin { to { transform: rotate(360deg); } }
+
+        /* Field feedback: per-field errors and hints sit right under their input. */
+        .field.is-invalid { border-color: #dc2626; }
+        .field.is-invalid:focus { box-shadow: 0 0 0 3px rgba(220,38,38,.14); }
+        .field-msg { display: flex; align-items: flex-start; gap: .35rem; margin-top: .4rem; font-size: .78rem; line-height: 1.35; color: #dc2626; }
+        .field-msg svg { width: .9rem; height: .9rem; flex: none; margin-top: .1rem; }
+        .field-hint { margin-top: .4rem; font-size: .76rem; line-height: 1.35; color: #78716c; }
+        .field-ok { color: #047857; }
 
         /* Full-bleed branded scene behind the centered card. */
         .auth-scene {
@@ -121,8 +134,12 @@
         document.querySelectorAll('.pw-toggle').forEach(btn => {
             btn.addEventListener('click', () => {
                 const input = btn.parentElement.querySelector('input');
-                input.type = input.type === 'password' ? 'text' : 'password';
+                const show = input.type === 'password';
+                input.type = show ? 'text' : 'password';
                 btn.querySelectorAll('svg').forEach(s => s.classList.toggle('hidden'));
+                // Optional translated labels (data-label-show / data-label-hide) for screen readers.
+                btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+                if (btn.dataset.labelShow) btn.setAttribute('aria-label', show ? btn.dataset.labelHide : btn.dataset.labelShow);
             });
         });
     </script>

@@ -138,4 +138,18 @@ class OwnerBrandImageTest extends TestCase
         $this->post('/profile/logo', ['logo' => UploadedFile::fake()->image('x.png')])
             ->assertRedirect('/login');
     }
+
+    public function test_choosing_a_file_uploads_it_straight_away(): void
+    {
+        $owner = $this->makeOwner();
+
+        $html = $this->actingAs($owner, 'owner')->get('/profile')->assertOk()
+            ->assertSee(__('app.profile.choose_image'))
+            ->getContent();
+
+        // The picker submits its own form on change; the button is only a no-JS fallback.
+        $this->assertStringContainsString('this.form.submit()', $html);
+        $this->assertMatchesRegularExpression('/<noscript>\s*<button type="submit"/', $html);
+        $this->assertStringContainsString(__('app.profile.image_too_big'), $html);
+    }
 }

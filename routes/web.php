@@ -31,6 +31,7 @@ use App\Http\Controllers\HotspotUserController;
 use App\Http\Controllers\LanguageController;
 use App\Http\Controllers\MemberPackageController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\PackageTemplateController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProfileController;
@@ -361,6 +362,15 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
     // all (see CheckPermission's owner-bypass: this is enforced by the
     // guard restriction below, not by a permission flag, so staff can never
     // reach this surface regardless of what staff_permissions might say).
+});
+
+// Onboarding (Welcome Wizard + dashboard setup checklist) — the owner only; staff never see it.
+Route::middleware(['auth:owner', 'subscription.active'])->prefix('onboarding')->group(function () {
+    Route::post('/welcome/dismiss', [OnboardingController::class, 'dismissWelcome'])->name('onboarding.welcome.dismiss');
+    Route::post('/welcome/restart', [OnboardingController::class, 'restartWelcome'])->name('onboarding.welcome.restart');
+    Route::post('/profile', [OnboardingController::class, 'saveProfile'])->name('onboarding.profile');
+    Route::post('/checklist/hide', [OnboardingController::class, 'hideChecklist'])->name('onboarding.checklist.hide');
+    Route::post('/checklist/show', [OnboardingController::class, 'showChecklist'])->name('onboarding.checklist.show');
 });
 
 Route::middleware(['auth:owner', 'subscription.active', 'permission:staff.view'])->group(function () {

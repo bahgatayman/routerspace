@@ -3,6 +3,7 @@
 @section('page-title', __('app.workspace.add_room'))
 
 @section('content')
+    <x-ui.flash />
     <div class="max-w-2xl mx-auto">
         <nav class="text-sm text-gray-500 mb-4">
             <a href="{{ route('workspaces.index', ['workspace' => $workspace->id]) }}" class="text-blue-600 hover:text-blue-800">{{ $workspace->name }}</a>

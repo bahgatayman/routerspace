@@ -6,6 +6,8 @@ use App\Models\Room;
 use App\Models\Workspace;
 use App\Services\ActivityLogger;
 use App\Services\AvailabilityService;
+use App\Services\OnboardingService;
+use App\Support\PhoneNumber;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -126,7 +128,23 @@ class WorkspaceController extends Controller
 
     public function create(): View
     {
-        return view('workspaces.create');
+        $owner = TenantContext::user();
+        $isFirst = ! Workspace::where('owner_id', $owner->id)->exists();
+
+        // Only the FIRST workspace reuses the space name given at onboarding — and
+        // only when it's a real name, not the sign-up default (the owner's own
+        // name). Additional workspaces always start blank.
+        $suggestedName = $isFirst && filled($owner->business_name) && $owner->business_name !== $owner->name
+            ? $owner->business_name
+            : null;
+
+        return view('workspaces.create', [
+            // null = unlimited on this plan; 0 = limit reached (store() refuses too).
+            'remainingSlots' => $owner->remainingWorkspaceSlots(),
+            'suggestedName' => $suggestedName,
+            'mapsKey' => config('services.google_maps.key'),
+            'mapsMapId' => config('services.google_maps.map_id'),
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -138,19 +156,44 @@ class WorkspaceController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
-            'address' => 'nullable|string|max:500',
-            'city' => 'nullable|string|max:100',
-            'phone' => 'nullable|string|max:20',
+            'address' => 'required|string|max:500',
+            'city' => 'required|string|max:100',
+            'phone' => $this->mobileRules(),
+            // From the map picker; optional, but coordinates come as a valid pair.
+            'latitude' => 'nullable|numeric|between:-90,90|required_with:longitude',
+            'longitude' => 'nullable|numeric|between:-180,180|required_with:latitude',
+            'place_id' => 'nullable|string|max:255',
         ]);
 
+        // A Google place id is only kept alongside real coordinates; it is a
+        // reference for later lookups, never treated as a verified address.
+        if (! isset($data['latitude'], $data['longitude'])) {
+            $data['place_id'] = null;
+        }
+
+        $owner = TenantContext::user();
+        $isFirst = ! Workspace::where('owner_id', $owner->id)->exists();
+
         $workspace = Workspace::create(array_merge($data, [
-            'owner_id' => TenantContext::id(),
+            'owner_id' => $owner->id,
         ]));
 
         $this->activityLogger->log('workspace.created', $workspace, "Created workspace {$workspace->name}");
 
+        // Creating the first workspace means setup is under way: never pop the
+        // first-visit Welcome Wizard up after this (the dashboard checklist stays).
+        if ($isFirst && auth('owner')->check()) {
+            app(OnboardingService::class)->markWelcomed(auth('owner')->user());
+        }
+
+        // First workspace: go straight to adding its first room (the natural next step).
+        if ($isFirst) {
+            return redirect()->route('rooms.create', $workspace->id)
+                ->with('success', __('app.workspace.form.created_first', ['name' => $workspace->name]));
+        }
+
         return redirect()->route('workspaces.index', ['workspace' => $workspace->id])
-            ->with('success', 'Workspace created successfully.');
+            ->with('success', __('app.workspace.form.created', ['name' => $workspace->name]));
     }
 
     public function edit(int $id): View
@@ -171,9 +214,9 @@ class WorkspaceController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
-            'address' => 'nullable|string|max:500',
-            'city' => 'nullable|string|max:100',
-            'phone' => 'nullable|string|max:20',
+            'address' => 'required|string|max:500',
+            'city' => 'required|string|max:100',
+            'phone' => $this->mobileRules(),
         ]);
 
         $workspace->update($data);
@@ -216,5 +259,21 @@ class WorkspaceController extends Controller
             'success',
             "Workspace '{$workspace->name}' ".($workspace->is_active ? 'activated' : 'deactivated').'.'
         );
+    }
+
+    /**
+     * A workspace's contact number must be a valid Egyptian mobile (010/011/012/015,
+     * any common shape — 01012345678, +201012345678…), checked with the same
+     * PhoneNumber helper the rest of the app uses.
+     *
+     * @return array<int, mixed>
+     */
+    private function mobileRules(): array
+    {
+        return ['required', 'string', 'max:20', function (string $attribute, mixed $value, \Closure $fail) {
+            if (PhoneNumber::normalize((string) $value) === null) {
+                $fail(__('app.workspace.form.phone_invalid'));
+            }
+        }];
     }
 }

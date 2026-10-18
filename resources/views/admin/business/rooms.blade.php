@@ -18,41 +18,59 @@
         <div class="ls-filter-actions"><button class="ls-btn ls-btn--secondary">{{ $t('apply') }}</button></div>
     </form>
 
-    <section class="ls-card">
-        @if ($rooms->isEmpty())
-            <x-ui.empty-state :title="$t('no_rooms')" />
-        @else
-            <div class="ls-table-wrap">
-                <table class="ls-table ls-adm-table">
-                    <thead><tr>
-                        <th scope="col">{{ $t('col.room') }}</th>
-                        <th scope="col">{{ $t('col.location') }}</th>
-                        <th scope="col">{{ $t('col.type') }}</th>
-                        <th scope="col" class="is-num">{{ $t('col.capacity') }}</th>
-                        <th scope="col">{{ $t('col.pricing') }}</th>
-                        <th scope="col" class="is-num">{{ $t('col.bookings_period') }}</th>
-                        <th scope="col" class="is-num">{{ $t('hours_billed') }}</th>
-                        <th scope="col" class="is-num">{{ $t('col.earnings_period') }}</th>
-                        <th scope="col">{{ __('app.common.status') }}</th>
-                    </tr></thead>
-                    <tbody>
-                        @foreach ($rooms as $room)
-                            <tr class="row-link" data-href="/admin/rooms/{{ $room->id }}">
-                                <td><a href="/admin/rooms/{{ $room->id }}" class="ls-adm-ident-name">{{ $room->name }}</a></td>
-                                <td>{{ $room->workspace?->name ?? '—' }}</td>
-                                <td>{{ $room->typeLabel() }}</td>
-                                <td class="is-num">{{ $room->capacity }}</td>
-                                <td class="ls-faint">{{ $room->pricingSummary() }}</td>
-                                <td class="is-num">{{ number_format($room->period_bookings) }}</td>
-                                <td class="is-num">{{ number_format((float) $room->period_hours, 1) }}</td>
-                                <td class="is-money">{{ Money::format((float) $room->period_earnings) }}</td>
-                                <td>@if ($room->is_available)<span class="ls-status"><span class="ls-dot"></span>{{ $t('available') }}</span>@else<x-ui.badge tone="neutral">{{ $t('unavailable') }}</x-ui.badge>@endif</td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-        @endif
-    </section>
+    @if ($rooms->isEmpty())
+        <section class="ls-card"><x-ui.empty-state :title="$t('no_rooms')" /></section>
+    @else
+        {{-- Read-only cards: the room's photos (swipeable when there are several),
+             then what it is and how it performed in the selected period. --}}
+        <div class="ls-rooms-grid">
+            @foreach ($rooms as $room)
+                @php $images = $room->images; @endphp
+                <article class="ls-room is-{{ $room->is_available ? 'available' : 'unavailable' }}" aria-labelledby="adm-room-{{ $room->id }}">
+                    <div class="ls-room-photo" @if ($images->count() > 1) data-ls-gallery @endif>
+                        @if ($images->isEmpty())
+                            <div class="ls-room-photo-placeholder"><x-ui.icon name="image" /><span>{{ __('app.workspace.no_photos') }}</span></div>
+                        @else
+                            <div class="ls-room-photo-track">
+                                @foreach ($images as $image)
+                                    <a href="/admin/rooms/{{ $room->id }}" class="ls-room-photo-slide" tabindex="-1" aria-hidden="true"><img src="{{ $image->thumbnailUrl() }}" loading="lazy" alt=""></a>
+                                @endforeach
+                            </div>
+                            @if ($images->count() > 1)
+                                <button type="button" class="ls-room-nav is-prev" aria-label="{{ __('app.workspace.previous_photo') }}"><x-ui.icon name="chevron-right" /></button>
+                                <button type="button" class="ls-room-nav is-next" aria-label="{{ __('app.workspace.next_photo') }}"><x-ui.icon name="chevron-right" /></button>
+                                <div class="ls-room-dots">
+                                    @foreach ($images as $i => $image)
+                                        <button type="button" class="ls-room-dot {{ $i === 0 ? 'is-active' : '' }}" aria-label="{{ __('app.workspace.photo_of', ['current' => $i + 1, 'total' => $images->count()]) }}"></button>
+                                    @endforeach
+                                </div>
+                            @endif
+                        @endif
+                        <span class="ls-room-badge is-{{ $room->is_available ? 'available' : 'unavailable' }}">
+                            <span class="ls-dot" aria-hidden="true"></span>{{ $room->is_available ? $t('available') : $t('unavailable') }}
+                        </span>
+                    </div>
+
+                    <div class="ls-room-body">
+                        <div class="ls-room-head">
+                            <a href="/admin/rooms/{{ $room->id }}" class="ls-room-name" id="adm-room-{{ $room->id }}" title="{{ $room->name }}">{{ $room->name }}</a>
+                        </div>
+                        <div class="ls-room-meta">
+                            <span class="ls-room-type is-{{ $room->type }}">{{ $room->typeLabel() }}</span>
+                            <span><x-ui.icon name="users" />{{ trans_choice('app.workspace.seats_count', $room->capacity, ['count' => $room->capacity]) }}</span>
+                            @if ($room->workspace)<span><x-ui.icon name="pin" />{{ $room->workspace->name }}</span>@endif
+                        </div>
+                        <div class="ls-room-price"><span class="ls-num">{{ $room->pricingSummary() }}</span></div>
+
+                        <dl class="ls-adm-room-stats">
+                            <div><dt>{{ $t('col.bookings_period') }}</dt><dd class="ls-num">{{ number_format($room->period_bookings) }}</dd></div>
+                            <div><dt>{{ $t('hours_billed') }}</dt><dd class="ls-num">{{ number_format((float) $room->period_hours, 1) }}</dd></div>
+                            <div><dt>{{ $t('col.earnings_period') }}</dt><dd class="ls-num is-money">{{ Money::format((float) $room->period_earnings) }}</dd></div>
+                        </dl>
+                    </div>
+                </article>
+            @endforeach
+        </div>
+    @endif
 </div>
 @endsection

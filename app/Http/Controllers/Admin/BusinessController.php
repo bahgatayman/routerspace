@@ -147,7 +147,7 @@ class BusinessController extends Controller
         [$period, $range] = $this->resolvePeriod($request);
         $inPeriod = fn ($q) => $q->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate());
 
-        $rooms = Room::where('owner_id', $owner->id)->with('workspace:id,name')
+        $rooms = Room::where('owner_id', $owner->id)->with(['workspace:id,name', 'images'])
             ->when($workspace, fn ($q) => $q->where('workspace_id', $workspace->id))
             ->withCount(['bookings as period_bookings' => fn ($q) => $inPeriod($q)->countsTowardGbv()])
             ->withSum(['bookings as period_earnings' => fn ($q) => $inPeriod($q)->revenueRecognised()], 'amount_paid')

@@ -48,6 +48,8 @@ class Owner extends Authenticatable
             'subscription_starts_at' => 'datetime',
             'subscription_expires_at' => 'datetime',
             'is_active' => 'boolean',
+            'onboarding_welcomed_at' => 'datetime',
+            'onboarding_checklist_hidden_at' => 'datetime',
         ];
     }
 

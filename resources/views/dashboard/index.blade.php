@@ -18,6 +18,8 @@
         <x-ui.banner tone="warn" class="mb-6">{{ __('app.dashboard.mikrotik_unreachable') }}</x-ui.banner>
     @endif
 
+    @include('onboarding._dashboard')
+
     {{-- ================= Hero — revenue trend chart (visual left) + Revenue Today (visual right) =================
          ls-visual-ltr forces grid column 1 to be the physical left regardless of
          page direction (plain logical/RTL-flipping grid columns would otherwise

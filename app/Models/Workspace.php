@@ -18,6 +18,9 @@ class Workspace extends Model
         'address',
         'city',
         'phone',
+        'latitude',
+        'longitude',
+        'place_id',
         'is_active',
     ];
 
@@ -25,6 +28,8 @@ class Workspace extends Model
     {
         return [
             'is_active' => 'boolean',
+            'latitude' => 'float',
+            'longitude' => 'float',
         ];
     }
 

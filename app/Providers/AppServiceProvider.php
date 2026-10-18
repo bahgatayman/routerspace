@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\Notification;
 use App\Services\NotificationService;
+use App\Services\OnboardingService;
 use App\Support\ActiveSessionsQuery;
 use App\Support\TenantContext;
 use Illuminate\Support\Facades\Auth;
@@ -19,7 +20,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // One instance per request so the setup-task queries run at most once.
+        $this->app->scoped(OnboardingService::class);
     }
 
     /**
@@ -32,6 +34,25 @@ class AppServiceProvider extends ServiceProvider
             if ($owner) {
                 $view->with('owner', $owner);
             }
+        });
+
+        // Onboarding on the dashboard: the owner only (never staff). Tasks are
+        // computed here, once, only when this partial renders.
+        View::composer('onboarding._dashboard', function ($view) {
+            $owner = Auth::guard('staff')->check() ? null : Auth::guard('owner')->user();
+            if (! $owner || ! app(OnboardingService::class)->isAvailable()) {
+                $view->with('onboardingOwner', null);
+
+                return;
+            }
+            $service = app(OnboardingService::class);
+            $view->with([
+                'onboardingOwner' => $owner,
+                'onboardingTasks' => $service->tasks($owner),
+                'onboardingSummary' => $service->summary($owner),
+                'showWelcome' => $service->shouldShowWelcome($owner),
+                'checklistHidden' => $owner->onboarding_checklist_hidden_at !== null,
+            ]);
         });
 
         // Notification bell — inject unread count + recent items into the owner layout.

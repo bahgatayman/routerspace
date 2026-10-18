@@ -38,15 +38,20 @@
                         </div>
 
                         <div class="min-w-0 flex-1">
-                            <input type="file" name="logo" id="logo-input" accept="image/jpeg,image/png,image/webp" required
-                                   class="block w-full text-sm text-gray-600 file:me-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:cursor-pointer">
-                            <p class="text-xs text-gray-400 mt-2">{{ __('app.profile.brand_image_rules') }}</p>
+                            {{-- Picking a file uploads and saves it straight away (script below);
+                                 the submit button is only the no-JavaScript fallback. --}}
+                            <input type="file" name="logo" id="logo-input" accept="image/jpeg,image/png,image/webp" required class="ls-sr">
+                            <label for="logo-input" id="logo-pick" class="ls-btn ls-btn--secondary" style="cursor: pointer" tabindex="0"
+                                   onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); document.getElementById('logo-input').click(); }">
+                                <x-ui.icon name="upload" />
+                                <span>{{ $owner->logoUrl() ? __('app.profile.change_image') : __('app.profile.choose_image') }}</span>
+                            </label>
+                            <p class="text-xs text-gray-400 mt-2" id="logo-status" aria-live="polite">{{ __('app.profile.brand_image_rules') }}</p>
+                            <p class="ls-error mt-2" id="logo-error" role="alert" hidden></p>
 
-                            <div class="flex items-center gap-3 mt-4">
-                                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
-                                    {{ __('app.profile.upload_image') }}
-                                </button>
-                            </div>
+                            <noscript>
+                                <button type="submit" class="ls-btn ls-btn--primary mt-3">{{ __('app.profile.upload_image') }}</button>
+                            </noscript>
                         </div>
                     </form>
 
@@ -161,17 +166,37 @@
     </div>
 
     <script>
-        // Preview the picked file before it is uploaded.
-        document.getElementById('logo-input').addEventListener('change', function () {
-            const file = this.files[0];
-            if (!file) return;
+        // Choose a file → check it → preview → upload and save at once.
+        // The server re-validates (type + 2 MB) and replies with the usual message.
+        (function () {
+            const input = document.getElementById('logo-input');
+            const pick = document.getElementById('logo-pick');
+            const status = document.getElementById('logo-status');
+            const error = document.getElementById('logo-error');
+            @php $logoText = ['uploading' => __('app.profile.uploading'), 'tooBig' => __('app.profile.image_too_big'), 'wrongType' => __('app.profile.image_wrong_type')]; @endphp
+            const T = @json($logoText);
+            const types = ['image/jpeg', 'image/png', 'image/webp'];
 
-            const preview = document.getElementById('logo-preview');
-            const placeholder = preview.previousElementSibling;
+            input.addEventListener('change', function () {
+                const file = this.files[0];
+                error.hidden = true;
+                if (!file) return;
 
-            preview.src = URL.createObjectURL(file);
-            preview.classList.remove('hidden');
-            if (placeholder) placeholder.classList.add('hidden');
-        });
+                if (!types.includes(file.type)) { error.textContent = T.wrongType; error.hidden = false; this.value = ''; return; }
+                if (file.size > 2 * 1024 * 1024) { error.textContent = T.tooBig; error.hidden = false; this.value = ''; return; }
+
+                const preview = document.getElementById('logo-preview');
+                const placeholder = preview.previousElementSibling;
+                preview.src = URL.createObjectURL(file);
+                preview.classList.remove('hidden');
+                if (placeholder) placeholder.classList.add('hidden');
+
+                status.textContent = T.uploading;
+                pick.classList.add('is-loading');
+                pick.style.pointerEvents = 'none';
+                pick.setAttribute('aria-busy', 'true');
+                this.form.submit();
+            });
+        })();
     </script>
 @endsection

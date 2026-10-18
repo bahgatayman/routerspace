@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    /*
+     * Google Maps (Create Workspace location picker). A BROWSER key: it is sent
+     * to the page, so restrict it in Google Cloud to your site's HTTP referrers
+     * and to "Maps JavaScript API" + "Places API (New)" (+ "Geocoding API" for
+     * "Use my current location"). Leave empty to hide the map picker; manual
+     * address entry always works. map_id is optional.
+     */
+    'google_maps' => [
+        'key' => env('GOOGLE_MAPS_API_KEY'),
+        'map_id' => env('GOOGLE_MAPS_MAP_ID'),
+    ],
+
 ];

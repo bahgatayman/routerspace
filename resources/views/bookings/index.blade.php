@@ -58,7 +58,13 @@
     @endphp
 
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        @if ($bookings->isEmpty())
+        @if ($bookings->isEmpty() && ! $status && ! $date && ! $roomId)
+            {{-- First use: explain bookings vs live sessions and point to both real workflows. --}}
+            <x-ui.empty-state illustration="calendar" :title="__('app.onboarding.empty.bookings_title')" :text="__('app.onboarding.empty.bookings_text')">
+                <x-ui.button variant="primary" icon="plus" href="/bookings/create">{{ __('app.booking.new_booking') }}</x-ui.button>
+                <x-ui.button href="/active-sessions">{{ __('app.onboarding.empty.bookings_sessions') }}</x-ui.button>
+            </x-ui.empty-state>
+        @elseif ($bookings->isEmpty())
             <div class="p-12 text-center">
                 <p class="text-gray-400 text-sm">{{ __('app.empty.no_bookings') }}</p>
                 <a href="/bookings/create" class="text-blue-600 hover:underline text-sm font-medium mt-2 inline-block">{{ __('app.booking.new_booking') }}</a>

@@ -78,10 +78,10 @@ class PlanCustomizationTest extends TestCase
         $owner = $this->owner($this->plan(['max_workspaces' => 1, 'features' => ['workspace']]));
         $owner->enableFeature('workspace');
 
-        $this->actingAs($owner, 'owner')->post('/workspaces', ['name' => 'Branch 1'])->assertRedirect();
+        $this->actingAs($owner, 'owner')->post('/workspaces', ['name' => 'Branch 1', 'address' => '1 Main St', 'city' => 'Cairo', 'phone' => '01012345678'])->assertRedirect();
         $this->assertSame(1, $owner->workspaces()->count());
 
-        $this->actingAs($owner, 'owner')->post('/workspaces', ['name' => 'Branch 2'])->assertSessionHas('error');
+        $this->actingAs($owner, 'owner')->post('/workspaces', ['name' => 'Branch 2', 'address' => '2 Main St', 'city' => 'Cairo', 'phone' => '01012345678'])->assertSessionHas('error');
         $this->assertSame(1, $owner->workspaces()->count());
     }
 

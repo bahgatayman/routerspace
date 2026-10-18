@@ -28,15 +28,21 @@ class RoomImage extends Model
         return $this->belongsTo(Room::class);
     }
 
+    /**
+     * Built with asset() (like Owner::logoUrl()) rather than Storage::url(): the
+     * latter hard-codes APP_URL, so on any other host/port (e.g. `artisan serve`
+     * on :8000 with APP_URL=http://localhost) every room photo came back broken.
+     * asset() follows the host the request actually came in on.
+     */
     public function url(): string
     {
-        return Storage::disk('public')->url($this->path);
+        return asset('storage/'.$this->path);
     }
 
     /** Falls back to the full image when no thumbnail was generated (e.g. GD unavailable at upload time). */
     public function thumbnailUrl(): string
     {
-        return Storage::disk('public')->url($this->thumbnail_path ?? $this->path);
+        return asset('storage/'.($this->thumbnail_path ?? $this->path));
     }
 
     /** Deletes the stored files first, then the row — call instead of plain delete() to avoid orphaned files. */
