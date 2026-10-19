@@ -21,5 +21,5 @@
     @csrf
     @if ($method !== 'POST') @method($method) @endif
     @if ($method === 'POST')<input type="hidden" name="owner_id" value="{{ $owner->id }}">@endif
-    @include('coupons._form', ['cancelUrl' => $coupon->exists ? route('admin.coupons.show', $coupon->id) : route('admin.coupons.index')])
+    @include('coupons._form', ['cancelUrl' => $coupon->exists ? route('admin.coupons.show', $coupon->id) : route('admin.business.coupons', $owner->id)])
 </form>

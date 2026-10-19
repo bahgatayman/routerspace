@@ -152,7 +152,7 @@ class CouponController extends Controller
 
         $this->audit->log('coupon.deleted', $owner, __('app.coupons.admin.audit_deleted', ['code' => $code]), ['code' => $code]);
 
-        return redirect()->route('admin.coupons.index')->with('success', __('app.coupons.deleted'));
+        return redirect()->route('admin.business.coupons', $owner->id)->with('success', __('app.coupons.deleted'));
     }
 
     /** @return Collection<int, Owner> */

@@ -12,7 +12,7 @@
 
 @section('content')
 <div class="ls-adm">
-    <a href="{{ route('admin.coupons.index') }}" class="ls-biz-back">&larr; {{ $a('back') }}</a>
+    <a href="{{ $coupon->owner_id ? route('admin.business.coupons', $coupon->owner_id) : route('admin.coupons.index') }}" class="ls-biz-back">&larr; {{ $a('back') }}</a>
 
     <header class="ls-page-head ls-adm-head">
         <div>

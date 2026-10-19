@@ -40,7 +40,7 @@ class RoomController extends Controller
         $dir = $request->query('dir') === 'asc' ? 'asc' : 'desc';
         $inPeriod = fn ($q) => $q->whereDate('booking_date', '>=', $period->startDate())->whereDate('booking_date', '<=', $period->endDate());
 
-        $rooms = Room::with(['owner:id,business_name,name', 'workspace:id,name'])
+        $rooms = Room::with(['owner:id,business_name,name', 'workspace:id,name', 'images'])
             ->withCount(['bookings as period_bookings' => fn ($q) => $inPeriod($q)->countsTowardGbv()])
             ->withSum(['bookings as period_earnings' => fn ($q) => $inPeriod($q)->revenueRecognised()], 'amount_paid')
             ->when($search !== '', fn ($q) => $q->where('name', 'like', '%'.str_replace(['%', '_'], ['\%', '\_'], $search).'%'))

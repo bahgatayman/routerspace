@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\Concerns\ResolvesPeriod;
 use App\Http\Controllers\Controller;
 use App\Models\AdminAuditLog;
 use App\Models\Booking;
+use App\Models\Coupon;
 use App\Models\Owner;
 use App\Models\Product;
 use App\Models\Room;
@@ -246,6 +247,31 @@ class BusinessController extends Controller
             'byRoom' => $revenue->revenueByRoom($owner, $period),
             'byProduct' => array_slice($revenue->revenueByProduct($owner, $period), 0, 10),
             'byCategory' => $expenses->expensesByCategory($owner, $period),
+        ]);
+    }
+
+    /** This business's coupons (managed through the existing Admin\CouponController pages). */
+    public function coupons(Request $request, int $owner): View
+    {
+        $owner = $this->owner($owner);
+        $statuses = ['active', 'inactive', 'scheduled', 'expired', 'limit_reached'];
+        $status = in_array($request->query('status'), $statuses, true) ? $request->query('status') : null;
+
+        $coupons = Coupon::where('owner_id', $owner->id)
+            ->withCount(['usages', 'rooms', 'products'])
+            ->when($status, fn ($q) => $q->withStatus($status))
+            ->orderByDesc('created_at')
+            ->paginate(24)->withQueryString();
+
+        $counts = collect($statuses)->mapWithKeys(fn ($s) => [$s => Coupon::where('owner_id', $owner->id)->withStatus($s)->count()]);
+
+        return view('admin.business.coupons', [
+            'owner' => $owner,
+            'workspace' => null,
+            'coupons' => $coupons,
+            'status' => $status,
+            'counts' => $counts,
+            'total' => Coupon::where('owner_id', $owner->id)->count(),
         ]);
     }
 

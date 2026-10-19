@@ -67,6 +67,7 @@
         ['label' => __('app.ui.nav_group.admin'), 'items' => [
             ['show' => ! $actingStaff, 'href' => '/staff', 'active' => request()->is('staff*'), 'icon' => 'team', 'label' => __('app.nav.staff')],
             ['show' => $can('settings.view'), 'href' => '/settings', 'active' => request()->is('settings*'), 'icon' => 'gear', 'label' => __('app.nav.settings')],
+            ['show' => true, 'href' => '/feedback', 'active' => false, 'icon' => 'star', 'label' => __('app.feedback.page_title')],
         ]],
     ];
     $who = $actingStaff->name ?? $owner->name ?? $owner->business_name;

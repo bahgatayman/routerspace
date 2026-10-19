@@ -108,10 +108,22 @@ class AdminCouponManagementTest extends TestCase
         $this->assertSame(0, AdminAuditLog::count());
     }
 
-    public function test_admin_navigation_links_to_coupons(): void
+    public function test_coupons_live_in_the_business_tabs_not_the_sidebar(): void
     {
-        $this->as($this->admin, 'admin')->get('/admin/coupons')->assertOk()
-            ->assertSee('href="'.route('admin.coupons.index').'"', false);
+        $alpha = $this->owner('Alpha');
+        $bravo = $this->owner('Bravo');
+        $this->coupon($alpha, 'ALPHA10');
+        $this->coupon($bravo, 'BRAVO10');
+        $this->as($this->admin, 'admin');
+
+        $this->get('/admin/dashboard')->assertOk()->assertDontSee('href="'.route('admin.coupons.index').'"', false);
+        $this->get('/admin/owners/'.$alpha->id)->assertOk()->assertSee('href="/admin/owners/'.$alpha->id.'/coupons"', false);
+
+        $this->get('/admin/owners/'.$alpha->id.'/coupons')->assertOk()
+            ->assertSee('ALPHA10')->assertDontSee('BRAVO10')
+            ->assertSee(route('admin.coupons.create', ['owner' => $alpha->id]), false);
+        $this->get('/admin/owners/'.$alpha->id.'/coupons?status=inactive')->assertOk()->assertDontSee('ALPHA10');
+        $this->get('/admin/owners/999999/coupons')->assertNotFound();
     }
 
     // ------------------------------------------------------------------ list + detail
@@ -232,7 +244,7 @@ class AdminCouponManagementTest extends TestCase
         $this->delete("/admin/coupons/{$used->id}")->assertRedirect()->assertSessionHas('error', __('app.coupons.delete_blocked'));
         $this->assertNotNull($used->fresh());
 
-        $this->delete("/admin/coupons/{$unused->id}")->assertRedirect(route('admin.coupons.index'));
+        $this->delete("/admin/coupons/{$unused->id}")->assertRedirect(route('admin.business.coupons', $alpha->id));
         $this->assertNull($unused->fresh());
         $this->assertSame(['coupon.deleted', 'coupon.toggled'], AdminAuditLog::orderBy('action')->pluck('action')->all());
     }

@@ -2452,3 +2452,72 @@ html[dir="rtl"] .ls-ws-back-icon { transform: none; }
   .ls-wsd-sort { width: 100%; justify-content: space-between; }
 }
 @media (prefers-reduced-motion: reduce) { .ls-wsd-card, .ls-wsd-go { transition: none; } .ls-wsd-card:hover { transform: none; } }
+
+/* Admin → Feedback: rating distribution, response list, detail page. */
+.ls-akpi-value.is-danger { color: var(--color-danger); }
+.ls-fbd-avg { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; }
+.ls-fbd-avg b { font-size: 34px; font-weight: var(--fw-strong); line-height: 1; color: var(--color-text); }
+.ls-fbd-avg small { font-size: 12.5px; color: var(--color-text-muted); }
+.ls-fbd-stars { display: inline-flex; gap: 2px; }
+.ls-fbd-stars .ls-icon, .ls-fb-rating .ls-icon, .ls-fbd-label .ls-icon { width: 16px; height: 16px; fill: var(--color-border); stroke: var(--color-border-strong); stroke-width: 1; }
+.ls-fbd-stars .ls-icon.is-on, .ls-fb-rating .ls-icon.is-on, .ls-fbd-label .ls-icon.is-on { fill: #f5b301; stroke: #e0a100; }
+.ls-fbd-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ls-fbd-row { display: grid; grid-template-columns: 44px 1fr 44px 48px; align-items: center; gap: var(--space-3); padding: 5px 6px; border-radius: 8px; color: var(--color-text); text-decoration: none; }
+.ls-fbd-row:hover { background: var(--color-surface-subtle); }
+.ls-fbd-label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: var(--fw-medium); }
+.ls-fbd-label .ls-icon { width: 13px; height: 13px; }
+.ls-fbd-track { height: 10px; border-radius: 999px; background: var(--color-surface-subtle); overflow: hidden; }
+.ls-fbd-fill { display: block; height: 100%; border-radius: 999px; background: var(--chart-c1, var(--color-primary)); min-width: 2px; }
+.ls-fbd-fill.is-1, .ls-fbd-fill.is-2 { background: var(--color-danger); }
+.ls-fbd-fill.is-3 { background: var(--color-warning); }
+.ls-fbd-n { font-size: 13px; font-weight: var(--fw-strong); text-align: end; }
+.ls-fbd-pct { font-size: 12px; color: var(--color-text-muted); text-align: end; }
+.ls-fbd-score { font-weight: var(--fw-strong); }
+.ls-fbd-score.is-low { color: var(--color-danger); }
+.ls-fbd-score.is-high { color: var(--color-success); }
+
+.ls-fb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.ls-fb-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-4); align-items: start; padding: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; }
+.ls-fb-item.is-new { border-inline-start: 3px solid var(--color-primary); background: linear-gradient(90deg, var(--color-accent-soft), var(--color-surface) 30%); }
+[dir="rtl"] .ls-fb-item.is-new { background: linear-gradient(270deg, var(--color-accent-soft), var(--color-surface) 30%); }
+.ls-fb-rating { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 40px; padding: 6px 4px; border-radius: 10px; background: var(--color-surface-subtle); }
+.ls-fb-rating b { font-size: 18px; line-height: 1; color: var(--color-text); }
+.ls-fb-main { display: grid; gap: 6px; min-width: 0; }
+.ls-fb-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ls-fb-dot { font-size: 11px; font-weight: var(--fw-strong); color: var(--color-on-primary, #fff); background: var(--color-primary); padding: 2px 8px; border-radius: 999px; }
+.ls-fb-area { font-size: 12px; color: var(--color-text-secondary); background: var(--color-surface-subtle); padding: 2px 8px; border-radius: 999px; }
+.ls-fb-msg { font-size: 14px; line-height: 1.55; color: var(--color-text); text-decoration: none; overflow-wrap: anywhere; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ls-fb-msg:hover { color: var(--color-primary); }
+html[dir="ltr"] .ls-fb-msg, html[dir="ltr"] .ls-fbs-text { text-align: left; }
+html[dir="rtl"] .ls-fb-msg, html[dir="rtl"] .ls-fbs-text { text-align: right; } /* dir=auto keeps each message's own punctuation, alignment follows the page */
+.ls-fb-meta { display: flex; flex-wrap: wrap; gap: 4px; font-size: 12px; color: var(--color-text-muted); }
+.ls-fb-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
+
+.ls-fbs { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: var(--space-4); align-items: start; }
+.ls-fbs-body { display: grid; gap: var(--space-4); }
+.ls-fbs-rating { display: flex; align-items: center; gap: var(--space-3); }
+.ls-fbs-rating .ls-icon { width: 22px; height: 22px; }
+.ls-fbs-rating b { font-size: 15px; }
+.ls-fbs-text { font-size: 15px; line-height: 1.7; color: var(--color-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ls-fbs-details { padding: var(--space-3) var(--space-4); border-radius: 10px; background: var(--color-surface-subtle); display: grid; gap: 4px; }
+.ls-fbs-k { font-size: 12.5px; font-weight: var(--fw-medium); color: var(--color-text-secondary); }
+.ls-fbs-facts { margin: 0; display: grid; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--color-border-subtle); }
+.ls-fbs-facts dt { font-size: 12px; color: var(--color-text-muted); }
+.ls-fbs-facts dd { margin: 2px 0 0; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; font-size: 14px; }
+.ls-fbs-form { display: grid; gap: var(--space-4); }
+.ls-fbs-reviewed { font-size: 12.5px; margin: 0; }
+@media (max-width: 900px) { .ls-fbs { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .ls-fb-item { grid-template-columns: auto minmax(0, 1fr); }
+  .ls-fb-side { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; align-items: center; }
+  .ls-fbd-row { grid-template-columns: 40px 1fr 36px 44px; gap: var(--space-2); }
+}
+
+/* Admin → Rooms: which business a room belongs to (on the shared room card). */
+.ls-adm-room-biz { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: -2px; font-size: 12.5px; font-weight: var(--fw-medium); color: var(--color-text-secondary); text-decoration: none; }
+.ls-adm-room-biz span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ls-adm-room-biz .ls-icon { width: 14px; height: 14px; flex: none; color: var(--color-text-muted); }
+.ls-adm-room-biz:hover { color: var(--color-primary); }
+
+/* Admin → business → Coupons tab: status chips + create button on one row. */
+.ls-biz-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }

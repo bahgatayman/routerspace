@@ -42,6 +42,8 @@
     @php
         $navItem = fn (bool $active) => 'flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/10 transition '.($active ? 'bg-white/10 border-l-4 border-red-500' : '');
         $pendingRenewals = \App\Models\SubscriptionRequest::pending()->count();
+        // Guarded so admin pages keep working on a server where the feedback migration hasn't run yet.
+        $newFeedback = \Illuminate\Support\Facades\Schema::hasTable('feedback') ? \App\Models\Feedback::where('status', 'new')->count() : 0;
     @endphp
     <div class="app-shell flex flex-col lg:flex-row">
         <!-- Mobile header -->
@@ -87,18 +89,20 @@
                     </svg>
                     <span>{{ __('app.nav.notifications') }}</span>
                 </a>
+                <a href="{{ route('admin.feedback.index') }}" class="{{ $navItem(request()->is('admin/feedback*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.48 3.5a.56.56 0 011.04 0l2.13 5.1 5.5.44c.5.04.7.66.32.99l-4.19 3.59 1.28 5.37a.56.56 0 01-.84.61L12 16.73l-4.72 2.87a.56.56 0 01-.84-.61l1.28-5.37-4.19-3.6a.56.56 0 01.32-.98l5.5-.44 2.13-5.1z"/>
+                    </svg>
+                    <span class="flex-1">{{ __('app.feedback.admin.nav') }}</span>
+                    @if ($newFeedback > 0)
+                        <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold text-white bg-red-500 rounded-full">{{ $newFeedback }}</span>
+                    @endif
+                </a>
                 <a href="/admin/features" class="{{ $navItem(request()->is('admin/features*')) }}">
                     <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
                     </svg>
                     <span>{{ __('app.nav.features') }}</span>
-                </a>
-                <a href="/admin/locations" class="{{ $navItem(request()->is('admin/locations*')) }}">
-                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-                    </svg>
-                    <span>{{ __('app.admin_platform.nav.locations') }}</span>
                 </a>
                 <a href="/admin/rooms" class="{{ $navItem(request()->is('admin/rooms*')) }}">
                     <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -117,12 +121,6 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
                     </svg>
                     <span>{{ __('app.nav.plans') }}</span>
-                </a>
-                <a href="{{ route('admin.coupons.index') }}" class="{{ $navItem(request()->is('admin/coupons*')) }}">
-                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
-                    </svg>
-                    <span>{{ __('app.coupons.admin.title') }}</span>
                 </a>
                 <a href="{{ route('admin.subscription-requests.index') }}" class="{{ $navItem(request()->is('admin/subscription-requests*')) }}">
                     <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">

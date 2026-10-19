@@ -8,7 +8,7 @@
     $height = $height ?? 260;
     $total = collect($spec['datasets'])->flatMap(fn ($d) => $d['data'])->sum(fn ($v) => abs((float) $v));
     $isEmpty = $total == 0;
-    $fmtCell = fn ($v) => ($spec['money'] ?? false) ? number_format((float) $v, 2) : number_format((float) $v);
+    $fmtCell = fn ($v) => $v === null ? '—' : (($spec['money'] ?? false) ? number_format((float) $v, 2) : number_format((float) $v, floor((float) $v) == (float) $v ? 0 : 2));
 @endphp
 {{--
     The CDN tag is emitted inline via a shared @once id (not pushed to the

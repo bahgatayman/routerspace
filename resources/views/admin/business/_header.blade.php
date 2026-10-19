@@ -14,6 +14,7 @@
         'products' => ['href' => $base.'/products', 'label' => __('app.admin_biz.tabs.products')],
         'rooms' => ['href' => $base.'/rooms', 'label' => __('app.admin_biz.tabs.rooms')],
         'bookings' => ['href' => $base.'/bookings', 'label' => __('app.admin_biz.tabs.bookings')],
+        'coupons' => ['href' => $base.'/coupons', 'label' => __('app.admin_biz.tabs.coupons')],
         'financials' => ['href' => $base.'/financials', 'label' => __('app.admin_biz.tabs.financials')],
         'members' => ['href' => $base.'/users', 'label' => __('app.admin_biz.tabs.members')],
         'subscription' => ['href' => $base.'/subscription', 'label' => __('app.admin_biz.tabs.subscription')],

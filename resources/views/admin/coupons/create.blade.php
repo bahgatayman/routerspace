@@ -6,7 +6,7 @@
 
 @section('content')
 <div class="ls-adm ls-adm-narrow">
-    <a href="{{ route('admin.coupons.index') }}" class="ls-biz-back">&larr; {{ __('app.coupons.admin.back') }}</a>
+    <a href="{{ $owner ? route('admin.business.coupons', $owner->id) : url('/admin/workspaces') }}" class="ls-biz-back">&larr; {{ __('app.coupons.admin.back') }}</a>
     <h1 class="ls-title">{{ __('app.coupons.add') }}</h1>
 
     @if (! $owner)

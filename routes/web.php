@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\BusinessController as AdminBusinessController;
 use App\Http\Controllers\Admin\CouponController as AdminCouponController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\FeatureController;
+use App\Http\Controllers\Admin\FeedbackController as AdminFeedbackController;
 use App\Http\Controllers\Admin\FinancialController;
 use App\Http\Controllers\Admin\NotificationController as AdminNotificationController;
 use App\Http\Controllers\Admin\OwnerController;
@@ -26,6 +27,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DemoRequestController;
 use App\Http\Controllers\ExpenseCategoryController;
 use App\Http\Controllers\ExpenseController;
+use App\Http\Controllers\FeedbackController;
 use App\Http\Controllers\FinancialController as OwnerFinancialController;
 use App\Http\Controllers\HotspotUserController;
 use App\Http\Controllers\LanguageController;
@@ -56,6 +58,12 @@ Route::get('/', function () {
 Route::post('/demo-request', [DemoRequestController::class, 'send'])->name('demo.request');
 
 Route::post('/language/{locale}', [LanguageController::class, 'switch'])->name('language.switch');
+
+// Public platform feedback (no login). The old misspelt link keeps working.
+Route::get('/feedback', [FeedbackController::class, 'create'])->name('feedback.create');
+Route::post('/feedback', [FeedbackController::class, 'store'])->name('feedback.store');
+Route::permanentRedirect('/submityourfeesback', '/feedback');
+Route::permanentRedirect('/submityourfeedback', '/feedback');
 
 // ===================== Owner Auth =====================
 Route::middleware('guest:owner')->group(function () {
@@ -415,6 +423,7 @@ Route::middleware('auth:admin')->prefix('admin')->group(function () {
     Route::get('/owners/{owner}/bookings', [AdminBusinessController::class, 'bookings'])->whereNumber('owner')->name('admin.business.bookings');
     Route::get('/owners/{owner}/financials', [AdminBusinessController::class, 'financials'])->whereNumber('owner')->name('admin.business.financials');
     Route::get('/owners/{owner}/activity', [AdminBusinessController::class, 'activity'])->whereNumber('owner')->name('admin.business.activity');
+    Route::get('/owners/{owner}/coupons', [AdminBusinessController::class, 'coupons'])->whereNumber('owner')->name('admin.business.coupons');
     Route::put('/owners/{owner}/toggle-active', [OwnerController::class, 'toggleActive']);
     Route::get('/owners/{owner}/users', [OwnerController::class, 'users']);
 
@@ -428,6 +437,11 @@ Route::middleware('auth:admin')->prefix('admin')->group(function () {
     // Admin → Owner notifications (broadcast)
     Route::get('/notifications', [AdminNotificationController::class, 'index'])->name('admin.notifications.index');
     Route::post('/notifications', [AdminNotificationController::class, 'store'])->name('admin.notifications.store');
+
+    // Platform feedback from the public /feedback page
+    Route::get('/feedback', [AdminFeedbackController::class, 'index'])->name('admin.feedback.index');
+    Route::get('/feedback/{feedback}', [AdminFeedbackController::class, 'show'])->whereNumber('feedback')->name('admin.feedback.show');
+    Route::put('/feedback/{feedback}', [AdminFeedbackController::class, 'update'])->whereNumber('feedback')->name('admin.feedback.update');
 
     // Admin Feature Management
     Route::get('/features', [FeatureController::class, 'index']);
