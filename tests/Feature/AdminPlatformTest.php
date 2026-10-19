@@ -235,6 +235,24 @@ class AdminPlatformTest extends TestCase
         $this->asAdmin()->get('/admin/owners')->assertRedirect('/admin/workspaces');
     }
 
+    public function test_workspace_directory_renders_one_card_per_business_with_sort_menu(): void
+    {
+        [$a] = $this->seedPlatform();
+        $this->business('Delta Expired', null, now()->subDays(2));
+
+        $html = $this->asAdmin()->get('/admin/workspaces?preset=this_month&sort=earnings&dir=desc')->assertOk()
+            ->assertSee('href="/admin/owners/'.$a->id.'"', false)
+            ->assertSee($a->email)
+            ->assertSee(__('app.admin_platform.ws_card.sort.earnings_desc'))
+            ->assertSee('class="ls-wsd-card is-expired"', false)
+            ->assertSee(__('app.btn.add_owner'))
+            ->getContent();
+
+        $this->assertSame(3, substr_count($html, 'class="ls-wsd-card '));
+        // The current sort is pre-selected in the menu.
+        $this->assertMatchesRegularExpression('/sort=earnings&amp;dir=desc[^>]*selected/', $html);
+    }
+
     // ------------------------------------------------------------------ business tabs + isolation
 
     public function test_business_tabs_show_only_that_business(): void

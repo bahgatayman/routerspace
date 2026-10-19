@@ -8,6 +8,16 @@
     $statusTone = ['active' => 'ok', 'expiring_soon' => 'warn', 'expired' => 'danger', 'disabled' => 'danger', 'never' => 'neutral'];
     $chip = fn (?string $s) => request()->fullUrlWithQuery(['status' => $s, 'page' => null]);
     $hasFilters = request()->hasAny(['q', 'status', 'plan', 'joined_from', 'joined_to', 'preset']);
+    $moreOpen = filled($filters['joined_from']) || filled($filters['joined_to']);
+
+    // "Sort by" replaces the old sortable table headers: same sort/dir query params.
+    $sortOptions = collect(['created_desc', 'created_asc', 'name_asc', 'earnings_desc', 'bookings_desc', 'activity_desc', 'expires_asc', 'rooms_desc'])
+        ->mapWithKeys(function ($o) {
+            [$key, $dir] = explode('_', $o);
+
+            return [$o => ['url' => request()->fullUrlWithQuery(['sort' => $key, 'dir' => $dir, 'page' => null]), 'on' => false]];
+        });
+    $currentSort = $sort.'_'.$dir;
 @endphp
 
 @section('content')
@@ -18,7 +28,7 @@
             <p class="ls-subtitle">{{ $t('directory_sub') }}</p>
         </div>
         <div class="ls-actions">
-            <x-ui.button variant="primary" icon="plus" href="/admin/owners/create">{{ __('app.admin.add_owner') }}</x-ui.button>
+            <x-ui.button variant="primary" icon="plus" href="/admin/owners/create">{{ __('app.btn.add_owner') }}</x-ui.button>
         </div>
     </header>
 
@@ -29,91 +39,134 @@
         @endforeach
     </nav>
 
-    <form method="GET" class="ls-adm-filters" aria-label="{{ $t('filters') }}">
+    <form method="GET" class="ls-wsd-filters" aria-label="{{ $t('filters') }}">
         @if ($filters['status'])<input type="hidden" name="status" value="{{ $filters['status'] }}">@endif
-        <div class="ls-field ls-filter-field ls-filter-field--grow">
-            <label class="ls-label" for="f-q">{{ __('app.common.search') }}</label>
-            <div class="ls-search">
-                <x-ui.icon name="search" />
-                <input id="f-q" type="search" name="q" value="{{ $filters['q'] }}" class="ls-input" placeholder="{{ $t('search_ws') }}" autocomplete="off">
+        <input type="hidden" name="sort" value="{{ $sort }}"><input type="hidden" name="dir" value="{{ $dir }}">
+        <div class="ls-wsd-filter-row">
+            <div class="ls-field ls-filter-field ls-wsd-search">
+                <label class="ls-label" for="f-q">{{ __('app.common.search') }}</label>
+                <div class="ls-search">
+                    <x-ui.icon name="search" />
+                    <input id="f-q" type="search" name="q" value="{{ $filters['q'] }}" class="ls-input" placeholder="{{ $t('search_ws') }}" autocomplete="off">
+                </div>
+            </div>
+            <div class="ls-field ls-filter-field">
+                <label class="ls-label" for="f-plan">{{ __('app.nav.plans') }}</label>
+                <select id="f-plan" name="plan" class="ls-select">
+                    <option value="">{{ $t('all_plans') }}</option>
+                    @foreach ($plans as $p)<option value="{{ $p->id }}" @selected($filters['plan'] === $p->id)>{{ $p->name }}</option>@endforeach
+                </select>
+            </div>
+            @include('admin.partials.period', $range)
+            <div class="ls-filter-actions">
+                <button type="submit" class="ls-btn ls-btn--primary">{{ $t('apply') }}</button>
+                @if ($hasFilters)<a href="/admin/workspaces" class="ls-btn ls-btn--ghost">{{ $t('reset') }}</a>@endif
             </div>
         </div>
-        <div class="ls-field ls-filter-field">
-            <label class="ls-label" for="f-plan">{{ __('app.nav.plans') }}</label>
-            <select id="f-plan" name="plan" class="ls-select">
-                <option value="">{{ $t('all_plans') }}</option>
-                @foreach ($plans as $p)<option value="{{ $p->id }}" @selected($filters['plan'] === $p->id)>{{ $p->name }}</option>@endforeach
-            </select>
-        </div>
-        <div class="ls-field ls-filter-field">
-            <label class="ls-label" for="f-jf">{{ $t('joined_from') }}</label>
-            <input id="f-jf" type="date" name="joined_from" value="{{ $filters['joined_from'] }}" class="ls-input" dir="ltr">
-        </div>
-        <div class="ls-field ls-filter-field">
-            <label class="ls-label" for="f-jt">{{ $t('joined_to') }}</label>
-            <input id="f-jt" type="date" name="joined_to" value="{{ $filters['joined_to'] }}" class="ls-input" dir="ltr">
-        </div>
-        @include('admin.partials.period', $range)
-        <div class="ls-filter-actions">
-            <button type="submit" class="ls-btn ls-btn--primary">{{ $t('apply') }}</button>
-            @if ($hasFilters)<a href="/admin/workspaces" class="ls-btn ls-btn--ghost">{{ $t('reset') }}</a>@endif
-        </div>
+        <details class="ls-wsd-more" @if ($moreOpen) open @endif>
+            <summary>{{ $t('ws_card.more_filters') }}</summary>
+            <div class="ls-wsd-filter-row">
+                <div class="ls-field ls-filter-field">
+                    <label class="ls-label" for="f-jf">{{ $t('joined_from') }}</label>
+                    <input id="f-jf" type="date" name="joined_from" value="{{ $filters['joined_from'] }}" class="ls-input" dir="ltr">
+                </div>
+                <div class="ls-field ls-filter-field">
+                    <label class="ls-label" for="f-jt">{{ $t('joined_to') }}</label>
+                    <input id="f-jt" type="date" name="joined_to" value="{{ $filters['joined_to'] }}" class="ls-input" dir="ltr">
+                </div>
+            </div>
+        </details>
     </form>
 
-    <section class="ls-card" aria-label="{{ $t('nav.workspaces') }}">
-        @if ($owners->isEmpty())
+    @if ($owners->isEmpty())
+        <section class="ls-card">
             <x-ui.empty-state :title="$hasFilters ? $t('no_match') : $t('no_workspaces')" :text="$hasFilters ? $t('no_match_text') : null">
                 @if ($hasFilters)<a href="/admin/workspaces" class="ls-btn ls-btn--secondary">{{ $t('reset') }}</a>@endif
             </x-ui.empty-state>
-        @else
-            <div class="ls-table-wrap">
-                <table class="ls-table ls-adm-table">
-                    <thead><tr>
-                        @include('admin.partials.sort', ['key' => 'name', 'label' => $t('col.workspace'), 'default' => 'asc'])
-                        <th scope="col">{{ __('app.common.status') }}</th>
-                        <th scope="col">{{ __('app.nav.plans') }}</th>
-                        @include('admin.partials.sort', ['key' => 'locations', 'label' => $t('nav.locations'), 'class' => 'is-num'])
-                        @include('admin.partials.sort', ['key' => 'rooms', 'label' => $t('nav.rooms'), 'class' => 'is-num'])
-                        @include('admin.partials.sort', ['key' => 'products', 'label' => $t('col.products'), 'class' => 'is-num'])
-                        @include('admin.partials.sort', ['key' => 'bookings', 'label' => $t('col.bookings_period'), 'class' => 'is-num'])
-                        @include('admin.partials.sort', ['key' => 'earnings', 'label' => $t('col.earnings_period'), 'class' => 'is-num'])
-                        @include('admin.partials.sort', ['key' => 'expires', 'label' => $t('col.expires'), 'default' => 'asc'])
-                        @include('admin.partials.sort', ['key' => 'activity', 'label' => $t('col.last_activity')])
-                        @include('admin.partials.sort', ['key' => 'created', 'label' => $t('col.joined')])
-                    </tr></thead>
-                    <tbody>
-                        @foreach ($owners as $o)
-                            @php $st = $o->subscriptionStatus(); @endphp
-                            <tr class="row-link" data-href="/admin/owners/{{ $o->id }}">
-                                <td>
-                                    <div class="ls-adm-ident">
-                                        <x-ui.avatar :name="$o->business_name ?: $o->name" size="sm" />
-                                        <span>
-                                            <a href="/admin/owners/{{ $o->id }}" class="ls-adm-ident-name">{{ $o->business_name ?: $o->name }}</a>
-                                            <small>#{{ $o->id }} · {{ $o->name }} · <bdi dir="ltr">{{ $o->email }}</bdi></small>
-                                        </span>
-                                    </div>
-                                </td>
-                                <td><x-ui.badge :tone="$statusTone[$st] ?? 'neutral'">{{ __('app.admin_biz.status.'.$st) }}</x-ui.badge></td>
-                                <td>{{ $o->plan?->name ?? '—' }}</td>
-                                <td class="is-num">{{ $o->locations_count }}</td>
-                                <td class="is-num">{{ $o->rooms_count }}</td>
-                                <td class="is-num">{{ $o->products_count }}</td>
-                                <td class="is-num">{{ number_format($o->period_bookings) }}</td>
-                                <td class="is-money">{{ Money::format((float) $o->booking_earnings + (float) $o->sales_earnings) }}</td>
-                                <td class="ls-nowrap">{{ $o->subscription_expires_at?->translatedFormat('M j, Y') ?? '—' }}</td>
-                                <td class="ls-nowrap ls-faint">{{ $o->last_booking_at ? \Carbon\Carbon::parse($o->last_booking_at)->diffForHumans() : '—' }}</td>
-                                <td class="ls-nowrap ls-faint">{{ $o->created_at?->translatedFormat('M j, Y') }}</td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-            <div class="ls-adm-pager">
-                <span class="ls-faint">{{ $t('showing', ['from' => $owners->firstItem(), 'to' => $owners->lastItem(), 'total' => $owners->total()]) }} · {{ $t('money_note_period') }}</span>
-                {{ $owners->onEachSide(1)->links('admin.partials.pager') }}
-            </div>
-        @endif
-    </section>
+        </section>
+    @else
+        <div class="ls-wsd-bar">
+            <span class="ls-faint">{{ $t('showing', ['from' => $owners->firstItem(), 'to' => $owners->lastItem(), 'total' => $owners->total()]) }}</span>
+            <label class="ls-wsd-sort">
+                <span>{{ __('app.workspace.sort_by') }}</span>
+                <select class="ls-select" onchange="location.href = this.value" aria-label="{{ __('app.workspace.sort_by') }}">
+                    @foreach ($sortOptions as $key => $o)
+                        <option value="{{ $o['url'] }}" @selected($currentSort === $key)>{{ $t('ws_card.sort.'.$key) }}</option>
+                    @endforeach
+                </select>
+            </label>
+        </div>
+
+        <div class="ls-wsd-grid" aria-label="{{ $t('nav.workspaces') }}">
+            @foreach ($owners as $o)
+                @php
+                    $st = $o->subscriptionStatus();
+                    $label = $o->business_name ?: $o->name;
+                    $logo = $o->logoUrl();
+                    $earned = (float) $o->booking_earnings + (float) $o->sales_earnings;
+                    $exp = $o->subscription_expires_at;
+                @endphp
+                <article class="ls-wsd-card is-{{ $st }}" aria-labelledby="ws-{{ $o->id }}">
+                    <div class="ls-wsd-top">
+                        @if ($logo)
+                            {{-- Falls back to the initials if the stored file is gone. --}}
+                            <img src="{{ $logo }}" alt="" class="ls-wsd-logo" loading="lazy" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
+                            <x-ui.avatar :name="$label" size="lg" hidden />
+                        @else
+                            <x-ui.avatar :name="$label" size="lg" />
+                        @endif
+                        <div class="ls-wsd-id">
+                            <a id="ws-{{ $o->id }}" href="/admin/owners/{{ $o->id }}" class="ls-wsd-name">{{ $label }}</a>
+                            <span class="ls-wsd-owner">#{{ $o->id }} · {{ $o->name }}</span>
+                            <bdi dir="ltr" class="ls-wsd-email" title="{{ $o->email }}">{{ $o->email }}</bdi>
+                        </div>
+                        <x-ui.badge :tone="$statusTone[$st] ?? 'neutral'">{{ __('app.admin_biz.status.'.$st) }}</x-ui.badge>
+                    </div>
+
+                    <div class="ls-wsd-plan">
+                        <span class="ls-wsd-plan-name"><x-ui.icon name="tag" />{{ $o->plan?->name ?? $t('ws_card.no_plan') }}</span>
+                        <span class="ls-wsd-exp is-{{ $st }}">
+                            @if (! $exp)
+                                {{ $t('ws_card.no_expiry') }}
+                            @elseif ($exp->isPast())
+                                {{ $t('ws_card.expired_on', ['date' => $exp->translatedFormat('M j, Y')]) }}
+                            @else
+                                {{ $t('ws_card.expires_on', ['date' => $exp->translatedFormat('M j, Y')]) }} · {{ $exp->diffForHumans(['parts' => 1]) }}
+                            @endif
+                        </span>
+                    </div>
+
+                    {{-- Value first, label under it: keeps 4 tiles readable on a narrow card. --}}
+                    <dl class="ls-wsd-stats">
+                        <div><dd class="ls-num">{{ number_format($o->locations_count) }}</dd><dt>{{ $t('nav.locations') }}</dt></div>
+                        <div><dd class="ls-num">{{ number_format($o->rooms_count) }}</dd><dt>{{ $t('nav.rooms') }}</dt></div>
+                        <div><dd class="ls-num">{{ number_format($o->products_count) }}</dd><dt>{{ $t('col.products') }}</dt></div>
+                        <div><dd class="ls-num">{{ number_format($o->members_count) }}</dd><dt>{{ __('app.common.members') }}</dt></div>
+                    </dl>
+
+                    <div class="ls-wsd-period-box">
+                        <span class="ls-wsd-period-label">{{ $t('ws_card.in_period') }}</span>
+                        <div class="ls-wsd-period-vals">
+                            <div><span>{{ $t('col.bookings_period') }}</span><b class="ls-num">{{ number_format($o->period_bookings) }}</b></div>
+                            <div><span>{{ $t('col.earnings_period') }}</span><b class="ls-num {{ $earned > 0 ? 'is-money' : '' }}">{{ Money::format($earned) }}</b></div>
+                        </div>
+                    </div>
+
+                    <footer class="ls-wsd-foot">
+                        <span>
+                            {{ $o->last_booking_at ? $t('ws_card.last_booking', ['when' => \Carbon\Carbon::parse($o->last_booking_at)->diffForHumans()]) : $t('ws_card.no_bookings') }}
+                            · {{ $t('ws_card.joined_on', ['date' => $o->created_at?->translatedFormat('M j, Y')]) }}
+                        </span>
+                        <x-ui.icon name="chevron-right" class="ls-wsd-go" />
+                    </footer>
+                </article>
+            @endforeach
+        </div>
+
+        <div class="ls-adm-pager">
+            <span class="ls-faint">{{ $t('money_note_period') }}</span>
+            {{ $owners->onEachSide(1)->links('admin.partials.pager') }}
+        </div>
+    @endif
 </div>
 @endsection

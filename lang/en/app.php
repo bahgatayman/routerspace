@@ -2719,6 +2719,22 @@ return [
         // Workspaces directory
         'directory_sub' => 'Every business on the platform — search, filter and open its full 360° view.',
         'search_ws' => 'Name, owner, email or #id',
+        'ws_card' => [
+            'more_filters' => 'More filters',
+            'no_plan' => 'No plan',
+            'no_expiry' => 'No subscription',
+            'expires_on' => 'Expires :date',
+            'expired_on' => 'Expired :date',
+            'in_period' => 'In this period',
+            'last_booking' => 'Last booking :when',
+            'no_bookings' => 'No bookings yet',
+            'joined_on' => 'Joined :date',
+            'sort' => [
+                'created_desc' => 'Newest first', 'created_asc' => 'Oldest first', 'name_asc' => 'Name (A–Z)',
+                'earnings_desc' => 'Highest earnings', 'bookings_desc' => 'Most bookings', 'activity_desc' => 'Recently active',
+                'expires_asc' => 'Expiring soonest', 'rooms_desc' => 'Most rooms',
+            ],
+        ],
         'joined_from' => 'Joined from',
         'joined_to' => 'Joined to',
         'no_workspaces' => 'No workspaces yet',

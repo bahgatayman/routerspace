@@ -2570,6 +2570,22 @@ return [
 
         'directory_sub' => 'كل الأنشطة على المنصة — ابحث وصفِّ وافتح العرض الكامل 360°.',
         'search_ws' => 'الاسم أو المالك أو البريد أو #الرقم',
+        'ws_card' => [
+            'more_filters' => 'فلاتر إضافية',
+            'no_plan' => 'بدون خطة',
+            'no_expiry' => 'بدون اشتراك',
+            'expires_on' => 'ينتهي :date',
+            'expired_on' => 'انتهى :date',
+            'in_period' => 'خلال هذه الفترة',
+            'last_booking' => 'آخر حجز :when',
+            'no_bookings' => 'لا توجد حجوزات بعد',
+            'joined_on' => 'انضم :date',
+            'sort' => [
+                'created_desc' => 'الأحدث أولاً', 'created_asc' => 'الأقدم أولاً', 'name_asc' => 'الاسم (أ–ي)',
+                'earnings_desc' => 'الأعلى أرباحًا', 'bookings_desc' => 'الأكثر حجوزات', 'activity_desc' => 'الأحدث نشاطًا',
+                'expires_asc' => 'الأقرب انتهاءً', 'rooms_desc' => 'الأكثر غرفًا',
+            ],
+        ],
         'joined_from' => 'انضم من',
         'joined_to' => 'انضم إلى',
         'no_workspaces' => 'لا توجد مساحات عمل بعد',
