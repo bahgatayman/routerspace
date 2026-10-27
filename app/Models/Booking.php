@@ -28,6 +28,9 @@ class Booking extends Model
 
     public const PAYMENT_PAID = 'paid';
 
+    /** Every status the state machine can hold — mirrors statusColor()'s match arms. For validating a status filter, not for display (use statusLabel()/statusBadgeClass() on an instance for that). */
+    public const STATUSES = ['pending', 'confirmed', 'checked_in', 'open', 'completed', 'cancelled', 'no_show'];
+
     protected $fillable = [
         'owner_id',
         'room_id',
