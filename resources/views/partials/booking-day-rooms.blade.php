@@ -56,9 +56,14 @@
     // the two columns can never drift out of sync with each other.
     $roomMeta = collect($dayRooms)->map(function ($entry) use ($laneHeight) {
         $room = $entry['room'];
-        $siblingUses = $room->isAdditionalUse()
-            ? collect([$room->physicalRoom])->concat($room->physicalRoom?->uses ?? collect())
-            : $room->uses;
+        // Guarded by method_exists(): the multi-use-room relationships
+        // aren't always present on Room (depends on migration state), and
+        // calling an undefined one throws rather than returning null.
+        $siblingUses = method_exists($room, 'isAdditionalUse')
+            ? ($room->isAdditionalUse()
+                ? collect([$room->physicalRoom])->concat($room->physicalRoom?->uses ?? collect())
+                : $room->uses)
+            : collect();
         $siblingUses = ($siblingUses ?? collect())->filter(fn ($r) => $r && $r->id !== $room->id);
         $laneCount = max(1, $entry['laneCount'] ?? 1);
         // 2 lines (name, type+live) always; a 3rd line only when the

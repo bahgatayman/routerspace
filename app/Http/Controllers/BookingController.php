@@ -1344,11 +1344,14 @@ class BookingController extends Controller
 
         // Unfiltered list for the filter dropdown, so picking a room doesn't
         // collapse the dropdown down to just that one option afterward.
-        // physicalRoom/uses are eager-loaded so the day-rooms partial can show
-        // "also bookable as" for a multi-use room without N+1 queries.
+        // physicalRoom/uses are eager-loaded — guarded by method_exists()
+        // because this repo's Room model doesn't always carry the
+        // multi-use-room relationships yet (depends on migration state);
+        // eager-loading an undefined relation throws immediately.
+        $supportsMultiUse = method_exists(Room::class, 'physicalRoom');
         $allRooms = Room::where('owner_id', $ownerId)
             ->where('is_available', true)
-            ->with(['workspace', 'physicalRoom.uses', 'uses'])
+            ->with($supportsMultiUse ? ['workspace', 'physicalRoom.uses', 'uses'] : ['workspace'])
             ->orderBy('name')
             ->get();
 
