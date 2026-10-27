@@ -1318,7 +1318,7 @@ class BookingController extends Controller
      * of booked/available data for day and week — this method only shapes
      * its output per room/day for the view, no capacity math of its own.
      */
-    public function calendar(Request $request, AvailabilityService $availability): View
+    public function calendar(Request $request, AvailabilityService $availability, BusinessHoursService $businessHours): View
     {
         $ownerId = TenantContext::id();
 
@@ -1332,13 +1332,23 @@ class BookingController extends Controller
         $roomId = $request->get('room_id');
         $workspaceId = $request->get('workspace_id');
 
+        // Display-only filter: narrows which bookings are LISTED, never what
+        // AvailabilityService considers busy — availability stays authoritative
+        // regardless of which status the owner is currently looking at.
+        $status = $request->get('status');
+        if (! in_array($status, Booking::STATUSES, true)) {
+            $status = null;
+        }
+
         $workspaces = Workspace::where('owner_id', $ownerId)->orderBy('name')->get();
 
         // Unfiltered list for the filter dropdown, so picking a room doesn't
         // collapse the dropdown down to just that one option afterward.
+        // physicalRoom/uses are eager-loaded so the day-rooms partial can show
+        // "also bookable as" for a multi-use room without N+1 queries.
         $allRooms = Room::where('owner_id', $ownerId)
             ->where('is_available', true)
-            ->with('workspace')
+            ->with(['workspace', 'physicalRoom.uses', 'uses'])
             ->orderBy('name')
             ->get();
 
@@ -1347,30 +1357,40 @@ class BookingController extends Controller
             ->when($roomId, fn ($c) => $c->where('id', (int) $roomId))
             ->values();
 
-        $data = compact('carbon', 'date', 'view', 'rooms', 'allRooms', 'workspaces', 'roomId', 'workspaceId');
+        $summary = $this->calendarDailySummary($ownerId, $roomId, $workspaceId);
+
+        // Read-only "working hours" label for Day view only — BusinessHoursService's
+        // schedule is per day-of-week, so a single label only ever describes ONE
+        // date; summarizing it for a multi-day Week/Month view would misrepresent
+        // days that are configured differently (or closed).
+        $workingHoursLabel = $view === 'day'
+            ? $this->workingHoursLabel($businessHours, TenantContext::user(), $date)
+            : null;
+
+        $data = compact('carbon', 'date', 'view', 'rooms', 'allRooms', 'workspaces', 'roomId', 'workspaceId', 'status', 'summary', 'workingHoursLabel');
 
         if ($view === 'month') {
             $data['bookings'] = Booking::where('owner_id', $ownerId)
                 ->with(['room.workspace', 'hotspotUser'])
                 ->whereMonth('booking_date', $carbon->month)
                 ->whereYear('booking_date', $carbon->year)
-                ->where('status', '!=', 'cancelled')
+                ->when($status, fn ($q) => $q->where('status', $status), fn ($q) => $q->where('status', '!=', 'cancelled'))
                 ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
                 ->when($workspaceId, fn ($q) => $q->whereHas('room', fn ($rq) => $rq->where('workspace_id', $workspaceId)))
                 ->get()
                 ->groupBy(fn ($b) => $b->booking_date->format('Y-m-d'));
         } elseif ($view === 'week') {
             $startOfWeek = $carbon->copy()->startOfWeek(Carbon::MONDAY);
-            $data['days'] = collect(range(0, 6))->map(function (int $i) use ($startOfWeek, $rooms, $availability) {
+            $data['days'] = collect(range(0, 6))->map(function (int $i) use ($startOfWeek, $rooms, $availability, $status) {
                 $day = $startOfWeek->copy()->addDays($i);
 
                 return [
                     'date' => $day,
-                    'rooms' => $this->roomDayAvailability($rooms, $day->format('Y-m-d'), $availability),
+                    'rooms' => $this->roomDayAvailability($rooms, $day->format('Y-m-d'), $availability, $status),
                 ];
             });
         } else {
-            $data['dayRooms'] = $this->roomDayAvailability($rooms, $carbon->format('Y-m-d'), $availability);
+            $data['dayRooms'] = $this->roomDayAvailability($rooms, $carbon->format('Y-m-d'), $availability, $status);
         }
 
         return view('bookings.calendar', array_merge($data, $this->availabilityPanelData()));
@@ -1380,24 +1400,165 @@ class BookingController extends Controller
      * Per-room booked/available blocks plus that day's actual bookings, for
      * the day and week views. Purely a packaging step around
      * AvailabilityService — no availability logic lives here or in the view.
+     * $status only narrows the listed bookings; blocks/slots are untouched.
      */
-    private function roomDayAvailability($rooms, string $dateStr, AvailabilityService $availability): array
+    private function roomDayAvailability($rooms, string $dateStr, AvailabilityService $availability, ?string $status = null): array
     {
         $isToday = $dateStr === now()->format('Y-m-d');
 
-        return $rooms->map(fn (Room $room) => [
-            'room' => $room,
-            'date' => $dateStr,
-            'blocks' => $availability->freeBusyForDay($room, $dateStr),
-            'slots' => $availability->bookableSlots($room, $dateStr),
-            'bookings' => $room->bookings()
+        return $rooms->map(function (Room $room) use ($dateStr, $availability, $status) {
+            $blocks = $availability->freeBusyForDay($room, $dateStr);
+            $bookings = $room->bookings()
                 ->whereDate('booking_date', $dateStr)
-                ->where('status', '!=', 'cancelled')
+                ->when($status, fn ($q) => $q->where('status', $status), fn ($q) => $q->where('status', '!=', 'cancelled'))
                 ->with('hotspotUser')
                 ->orderBy('start_time')
-                ->get(),
-            'live' => ($isToday && $room->isShared()) ? $availability->liveOccupancy($room) : null,
-        ])->all();
+                ->get();
+
+            // The day/week timeline renders real booking blocks positioned by
+            // their own start/end time (not inferred from the availability
+            // bar), so overlapping bookings — only ever possible in a shared
+            // room, AvailabilityService already forbids it for exclusive
+            // rooms — need a visual lane each rather than stacking on top of
+            // one another.
+            $lanes = $this->assignTimelineLanes($bookings, ! empty($blocks) ? (string) end($blocks)['end'] : '23:59');
+
+            return [
+                'room' => $room,
+                'date' => $dateStr,
+                'blocks' => $blocks,
+                'slots' => $availability->bookableSlots($room, $dateStr),
+                'bookings' => $bookings,
+                'laneItems' => $lanes['items'],
+                'laneCount' => $lanes['lanes'],
+                'live' => ($dateStr === now()->format('Y-m-d') && $room->isShared()) ? $availability->liveOccupancy($room) : null,
+            ];
+        })->all();
+    }
+
+    /**
+     * Greedy interval-lane packing for the timeline: each booking goes in the
+     * first lane whose last-placed booking it doesn't overlap, else a new
+     * lane. Pure presentation layout — it has no say over whether a booking
+     * is actually allowed to exist there; that stays AvailabilityService's
+     * job. $rangeEndFallback covers an Open Session (end_time null) by
+     * visually extending it to the end of the displayed range rather than
+     * collapsing it to an unreadable sliver — the booking row itself is
+     * never touched.
+     *
+     * @return array{lanes:int, items: array<int, array{booking: Booking, lane:int, startMin:int, endMin:int}>}
+     */
+    private function assignTimelineLanes($bookings, string $rangeEndFallback): array
+    {
+        $toMinutes = function (string $time): int {
+            if (str_starts_with($time, '24:00')) {
+                return 24 * 60;
+            }
+            [$h, $m] = array_map('intval', explode(':', substr($time, 0, 5)));
+
+            return ($h * 60) + $m;
+        };
+
+        $laneEndMinutes = [];
+        $items = [];
+
+        foreach ($bookings->sortBy('start_time') as $booking) {
+            $start = $toMinutes((string) $booking->start_time);
+            $end = $booking->end_time !== null ? $toMinutes((string) $booking->end_time) : $toMinutes($rangeEndFallback);
+            $end = max($end, $start + 1);
+
+            $lane = null;
+            foreach ($laneEndMinutes as $i => $laneEnd) {
+                if ($start >= $laneEnd) {
+                    $lane = $i;
+                    break;
+                }
+            }
+            $lane ??= count($laneEndMinutes);
+            $laneEndMinutes[$lane] = $end;
+
+            $items[] = ['booking' => $booking, 'lane' => $lane, 'startMin' => $start, 'endMin' => $end];
+        }
+
+        return ['lanes' => max(1, count($laneEndMinutes)), 'items' => $items];
+    }
+
+    /**
+     * The calendar header's always-on "how's today going" strip — deliberately
+     * NOT scoped to whichever date the owner is currently browsing (that's
+     * what the grid below is for). Three disjoint facts, each defined once:
+     *   - todayBookings: today's bookings that still count (not cancelled/no_show).
+     *   - activeSessionsNow: open SharedSessions + open-ended (walk-in) Bookings
+     *     right now — two different tables, never the same row twice.
+     *   - pendingRequests: pending bookings today or later — the backlog an
+     *     owner still needs to confirm, matching NotificationService's own
+     *     "still needs confirmation" definition rather than inventing a new one.
+     * Respects the same workspace/room filters as the grid, so the strip never
+     * disagrees with what's actually shown below it.
+     *
+     * @return array{todayBookings:int, activeSessions:int, pendingRequests:int}
+     */
+    private function calendarDailySummary(int $ownerId, ?string $roomId, ?string $workspaceId): array
+    {
+        $scopeToFilters = function ($query) use ($roomId, $workspaceId) {
+            return $query
+                ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
+                ->when($workspaceId, fn ($q) => $q->whereHas('room', fn ($rq) => $rq->where('workspace_id', $workspaceId)));
+        };
+
+        $todayBookings = $scopeToFilters(
+            Booking::where('owner_id', $ownerId)->whereDate('booking_date', now())->countsTowardGbv()
+        )->count();
+
+        $openSessions = $scopeToFilters(
+            SharedSession::where('owner_id', $ownerId)->where('status', 'open')
+        )->count();
+
+        $openBookings = $scopeToFilters(
+            Booking::where('owner_id', $ownerId)->where('status', 'open')
+        )->count();
+
+        $pendingRequests = $scopeToFilters(
+            Booking::where('owner_id', $ownerId)->where('status', 'pending')->whereDate('booking_date', '>=', now())
+        )->count();
+
+        return [
+            'todayBookings' => $todayBookings,
+            'activeSessions' => $openSessions + $openBookings,
+            'pendingRequests' => $pendingRequests,
+        ];
+    }
+
+    /**
+     * Read-only "Working hours" display for one date — BusinessHoursService
+     * is the single source of truth; this only formats its answer. Null when
+     * hours aren't configured (BusinessHoursService treats that as fully
+     * unrestricted, so there's nothing meaningful to summarize as a hint).
+     */
+    private function workingHoursLabel(BusinessHoursService $businessHours, ?Owner $owner, string $date): ?string
+    {
+        if (! $owner || ! $businessHours->hasConfiguredHours($owner)) {
+            return null;
+        }
+
+        $formatTime = function (string $time): string {
+            if (str_starts_with($time, '24:00')) {
+                return '12 AM';
+            }
+            [$hours, $minutes] = array_map('intval', explode(':', $time));
+
+            return Carbon::createFromTime($hours, $minutes)->format($minutes === 0 ? 'g A' : 'g:i A');
+        };
+
+        $windows = $businessHours->effectiveWindowForDate($owner, $date);
+
+        if (empty($windows)) {
+            return __('app.settings.working_hours.closed');
+        }
+
+        return collect($windows)
+            ->map(fn ($segment) => $formatTime($segment[0]).' – '.$formatTime($segment[1]))
+            ->join(', ');
     }
 
     /**

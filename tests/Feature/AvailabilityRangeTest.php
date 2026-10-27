@@ -128,9 +128,42 @@ class AvailabilityRangeTest extends TestCase
         $this->assertSame([[
             'booking_id' => Booking::first()->id, 'start' => '12:00', 'end' => '15:00', 'status' => 'confirmed',
             'customer' => 'Bahgat Ayman', 'party_size' => 1, 'overlap_minutes' => 180,
+            // Not held by another use of the same physical room — this
+            // room's own booking is the entire conflict.
+            'other_use' => null,
         ]], $day['conflicts']);
         $this->assertSame('available', $this->day($r, '2026-10-05')['status']);
         $this->assertSame('available', $this->day($r, '2026-10-07')['status']);
+    }
+
+    /**
+     * A booking on a SIBLING use of the same physical room (physical_room_id)
+     * blocks this use too — rangeReport() must report it as a conflict and
+     * name which other use caused it, distinct from a conflict on the room's
+     * own bookings (other_use: null, covered above).
+     */
+    public function test_2b_conflict_caused_by_another_use_of_the_same_physical_room_names_it(): void
+    {
+        $physical = $this->room('Open Floor', 'shared', 10);
+        $trainingUse = Room::create([
+            'owner_id' => $this->owner->id, 'workspace_id' => $physical->workspace_id, 'name' => 'Training Room',
+            'type' => 'training', 'capacity' => 1, 'price_per_hour' => 100,
+        ]);
+        // physical_room_id is deliberately not fillable — only a future
+        // room-use-management controller sets it; direct assignment mirrors
+        // that until one exists.
+        $trainingUse->physical_room_id = $physical->id;
+        $trainingUse->save();
+
+        // Booked on the OTHER use (Training Room), not on the physical room itself.
+        $this->book($trainingUse, '2026-10-06', '12:00', '15:00');
+
+        $r = $this->roomReport($this->check([])->assertOk(), $physical);
+        $day = $this->day($r, '2026-10-06');
+
+        $this->assertSame('unavailable', $day['status']);
+        $this->assertCount(1, $day['conflicts']);
+        $this->assertSame('Training Room', $day['conflicts'][0]['other_use']);
     }
 
     public function test_3_multiple_conflicts_across_days(): void
