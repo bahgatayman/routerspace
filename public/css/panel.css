@@ -2540,3 +2540,92 @@ html[dir="rtl"] .ls-fb-msg, html[dir="rtl"] .ls-fbs-text { text-align: right; } 
 .ls-session-conflict { display: flex; align-items: flex-start; gap: 6px; margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--ls-r-sm); font-size: 12.5px; line-height: 1.45; background: var(--color-warning-soft); color: var(--color-warning); }
 .ls-session-conflict.is-late { background: var(--color-danger-soft); color: var(--color-danger); }
 .ls-session-conflict svg { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+
+/* Add Room wizard (rooms/create): one form in three steps — progress, panels,
+   optional extras and a review. Without JS (.is-ready absent) every panel shows. */
+.ls-wizard-page { max-width: 960px; margin-inline: auto; }
+.ls-wizard-crumbs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); font-size: 13px; color: var(--color-text-muted); }
+.ls-wizard-note { margin-bottom: var(--space-4); }
+.ls-wizard-progress { margin-bottom: var(--space-4); }
+.ls-wizard-progress[hidden] { display: none; }
+.ls-wizard-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.ls-wizard-step-btn { width: 100%; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--ls-r-card); background: var(--color-surface); color: var(--color-text); text-align: start; font: inherit; cursor: pointer; transition: border-color var(--ls-t-fast) var(--ls-ease), background var(--ls-t-fast) var(--ls-ease); }
+.ls-wizard-step-btn:hover:not(:disabled) { border-color: var(--color-border-hover); }
+.ls-wizard-step-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-wizard-step-btn:disabled { cursor: default; color: var(--color-text-muted); }
+.ls-wizard-step-num { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--color-border-strong); font-weight: var(--fw-strong); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ls-wizard-step-num svg { display: none; width: 16px; height: 16px; }
+.ls-wizard-step-text { display: grid; gap: 1px; min-width: 0; }
+.ls-wizard-step-kicker { font-size: 11.5px; color: var(--color-text-muted); }
+.ls-wizard-step-title { font-size: 14px; font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-wizard-step-flag { font-size: 11.5px; font-weight: var(--fw-medium); color: var(--color-danger); }
+.ls-wizard-step.is-current .ls-wizard-step-btn { border-color: var(--color-primary); background: var(--color-primary-soft); }
+.ls-wizard-step.is-current .ls-wizard-step-num { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-on-solid); }
+.ls-wizard-step.is-current .ls-wizard-step-title { color: var(--color-primary-text); font-weight: var(--fw-strong); }
+.ls-wizard-step.is-done .ls-wizard-step-num { background: var(--color-success-soft); border-color: transparent; color: var(--color-success); }
+.ls-wizard-step.is-done .ls-wizard-step-num span { display: none; }
+.ls-wizard-step.is-done .ls-wizard-step-num svg { display: block; }
+.ls-wizard-step.has-error .ls-wizard-step-num { border-color: var(--color-danger); }
+.ls-wizard-card { overflow: hidden; }
+.ls-wizard-panel { display: grid; gap: var(--space-5); padding: var(--space-6); }
+.ls-wizard-panel:focus { outline: none; }
+.ls-wizard.is-ready .ls-wizard-panel[hidden] { display: none; }
+.ls-wizard:not(.is-ready) .ls-wizard-panel + .ls-wizard-panel { border-top: 1px solid var(--color-border-subtle); }
+.ls-wizard-panel-head { display: grid; gap: var(--space-1); }
+.ls-wizard-panel-title { margin: 0; font-size: 17px; font-weight: var(--fw-strong); color: var(--color-text); }
+.ls-wizard-panel-head .ls-hint { margin: 0; }
+.ls-wizard-panel > .ls-pricing { padding-top: 0; border-top: 0; }
+.ls-wizard-panel > .ls-pricing > .ls-pricing-title { font-size: 17px; }
+.ls-wizard-alert { padding: var(--space-3) var(--space-4); border-radius: var(--ls-r-ctl); background: var(--color-danger-soft); color: var(--color-danger); font-size: 13.5px; font-weight: var(--fw-medium); }
+.ls-wizard-alert[hidden] { display: none; }
+.ls-wizard-fields { display: grid; gap: var(--space-5); }
+.ls-wizard-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.ls-wizard-extra { border: 1px solid var(--color-border); border-radius: var(--ls-r-card); background: var(--color-surface); }
+.ls-wizard-extra > summary { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); cursor: pointer; list-style: none; border-radius: var(--ls-r-card); }
+.ls-wizard-extra > summary::-webkit-details-marker { display: none; }
+.ls-wizard-extra > summary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-wizard-extra > summary svg { flex: none; width: 16px; height: 16px; color: var(--color-text-muted); transition: transform var(--ls-t-fast) var(--ls-ease); }
+[dir="rtl"] .ls-wizard-extra > summary svg { transform: scaleX(-1); }
+.ls-wizard-extra[open] > summary svg { transform: rotate(90deg); }
+.ls-wizard-extra-title { flex: 1; min-width: 0; font-size: 14.5px; font-weight: var(--fw-strong); color: var(--color-text); }
+.ls-wizard-extra-title .ls-opt { font-weight: var(--fw-regular); color: var(--color-text-muted); }
+.ls-wizard-extra-count { font-size: 12.5px; color: var(--color-text-muted); white-space: nowrap; }
+.ls-wizard-extra-body { padding: 0 var(--space-4) var(--space-4); }
+.ls-wizard-extra-body .ls-plans { border-top: 0; padding-top: 0; margin-top: 0; }
+.ls-wizard-extra-body .ls-plans-head { justify-content: flex-end; }
+.ls-wizard-review { display: grid; gap: var(--space-3); padding-top: var(--space-5); border-top: 1px solid var(--color-border-subtle); }
+.ls-wizard-review[hidden] { display: none; }
+.ls-wizard-review-title { margin: 0; font-size: 15px; font-weight: var(--fw-strong); }
+.ls-wizard-review-section { display: grid; gap: var(--space-2); padding: var(--space-4); border-radius: var(--ls-r-card); background: var(--color-surface-subtle); }
+.ls-wizard-review-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.ls-wizard-review-head h4 { margin: 0; font-size: 13.5px; font-weight: var(--fw-strong); color: var(--color-text); }
+.ls-wizard-review-edit { font-size: 13px; }
+.ls-wizard-review-list { display: grid; gap: var(--space-2); margin: 0; }
+.ls-wizard-review-list > div { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); gap: var(--space-3); font-size: 13.5px; }
+.ls-wizard-review-list dt { color: var(--color-text-muted); }
+.ls-wizard-review-list dd { margin: 0; color: var(--color-text); overflow-wrap: anywhere; white-space: pre-line; }
+.ls-wizard-review-items { margin: 0; padding-inline-start: var(--space-5); display: grid; gap: var(--space-1); font-size: 13.5px; overflow-wrap: anywhere; }
+.ls-wizard-review-grid { width: 100%; font-size: 13px; }
+.ls-wizard-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-6); border-top: 1px solid var(--color-border-subtle); background: var(--color-surface-subtle); }
+.ls-wizard-foot-spacer { flex: 1; }
+.ls-wizard-foot [hidden] { display: none; }
+.ls-btn.is-busy { opacity: .7; cursor: progress; }
+@media (max-width: 720px) {
+  .ls-wizard-steps { gap: var(--space-1); }
+  .ls-wizard-step-btn { flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+  .ls-wizard-step-kicker { display: none; }
+  .ls-wizard-step-title { font-size: 12.5px; white-space: normal; }
+  .ls-wizard-panel { padding: var(--space-5) var(--space-4); }
+  .ls-wizard-row { grid-template-columns: minmax(0, 1fr); }
+  .ls-wizard-review-list > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .ls-wizard-foot { padding: var(--space-3) var(--space-4); }
+  .ls-wizard-foot > .ls-btn--ghost { order: 3; width: 100%; justify-content: center; }
+  .ls-wizard-foot-spacer { display: none; }
+  .ls-wizard-foot > .ls-btn:not(.ls-btn--ghost) { flex: 1; justify-content: center; }
+}
+.ls-wizard-uses { margin-bottom: var(--space-4); }
+.ls-wizard-uses .ls-room-uses-panel { margin-bottom: 0 !important; }
+.ls-wizard-review-grid-wrap { background: var(--color-surface); }
+/* Grid items default to min-width:auto (as wide as their content); let the
+   wizard columns shrink so wide content (the review price grid) scrolls in its frame. */
+.ls-wizard-panel, .ls-wizard-review, .ls-wizard-review-section { grid-template-columns: minmax(0, 1fr); }

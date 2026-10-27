@@ -1,81 +1,53 @@
 @extends('layouts.app')
 
+{{--
+    Edit Room: the same three-step wizard as Add Room (_wizard.blade.php),
+    every step open from the start and "Save changes" on each, as one PUT to
+    rooms.update with the same fields as before. Room Photos stays its own
+    card (and own uploads) below the form.
+--}}
 @section('page-title', __('app.workspace.edit_room'))
 
 @section('content')
-    <div class="max-w-2xl mx-auto">
-        <nav class="text-sm text-gray-500 mb-4">
-            <a href="{{ route('workspaces.index', ['workspace' => $workspace->id]) }}" class="text-blue-600 hover:text-blue-800">{{ $workspace->name }}</a>
-            <span class="mx-2">/</span>
-            <span class="text-gray-900">{{ __('app.workspace.edit_room') }}</span>
+    @php $cancelUrl = route('workspaces.index', ['workspace' => $workspace->id]); @endphp
+    <div class="ls-wizard-page">
+        <nav class="ls-wizard-crumbs" aria-label="{{ __('app.workspace.wizard.breadcrumb') }}">
+            <a href="{{ $cancelUrl }}" class="ls-link">{{ $workspace->name }}</a>
+            <span aria-hidden="true">/</span>
+            <span>{{ $room->name }}</span>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page">{{ __('app.workspace.edit_room') }}</span>
         </nav>
 
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h1 class="text-xl font-bold text-gray-900 mb-6">{{ __('app.workspace.edit_room') }}</h1>
+        <x-ui.page-header :title="__('app.workspace.edit_room')" :subtitle="__('app.workspace.wizard.edit_subtitle')" />
 
-            @include('workspaces.rooms.uses._panel')
+        <x-ui.flash />
 
-            <form method="POST" action="{{ route('rooms.update', [$workspace, $room]) }}">
-                @csrf
-                @method('PUT')
+        @if ($errors->any())
+            <div class="ls-wizard-note">
+                <x-ui.banner tone="danger">{{ __('app.workspace.wizard.fix_errors') }}</x-ui.banner>
+            </div>
+        @endif
 
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">{{ __('app.workspace.room_name') }} <span class="text-red-500">*</span></label>
-                        <input type="text" name="name" value="{{ old('name', $room->name) }}" required
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                        @error('name') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">{{ __('app.workspace.type') }} <span class="text-red-500">*</span></label>
-                        <select name="type" id="room_type" required
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            @foreach($roomTypes as $key => $label)
-                                <option value="{{ $key }}" {{ old('type', $room->type) === $key ? 'selected' : '' }}>{{ $label }}</option>
-                            @endforeach
-                        </select>
-                        @error('type') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
-                        <p class="text-xs text-gray-500 mt-1" id="room_type_hint">
-                            {{ old('type', $room->type) === 'shared' ? __('app.workspace.shared_room_hint') : __('app.workspace.exclusive_room_hint') }}
-                        </p>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">{{ __('app.workspace.capacity') }} <span class="text-red-500">*</span></label>
-                        <input type="number" name="capacity" min="1" max="999"
-                               value="{{ old('capacity', $room->capacity) }}" required
-                               class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                        @error('capacity') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
-                    </div>
-
-                    @include('workspaces.rooms._pricing', ['room' => $room])
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">{{ __('app.workspace.description') }}</label>
-                        <textarea name="description" rows="3"
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">{{ old('description', $room->description) }}</textarea>
-                        @error('description') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
-                    </div>
-                </div>
-
-                <div class="mt-6 flex items-center gap-3">
-                    <button type="submit"
-                        class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
-                        {{ __('app.common.update') }}
-                    </button>
-                    <a href="{{ route('workspaces.index', ['workspace' => $workspace->id]) }}"
-                        class="text-sm text-gray-600 hover:text-gray-800">{{ __('app.common.cancel') }}</a>
-                </div>
-            </form>
+        <div class="ls-card ls-wizard-uses">
+            <div class="ls-card-body">
+                @include('workspaces.rooms.uses._panel')
+            </div>
         </div>
+
+        @include('workspaces.rooms._wizard', [
+            'room' => $room,
+            'physicalRoom' => null,
+            'action' => route('rooms.update', [$workspace, $room]),
+            'method' => 'PUT',
+            'submitLabel' => __('app.workspace.wizard.save_changes'),
+            'busyLabel' => __('app.workspace.wizard.saving'),
+            'cancelUrl' => $cancelUrl,
+        ])
 
         {{--
             Room Photos — a separate card (and separate <form>, since this posts
-            to its own upload endpoint, not rooms.update) deliberately built on
-            the ls-*/x-ui.* design system rather than matching the legacy
-            Tailwind form above: new UI follows the current system, the
-            untouched existing fields above don't need a risky unrelated rewrite.
+            to its own upload endpoint, not rooms.update).
         --}}
         <div class="ls-card mt-6" id="room-photos" data-ls-photo-manager style="scroll-margin-top: var(--space-6)">
             <div class="ls-card-head"><h2 class="ls-card-title">{{ __('app.workspace.room_photos') }}</h2></div>
@@ -125,17 +97,4 @@
             </div>
         </div>
     </div>
-
-    <script>
-        (function () {
-            var select = document.getElementById('room_type');
-            var hint = document.getElementById('room_type_hint');
-            if (!select || !hint) return;
-            var sharedHint = @json(__('app.workspace.shared_room_hint'));
-            var exclusiveHint = @json(__('app.workspace.exclusive_room_hint'));
-            select.addEventListener('change', function () {
-                hint.textContent = select.value === 'shared' ? sharedHint : exclusiveHint;
-            });
-        })();
-    </script>
 @endsection
