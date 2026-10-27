@@ -23,6 +23,7 @@ use App\Models\SharedSession;
 use App\Models\Workspace;
 use App\Services\ActivityLogger;
 use App\Services\AvailabilityService;
+use App\Services\BookingCancellationService;
 use App\Services\BusinessHoursService;
 use App\Services\CouponService;
 use App\Services\HourPackageService;
@@ -472,21 +473,7 @@ class BookingController extends Controller
      */
     private function coverWithPackage(HourPackageService $packages, Booking $booking, ?MemberPackage $package, PriceQuote $quote): void
     {
-        $minutes = (int) ceil($quote->totalMinutes);
-        $value = $packages->reconcileBooking($booking, $package, $package ? $minutes : 0);
-
-        if (! $package) {
-            return;
-        }
-
-        $booking->update([
-            'payment_method' => Booking::METHOD_PACKAGE,
-            'member_package_id' => $package->id,
-            'total_price' => $value,
-            'amount_paid' => $value,
-            'payment_status' => Booking::PAYMENT_PAID,
-            'pricing_note' => __('app.packages.covered_note', ['name' => $package->name, 'hours' => Duration::label($minutes)]),
-        ]);
+        $packages->coverBooking($booking, $package, (int) ceil($quote->totalMinutes));
     }
 
     /**
@@ -854,36 +841,9 @@ class BookingController extends Controller
                 return back()->with('error', 'Invalid status transition.');
             }
         } elseif ($validated['status'] === 'cancelled') {
-            // Atomic claim so two racing cancels can't both return the
-            // booking's package hours; history rows are kept either way.
-            $claimed = DB::transaction(function () use ($booking, $packages, $inventory) {
-                $updated = Booking::where('id', $booking->id)
-                    ->where('owner_id', $booking->owner_id)
-                    ->whereIn('status', ['pending', 'confirmed'])
-                    ->update(['status' => 'cancelled']);
-
-                if ($updated) {
-                    $packages->releaseBooking($booking);
-
-                    // SalesService::saleForBooking() marks a Sale 'completed'
-                    // the instant it's created, independent of the booking's
-                    // own status (the invoice is editable while still
-                    // pending/confirmed — Booking::invoiceIsEditable()).
-                    // Without this, cancelling a booking that already has
-                    // products on its invoice would leave that Sale
-                    // 'completed' forever: stock never returned, and every
-                    // revenue/product report keeps counting it as real.
-                    $sale = $booking->sale;
-                    if ($sale && $sale->status !== 'cancelled') {
-                        foreach ($sale->items as $item) {
-                            $inventory->giveBack($item);
-                        }
-                        $sale->update(['status' => 'cancelled']);
-                    }
-                }
-
-                return (bool) $updated;
-            });
+            // Shared with recurring-series cancellation (one policy): atomic
+            // claim, package hours returned, invoice stock given back.
+            $claimed = (new BookingCancellationService($packages, $inventory))->cancel($booking);
 
             if (! $claimed) {
                 return back()->with('error', 'Invalid status transition.');
@@ -1442,7 +1402,7 @@ class BookingController extends Controller
             $bookings = $room->bookings()
                 ->whereDate('booking_date', $dateStr)
                 ->when($status, fn ($q) => $q->where('status', $status), fn ($q) => $q->where('status', '!=', 'cancelled'))
-                ->with('hotspotUser')
+                ->with(['hotspotUser', 'series:id,payment_plan'])
                 ->orderBy('start_time')
                 ->get();
 

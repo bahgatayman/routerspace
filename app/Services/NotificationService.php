@@ -3,9 +3,12 @@
 namespace App\Services;
 
 use App\Models\Booking;
+use App\Models\BookingSeries;
 use App\Models\MemberPackage;
 use App\Models\Notification;
 use App\Models\Owner;
+use App\Support\Money;
+use Illuminate\Support\Facades\Schema;
 
 class NotificationService
 {
@@ -49,6 +52,100 @@ class NotificationService
         if ($owner->hasFeature('booking')) {
             $this->checkBookings($owner);
             $this->checkPackages($owner);
+            $this->checkSeries($owner);
+        }
+    }
+
+    /**
+     * Repeating bookings, one summary per series (never one per date):
+     *  - unpaid dates in the next 7 days — re-notified only when the
+     *    earliest unpaid date changes; an unpaid date stays a valid booking;
+     *  - upcoming dates hit by a later change (room / use switched off, or
+     *    now outside working hours) — re-notified only when that set changes.
+     * Nothing is cancelled or moved here.
+     */
+    protected function checkSeries(Owner $owner): void
+    {
+        // Runs from every owner page (layout composer): until the
+        // booking_series migration is applied, simply do nothing.
+        if (! Schema::hasTable('booking_series')) {
+            return;
+        }
+
+        $series = BookingSeries::where('owner_id', $owner->id)
+            ->where('status', BookingSeries::ACTIVE)
+            ->with(['room', 'hotspotUser'])
+            ->get();
+        if ($series->isEmpty()) {
+            return;
+        }
+
+        $upcoming = Booking::whereIn('booking_series_id', $series->pluck('id'))
+            ->where('owner_id', $owner->id)
+            ->whereDate('booking_date', '>=', today())
+            ->whereIn('status', ['pending', 'confirmed'])
+            ->with('room')
+            ->orderBy('booking_date')->orderBy('start_time')
+            ->get()
+            ->groupBy('booking_series_id');
+        $hours = app(BusinessHoursService::class);
+
+        foreach ($series as $s) {
+            $dates = $upcoming[$s->id] ?? collect();
+            $room = $s->room?->name ?? '—';
+            $customer = $s->hotspotUser?->name ?? '—';
+
+            // Paid upfront: one alert while the series owes anything, again
+            // only when the amount due changes (a payment, a cancellation).
+            if ($s->isUpfront()) {
+                $due = round($dates->reject(fn ($b) => $b->isPackageCovered())->sum(fn ($b) => $b->balanceDue()), 2);
+                if ($due > 0) {
+                    $this->notify($owner, [
+                        'type' => 'series_upfront_unpaid',
+                        'level' => 'warning',
+                        'reference' => "series_upfront_unpaid:{$s->id}:".number_format($due, 2, '.', ''),
+                        'title' => __('app.series.notif.upfront_title', ['room' => $room]),
+                        'body' => __('app.series.notif.upfront_body', ['customer' => $customer, 'amount' => Money::format($due)]),
+                        'action_url' => "/bookings/series/{$s->id}",
+                    ]);
+                }
+            }
+
+            $unpaid = $s->isUpfront() ? collect() : $dates->filter(fn ($b) => $b->payment_status === Booking::PAYMENT_UNPAID && $b->booking_date->lte(today()->addDays(7)));
+            if ($unpaid->isNotEmpty()) {
+                $first = $unpaid->first()->booking_date;
+                $this->notify($owner, [
+                    'type' => 'series_unpaid',
+                    'level' => 'warning',
+                    'reference' => "series_unpaid:{$s->id}:{$first->toDateString()}",
+                    'title' => __('app.series.notif.unpaid_title', ['room' => $room]),
+                    'body' => trans_choice('app.series.notif.unpaid_body', $unpaid->count(), ['count' => $unpaid->count(), 'customer' => $customer, 'date' => $first->format('M j')]),
+                    'action_url' => "/bookings/series/{$s->id}",
+                ]);
+            }
+
+            // Working hours depend only on the weekday: one lookup per weekday + time.
+            $withinHours = [];
+            $affected = $dates->filter(function ($b) use ($hours, $owner, &$withinHours) {
+                if (! $b->room?->is_available) {
+                    return true;
+                }
+                $start = substr((string) $b->start_time, 0, 5);
+                $end = substr((string) $b->end_time, 0, 5);
+                $key = $b->booking_date->dayOfWeek.'|'.$start.'|'.$end;
+
+                return ! ($withinHours[$key] ??= $hours->isWithinWorkingHours($owner, $b->booking_date->toDateString(), $start, $end));
+            });
+            if ($affected->isNotEmpty()) {
+                $this->notify($owner, [
+                    'type' => 'series_attention',
+                    'level' => 'danger',
+                    'reference' => "series_attention:{$s->id}:".md5($affected->pluck('id')->implode(',')),
+                    'title' => __('app.series.notif.attention_title', ['room' => $room]),
+                    'body' => trans_choice('app.series.notif.attention_body', $affected->count(), ['count' => $affected->count(), 'customer' => $customer]),
+                    'action_url' => "/bookings/series/{$s->id}",
+                ]);
+            }
         }
     }
 

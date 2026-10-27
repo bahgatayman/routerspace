@@ -208,6 +208,10 @@
             </div>
         </div>
 
+        @unless ($isEdit)
+            @include('bookings._repeat')
+        @endunless
+
         {{-- 4. Payment --}}
         @include('bookings._payment', ['amountPaid' => $initialAmountPaid, 'paymentChoice' => $initialPaymentChoice, 'memberPackageId' => $isEdit ? $booking->member_package_id : ''])
         </div>{{-- /#fixed-time-sections --}}

@@ -303,6 +303,9 @@
                             <p class="font-medium text-gray-800 truncate">{{ $booking->hotspotUser?->name ?? '—' }}</p>
                             <p class="text-xs text-gray-400 truncate">{{ $booking->room?->name }} &middot; {{ $booking->timeRange() }}</p>
                         </div>
+                        @if ($booking->isUnpaidUpfrontDate())
+                            <a href="{{ route('bookings.series.show', $booking->booking_series_id) }}" class="ls-unpaid-tag shrink-0" title="{{ __('app.series.unpaid_upfront_title') }}">{{ __('app.series.unpaid_tag') }}</a>
+                        @endif
                         <span class="shrink-0 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $booking->statusBadgeClass() }}">
                             {{ $booking->statusLabel() }}
                         </span>

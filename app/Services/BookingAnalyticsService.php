@@ -267,7 +267,7 @@ class BookingAnalyticsService
         return Booking::where('owner_id', $owner->id)
             ->whereDate('booking_date', today())
             ->whereNotIn('status', ['cancelled', 'no_show'])
-            ->with(['room:id,name,type', 'hotspotUser:id,name'])
+            ->with(['room:id,name,type', 'hotspotUser:id,name', 'series:id,payment_plan'])
             ->orderBy('start_time')
             ->limit($limit)
             ->get();

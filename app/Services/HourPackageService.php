@@ -10,8 +10,10 @@ use App\Models\PackageTemplate;
 use App\Models\PackageUsage;
 use App\Models\Room;
 use App\Models\SharedSession;
+use App\Support\Duration;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
 
 /**
  * The only place a member package's balance changes, and every change leaves
@@ -160,6 +162,66 @@ class HourPackageService
         }
 
         return $this->bookingValue($booking, $pkg->id);
+    }
+
+    /**
+     * Draw $booking's $minutes from $pkg (or return them when null) and record
+     * it as covered: total_price = amount_paid = the package value those hours
+     * represent, which is how the revenue is recognised. Shared by one-time
+     * bookings (BookingController) and recurring dates (RecurringBookingService).
+     * Runs inside the caller's transaction; throws
+     * InsufficientPackageBalanceException (nothing written) when it no longer fits.
+     */
+    public function coverBooking(Booking $booking, ?MemberPackage $pkg, int $minutes): void
+    {
+        $value = $this->reconcileBooking($booking, $pkg, $pkg ? $minutes : 0);
+
+        if (! $pkg) {
+            return;
+        }
+
+        $booking->update([
+            'payment_method' => Booking::METHOD_PACKAGE,
+            'member_package_id' => $pkg->id,
+            'total_price' => $value,
+            'amount_paid' => $value,
+            'payment_status' => Booking::PAYMENT_PAID,
+            'pricing_note' => __('app.packages.covered_note', ['name' => $pkg->name, 'hours' => Duration::label($minutes)]),
+        ]);
+    }
+
+    /**
+     * Sell a package to $member from the sale form's validated input (see
+     * saleRules()): hours → minutes, a template's room restriction kept.
+     * The amount is what the customer paid for the package itself — it is
+     * never a payment towards any booking.
+     */
+    public function sell(HotspotUser $member, array $v, ?PackageTemplate $template = null): MemberPackage
+    {
+        return $this->assign($member, [
+            'name' => $v['name'],
+            'total_minutes' => (int) round((float) $v['hours'] * 60),
+            'price_paid' => $v['price_paid'],
+            'starts_on' => $v['starts_on'],
+            'expires_on' => $v['expires_on'],
+            // Room restriction is a template term; custom packages cover every room.
+            'room_ids' => $template?->room_ids,
+            'notes' => $v['notes'] ?? null,
+        ], $template);
+    }
+
+    /** The package sale form's rules (member profile and the repeating-booking review). */
+    public static function saleRules(int $ownerId): array
+    {
+        return [
+            'package_template_id' => ['nullable', 'integer', Rule::exists('package_templates', 'id')->where('owner_id', $ownerId)],
+            'name' => 'required|string|max:80',
+            'hours' => 'required|numeric|min:0.25|max:10000',
+            'price_paid' => 'required|numeric|min:0|max:9999999.99',
+            'starts_on' => 'required|date',
+            'expires_on' => 'required|date|after_or_equal:starts_on',
+            'notes' => 'nullable|string|max:500',
+        ];
     }
 
     /** Booking cancelled: every minute it holds goes back to its package(s). */

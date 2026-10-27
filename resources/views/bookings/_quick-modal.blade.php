@@ -63,10 +63,21 @@
         'partialRequired' => __('app.booking.payment.partial_required'),
         'exceedsTotal' => __('app.booking.payment.exceeds_total', ['total' => ':total']),
         'payStatus' => ['paid' => __('app.booking.payment.status_paid'), 'partial' => __('app.booking.payment.status_partial'), 'unpaid' => __('app.booking.payment.status_unpaid')],
+        'repeatCta' => __('app.series.review_button'),
+        'total' => __('app.quick_booking.total'),
+        'perDate' => __('app.series.per_date_price'),
+        'repeatEstimate' => __('app.series.series_estimate', ['count' => ':count', 'total' => ':total']),
+        'repeatNoPlan' => __('app.series.errors.no_plans'),
+        'repeatNoDays' => __('app.series.errors.no_dates'),
     ];
     $qbCanAddMember = ! ($actingStaff ?? null) || $actingStaff->hasPermission('members.create');
 @endphp
 <x-ui.modal id="quick-book" :title="__('app.quick_booking.title')" size="wide" class="ls-qb">
+    {{-- Repeating: two steps in this one dialog — the details, then review and confirm. --}}
+    <ol class="ls-flow-steps ls-qb-steps" id="qb-steps" aria-label="{{ __('app.series.steps_label') }}" hidden>
+        <li aria-current="step" data-qb-step="1"><span aria-hidden="true">1</span>{{ __('app.series.step_details') }}</li>
+        <li data-qb-step="2"><span aria-hidden="true">2</span>{{ __('app.series.step_review') }}</li>
+    </ol>
     <form id="qb-form" novalidate>
         <div class="ls-banner ls-banner--danger" id="qb-error" role="alert" hidden><x-ui.icon name="alert" /><span></span></div>
 
@@ -107,6 +118,8 @@
         <section class="ls-qb-step" aria-labelledby="qb-when">
             <h4 class="ls-qb-label" id="qb-when"><span class="ls-qb-n" aria-hidden="true">2</span>{{ __('app.quick_booking.when') }}</h4>
 
+            {{-- Repeating: the shortcuts step aside and the date reads as the series' start. --}}
+            <label class="ls-qb-field-label" for="qb-date" id="qb-start-date-label" hidden>{{ __('app.series.start_date') }}</label>
             <div class="ls-chips" role="group" aria-label="{{ __('app.booking.date') }}">
                 <button type="button" class="ls-chip" data-qb-day="0" aria-pressed="false">{{ __('app.quick_booking.today') }}</button>
                 <button type="button" class="ls-chip" data-qb-day="1" aria-pressed="false">{{ __('app.quick_booking.tomorrow') }}</button>
@@ -180,6 +193,14 @@
         </section>
 
         {{--
+            Repeat (same fields as the full form). On: Book becomes "Review
+            dates", which opens the recurring review step with this choice;
+            payment and hour packages step aside (each date is its own unpaid
+            booking), and a Custom Plan can't repeat. Off: nothing changes.
+        --}}
+        @include('bookings._repeat-fields', ['rp' => 'qb-repeat', 'useOld' => false, 'withReview' => false, 'class' => 'ls-qb-step'])
+
+        {{--
             Payment + note: always on screen, nothing to expand. One click picks
             No / Partial / Full; Partial reveals the amount field. The server
             re-derives the amount from payment_choice (BookingController::
@@ -217,9 +238,13 @@
         <a href="/bookings/create" class="ls-link ls-qb-fullpage" id="qb-fullpage" data-qb-bypass>{{ __('app.quick_booking.full_page') }}</a>
     </form>
 
+    {{-- Step 2 (bookings.series._review, fetched): step 1 above stays as it was, for Back. --}}
+    <div id="qb-review" class="ls-qb-review" hidden></div>
+    @include('bookings.series._review-script')
+
     <x-slot:footer>
         <div class="ls-qb-total" aria-live="polite">
-            <span class="ls-qb-total-label">{{ __('app.quick_booking.total') }}</span>
+            <span class="ls-qb-total-label" id="qb-total-label">{{ __('app.quick_booking.total') }}</span>
             <b class="ls-num" id="qb-total">—</b>
             <small id="qb-hint"></small>
         </div>
@@ -247,10 +272,15 @@
     const durLabel = (m) => m < 60 ? fill(T.minutes, { count: m }) : (m === 60 ? T.hour1 : fill(T.hoursN, { count: String(+(m / 60).toFixed(2)) }));
     const endMinutes = () => S.minutes === 'custom' ? (S.end ? toMin(S.end) : null) : S.minutes === 'fullday' ? (S.fullDay ? toMin(S.fullDay.end) : null) : toMin(S.start) + S.minutes;
 
+    // The grid's last slot is also the latest a booking can end (the server takes HH:MM, no "24:00").
+    const LAST_SLOT = toMin(SLOT_KEYS[SLOT_KEYS.length - 1]);
+
     function defaultStart() {
         const now = new Date();
         const next = Math.ceil((now.getHours() * 60 + now.getMinutes() + 1) / 30) * 30;
-        return SLOT_KEYS.find((k) => toMin(k) >= next) || null;
+        // Room for the default hour too — late in the evening there's none left today
+        // (the caller then starts tomorrow, as when no slot is left at all).
+        return SLOT_KEYS.find((k) => toMin(k) >= next && toMin(k) + 60 <= LAST_SLOT) || null;
     }
 
     // ---------- 1 · customer ----------
@@ -359,7 +389,8 @@
     const dateInput = $('qb-date'), startSel = $('qb-start'), endSel = $('qb-end');
     document.querySelectorAll('[data-qb-minutes]').forEach((b) => { if (/^\d+$/.test(b.dataset.qbMinutes)) b.textContent = durLabel(+b.dataset.qbMinutes); });
 
-    function setDate(v) { S.date = v; dateInput.value = v; fetchFullDay(); refreshWhen(); schedule(); }
+    // A new start date also moves a weekly series' default weekday (syncRepeat()).
+    function setDate(v) { S.date = v; dateInput.value = v; fetchFullDay(); refreshWhen(); schedule(); if (repeatOn()) syncRepeat(); }
     document.querySelectorAll('[data-qb-day]').forEach((b) => b.addEventListener('click', () => setDate(dayOffset(+b.dataset.qbDay))));
     dateInput.addEventListener('change', () => { if (dateInput.value) setDate(dateInput.value); });
 
@@ -383,6 +414,13 @@
             b.classList.toggle('is-active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
         $('qb-date-chip').classList.toggle('is-active', !!S.date && S.date !== today && S.date !== tomorrow);
+
+        // A length that no longer fits before the last slot (a later start) shrinks to the
+        // longest one that does — or to a custom end at the last slot — never past it.
+        if (typeof S.minutes === 'number' && toMin(S.start) + S.minutes > LAST_SLOT) {
+            const fit = [240, 180, 120, 60].find((m) => toMin(S.start) + m <= LAST_SLOT);
+            if (fit) { S.minutes = fit; } else { S.minutes = 'custom'; S.end = toMin(S.start) < LAST_SLOT ? toHm(LAST_SLOT) : ''; }
+        }
 
         // End choices: every slot after the start.
         endSel.innerHTML = SLOT_KEYS.filter((k) => toMin(k) > toMin(S.start)).map((k) => `<option value="${k}">${SLOTS[k]}</option>`).join('');
@@ -616,8 +654,23 @@
         submit.disabled = !!missing;
         submit.textContent = room ? fill(T.cta, { total: plan ? plan.price_display : room.total_price_display }) : T.ctaIdle;
         // Covered by an hour package: no deposit, one clear total.
-        const pkg = room && !missing ? currentPkg() : null;
+        const pkg = room && !missing && !repeatOn() ? currentPkg() : null;
         updatePayment(room, plan, pkg);
+        // Repeating: the review step books (and prices) every date; no payment or package here.
+        // The footer shows one date's price — never as the total — and an estimate for the series.
+        const dates = repeatSummary();
+        $('qb-total-label').textContent = repeatOn() ? T.perDate : T.total;
+        if (repeatOn()) {
+            $('qb-paid-wrap').hidden = true;
+            $('qb-pay-shared').hidden = true;
+            $('qb-pkg').hidden = true;
+            const why = missing || (currentPlan() ? T.repeatNoPlan : '') || (dates ? '' : T.repeatNoDays);
+            submit.disabled = !!why;
+            submit.textContent = T.repeatCta;
+            const each = room ? Number(plan ? plan.price : room.total_price) || 0 : 0;
+            $('qb-hint').textContent = why || fill(T.repeatEstimate, { count: dates, total: money(each * dates) });
+            return;
+        }
         // Payment is required (no default) — Book waits for a choice, the hint says why.
         if (!missing && !pkg && !room.is_shared && !payChoice()) {
             submit.disabled = true;
@@ -681,10 +734,133 @@
     }));
     $('qb-paid').addEventListener('input', update);
 
+    // ---------- repeat: hand this choice to the recurring review step ----------
+    const repeatBox = $('qb-repeat-section'), repeatToggle = $('qb-repeat-toggle'), repeatDays = $('qb-repeat-weekdays');
+    function repeatOn() { return repeatToggle.checked; }
+    const repeatWeekly = () => (repeatBox.querySelector('input[name="repeat_frequency"]:checked') || {}).value === 'weekly';
+    // Weekly starts on the start date's weekday and follows that date until
+    // the owner picks days themselves (then their days stand, and the summary
+    // says which date comes first — RecurrenceRule's own rule).
+    let repeatDaysChosen = false;
+    function syncRepeat() {
+        $('qb-repeat-fields').hidden = !repeatOn();
+        repeatDays.hidden = !repeatWeekly();
+        // Today/Tomorrow don't fit a repeating schedule: a clear start date instead.
+        document.querySelectorAll('[data-qb-day]').forEach((b) => { b.hidden = repeatOn(); });
+        $('qb-start-date-label').hidden = !repeatOn();
+        $('qb-steps').hidden = !repeatOn(); // two steps only when repeating
+        if (repeatOn() && repeatWeekly() && !repeatDaysChosen && S.date) {
+            const day = new Date(S.date + 'T00:00:00').getDay();
+            repeatDays.querySelectorAll('input').forEach((i) => { i.checked = +i.value === day; });
+        }
+        renderPackages(); // back on screen when repeat is switched off
+        update();
+    }
+    /** The pattern in words; also how many dates the series makes (0 when off/incomplete). */
+    function repeatSummary() {
+        const s = repeatOn() ? LSRepeat.summary(repeatBox, S.date) : { html: '', count: 0 };
+        $('qb-repeat-summary').innerHTML = s.html;
+        return s.count;
+    }
+    repeatToggle.addEventListener('change', syncRepeat);
+    repeatBox.querySelectorAll('input[name="repeat_frequency"]').forEach((r) => r.addEventListener('change', syncRepeat));
+    repeatDays.addEventListener('change', () => { repeatDaysChosen = true; syncRepeat(); });
+    repeatBox.addEventListener('input', (e) => { if (e.target.matches('[name="repeat_count"], [name="repeat_until"]')) update(); });
+    repeatBox.addEventListener('change', (e) => { if (e.target.matches('[name="repeat_end"], [name="repeat_until"]')) update(); });
+
+    // ---------- step 2: review and confirm, in this same dialog ----------
+    // The review is the server's (bookings.series.review, as a fragment):
+    // dates, conflicts, prices, payment plan, package — nothing is booked or
+    // held until its confirm button. Back shows step 1 exactly as it was;
+    // the plan / package / per-date choices made on step 2 come back too.
+    const reviewBox = $('qb-review'), steps = $('qb-steps'), dialog = $('quick-book').querySelector('.ls-dialog');
+    const footer = dialog.querySelector('.ls-dialog-foot');
+    let reviewKeep = null; // {plan, pkg, choices: {date: choice}} from the last review
+
+    function showStep(n) {
+        const review = n === 2;
+        $('qb-form').hidden = review;
+        reviewBox.hidden = !review;
+        footer.hidden = review; // step 2 has its own footer (amount + confirm)
+        dialog.classList.toggle('is-review', review);
+        steps.hidden = !repeatOn();
+        steps.querySelectorAll('[data-qb-step]').forEach((li) => {
+            const on = li.dataset.qbStep === String(n);
+            on ? li.setAttribute('aria-current', 'step') : li.removeAttribute('aria-current');
+            li.classList.toggle('is-done', review && li.dataset.qbStep === '1');
+        });
+        dialog.querySelector('.ls-dialog-body').scrollTop = 0;
+        (review ? reviewBox.querySelector('h3, [data-confirm]') : $('qb-repeat-toggle'))?.focus({ preventScroll: true });
+    }
+
+    function keepReviewChoices() {
+        const f = reviewBox.querySelector('[data-series-review]');
+        if (!f) return;
+        reviewKeep = {
+            user: S.user && S.user.id, // a package belongs to one customer
+            plan: (f.querySelector('[name="payment_plan"]:checked') || {}).value,
+            pkg: (f.querySelector('[name="series_package_id"]') || {}).value || '',
+            choices: Object.fromEntries([...f.querySelectorAll('[data-occurrence]')].map((s) => [s.closest('li').querySelector('input[name$="[date]"]').value, s.value])),
+        };
+    }
+
+    async function submitRepeat(room) {
+        const err = $('qb-error');
+        const fail = (msg) => { err.querySelector('span').textContent = msg; err.hidden = false; err.scrollIntoView({ block: 'nearest' }); };
+        if (repeatWeekly() && !repeatDays.querySelector('input:checked')) { fail(T.repeatNoDays); return; }
+        const body = new FormData();
+        const add = (k, v) => body.append(k, v);
+        add('_token', CSRF);
+        add('from_quick', '1');
+        add('repeat', '1');
+        add('hotspot_user_id', S.user.id);
+        add('booking_date', S.date);
+        add('start_time', S.start);
+        add('end_time', toHm(endMinutes()));
+        add('room_id', room.id);
+        add('guest_count', S.people);
+        if (currentProfile()) add('room_pricing_profile_id', S.profileId);
+        if ($('qb-notes').value.trim()) add('notes', $('qb-notes').value.trim());
+        repeatBox.querySelectorAll('input:checked, input[type="number"], input[type="date"]').forEach((i) => {
+            // Weekdays only mean something for a weekly series.
+            if (i.name && i.name !== 'repeat' && (repeatWeekly() || i.name !== 'repeat_weekdays[]')) add(i.name, i.value);
+        });
+        if (reviewKeep) {
+            if (reviewKeep.plan) add('payment_plan', reviewKeep.plan);
+            if (reviewKeep.pkg && reviewKeep.user === S.user.id) add('series_package_id', reviewKeep.pkg);
+        }
+
+        LS.busy(submit);
+        try {
+            const r = await fetch(@json(route('bookings.series.review')), { method: 'POST', body, headers: { 'X-LS-Fragment': 'series-review', Accept: 'text/html' } });
+            if (!r.ok) {
+                let msg = T.error;
+                try { msg = (await r.json()).message || msg; } catch (x) { if (r.status === 419) msg = T.sessionLost; }
+                fail(msg);
+                return;
+            }
+            reviewBox.innerHTML = await r.text();
+            const root = reviewBox.querySelector('[data-series-review-root]');
+            if (reviewKeep) {
+                root.querySelectorAll('[data-occurrence]').forEach((s) => {
+                    const v = reviewKeep.choices[s.closest('li').querySelector('input[name$="[date]"]').value];
+                    if (v && [...s.options].some((o) => o.value === v)) s.value = v;
+                });
+            }
+            LSSeriesReview.init(root, { container: reviewBox, onBack: () => { keepReviewChoices(); showStep(1); } });
+            showStep(2);
+        } catch (x) {
+            fail(T.error);
+        } finally {
+            LS.busy(submit, false);
+        }
+    }
+
     $('qb-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const room = currentRoom(); if (submit.disabled || !room) return;
         const err = $('qb-error'); err.hidden = true;
+        if (repeatOn()) { submitRepeat(room); return; }
         if (payError && !currentPkg()) {
             $('qb-paid-error').querySelector('span').textContent = payError;
             $('qb-paid-error').hidden = false;
@@ -738,6 +914,16 @@
         S.user = null; S.roomId = null; S.planId = null; S.profileId = null; S.rooms = []; S.people = 1; peopleInput.value = 1;
         S.pkgs = []; S.pkgId = null; S.pkgKey = ''; S.pkgMinutesLabel = null; $('qb-pkg').hidden = true;
         document.querySelector('[data-qb-pay-mode][value="normal"]').checked = true;
+        // Every open starts as a one-time booking.
+        repeatToggle.checked = false; $('qb-repeat-fields').hidden = true;
+        document.querySelectorAll('[data-qb-day]').forEach((b) => { b.hidden = false; }); $('qb-start-date-label').hidden = true;
+        repeatDays.querySelectorAll('input').forEach((i) => { i.checked = false; });
+        repeatDaysChosen = false;
+        // …on step 1, with no review left from last time.
+        reviewKeep = null; reviewBox.innerHTML = ''; showStep(1);
+        repeatBox.classList.remove('is-collapsed');
+        const fold = repeatBox.querySelector('[data-repeat-collapse]');
+        if (fold) { fold.setAttribute('aria-expanded', 'true'); fold.textContent = fold.dataset.done; }
         S.preferRoom = prefill.room_id || null;
         $('qb-picked').hidden = true; $('qb-find').hidden = false; search.value = '';
 

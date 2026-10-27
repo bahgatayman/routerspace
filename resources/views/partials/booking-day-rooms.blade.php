@@ -237,7 +237,15 @@
                                        style="inset-inline-start: {{ $left }}%; width: {{ $width }}%; top: {{ $top }}px; height: {{ $laneHeight - 4 }}px;"
                                        title="{{ $b->hotspotUser->name }} &middot; {{ $b->timeRange() }} &middot; {{ $b->statusLabel() }}{{ $b->party_size > 1 ? ' · '.__('app.session.party_of', ['count' => $b->party_size]) : '' }}">
                                         <span class="flex items-center gap-1 min-w-0">
+                                            @if ($b->booking_series_id)
+                                                {{-- Part of a repeating booking: a quiet marker, never colour alone. --}}
+                                                <svg class="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="{{ __('app.series.marker') }}"><title>{{ __('app.series.marker') }}</title><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 01-4 4H3"/></svg>
+                                            @endif
                                             <span class="font-semibold text-[11px] truncate leading-tight">{{ $b->hotspotUser->name }}</span>
+                                            @if ($b->isUnpaidUpfrontDate())
+                                                {{-- Upfront series not paid yet: words, not colour alone. --}}
+                                                <span class="ls-unpaid-tag" title="{{ __('app.series.unpaid_upfront_title') }}">{{ __('app.series.unpaid_tag') }}</span>
+                                            @endif
                                             {{-- Status must never depend on color alone — a small badge backs up
                                                  the block's own background color once there's room for it. --}}
                                             <span class="hidden lg:inline-block shrink-0 px-1 rounded text-[9px] font-medium bg-white/60 leading-tight">{{ $b->statusLabel() }}</span>

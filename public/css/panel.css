@@ -2629,3 +2629,187 @@ html[dir="rtl"] .ls-fb-msg, html[dir="rtl"] .ls-fbs-text { text-align: right; } 
 /* Grid items default to min-width:auto (as wide as their content); let the
    wizard columns shrink so wide content (the review price grid) scrolls in its frame. */
 .ls-wizard-panel, .ls-wizard-review, .ls-wizard-review-section { grid-template-columns: minmax(0, 1fr); }
+
+/* Recurring bookings: booking-form "Repeat" section, review, series list + page. */
+.ls-repeat-toggle { display: flex; align-items: flex-start; gap: var(--space-3); cursor: pointer; }
+.ls-repeat-toggle input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--color-primary); flex: none; }
+.ls-repeat-toggle span { display: grid; gap: 2px; }
+.ls-repeat-toggle b { font-size: 15px; font-weight: var(--fw-strong); color: var(--color-text); }
+.ls-repeat-toggle small { font-size: 13px; color: var(--color-text-muted); }
+.ls-repeat-fields { display: grid; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--ls-r-card); background: var(--color-surface); }
+.ls-repeat-fields[hidden], .ls-repeat-weekdays[hidden] { display: none; }
+.ls-repeat-fields fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ls-repeat-fields legend { padding: 0; margin-bottom: var(--space-2); }
+.ls-repeat-chip { cursor: pointer; border: 1px solid var(--color-border); }
+.ls-repeat-chip input { position: absolute; opacity: 0; pointer-events: none; }
+/* Selected: solid, plus a check mark — never told apart by a faint tint (or colour) alone. */
+.ls-repeat-chip:has(input:checked) { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-on-primary); font-weight: var(--fw-strong); }
+.ls-repeat-chip:has(input:checked) span::before { content: "✓"; margin-inline-end: 4px; font-weight: var(--fw-strong); }
+.ls-repeat-summary { margin: 0; padding: var(--space-3); border-radius: var(--ls-r-ctl); background: var(--color-surface-brand, var(--color-primary-soft)); color: var(--color-text); font-size: 14px; line-height: 1.5; }
+.ls-repeat-summary b { font-weight: var(--fw-strong); }
+.ls-repeat-summary .ls-repeat-shift { display: block; margin-top: 2px; color: var(--color-warning); font-size: 13px; }
+.ls-repeat-summary:empty { display: none; }
+.ls-repeat-chip:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-repeat-end { display: grid; gap: var(--space-2); }
+.ls-repeat-end-opt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: 14px; }
+.ls-repeat-end-opt .ls-input { width: auto; max-width: 180px; }
+.ls-repeat-end-opt input[type="number"] { width: 90px; }
+
+.ls-series-page { max-width: 960px; margin-inline: auto; display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); }
+.ls-series-page > .ls-page-head { margin-bottom: 0; }
+.ls-series-summary { padding: var(--space-4) var(--space-5); }
+.ls-series-summary dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3) var(--space-5); margin: 0; }
+.ls-series-summary dt { font-size: 12.5px; color: var(--color-text-muted); }
+.ls-series-summary dd { margin: 2px 0 0; font-size: 14px; font-weight: var(--fw-medium); color: var(--color-text); overflow-wrap: anywhere; }
+.ls-series-summary .ls-hint { margin: var(--space-3) 0 0; }
+.ls-series-dates, .ls-series-occurrences, .ls-series-unresolved, .ls-series-list { list-style: none; margin: 0; padding: 0; }
+.ls-series-date { display: grid; grid-template-columns: minmax(130px, 1.1fr) minmax(120px, 1fr) minmax(0, 2fr) minmax(90px, auto); align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-top: 1px solid var(--color-border-subtle); }
+.ls-series-date:first-child { border-top: 0; }
+.ls-series-date.is-conflict { background: color-mix(in srgb, var(--color-warning) 6%, transparent); }
+.ls-series-date.is-skipped .ls-series-date-when, .ls-series-date.is-skipped .ls-series-date-price { opacity: .55; }
+.ls-series-date-when { display: grid; gap: 1px; font-size: 14px; }
+.ls-series-date-choice .ls-hint { margin: 4px 0 0; }
+.ls-series-date-price { text-align: end; font-weight: var(--fw-medium); }
+.ls-series-more { margin: 0; }
+.ls-series-foot { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--ls-r-card); background: var(--color-surface); box-shadow: var(--shadow-pop); margin-top: var(--space-4); }
+.ls-series-total { display: grid; gap: 2px; }
+.ls-series-total b { font-size: 17px; }
+.ls-series-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ls-series-block .ls-card-body { display: grid; gap: var(--space-3); }
+.ls-series-block .ls-card-title + .ls-hint { margin: calc(var(--space-2) * -1) 0 0; }
+.ls-series-unresolved li { display: grid; gap: var(--space-2); padding: var(--space-3) 0; border-top: 1px solid var(--color-border-subtle); }
+.ls-series-unresolved li:first-child { border-top: 0; }
+.ls-series-unresolved li > div:first-child { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: 14px; }
+.ls-series-unresolved-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ls-series-occurrences li { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(0, 2fr) minmax(90px, auto) auto; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--color-border-subtle); font-size: 14px; }
+.ls-series-occurrences li:first-child { border-top: 0; }
+.ls-series-occurrences li.is-past { opacity: .7; }
+.ls-series-occ-when { display: grid; gap: 1px; }
+.ls-series-occ-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.ls-series-occ-price { text-align: end; }
+.ls-series-manage { gap: var(--space-5) !important; }
+.ls-series-form { display: grid; gap: var(--space-2); justify-items: start; }
+.ls-series-form + .ls-series-form { padding-top: var(--space-5); border-top: 1px solid var(--color-border-subtle); }
+.ls-series-form h3 { margin: 0; font-size: 14px; font-weight: var(--fw-strong); }
+.ls-series-form .ls-hint { margin: 0; }
+.ls-series-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3); width: 100%; }
+.ls-series-stop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ls-series-stop .ls-hint { margin: 0; }
+.ls-series-list { display: grid; gap: var(--space-3); }
+.ls-series-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-5); text-decoration: none; color: inherit; transition: border-color var(--ls-t-fast) var(--ls-ease); }
+.ls-series-item:hover { border-color: var(--color-border-hover); }
+.ls-series-item:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.ls-series-item.is-stopped { opacity: .75; }
+.ls-series-item-main { display: grid; gap: 2px; min-width: 0; font-size: 14px; }
+.ls-series-item-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.ls-series-link { margin-bottom: var(--space-4); }
+@media (max-width: 720px) {
+  .ls-series-date { grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-3) var(--space-4); }
+  .ls-series-date-choice { grid-column: 1 / -1; }
+  .ls-series-date-status { justify-self: end; }
+  .ls-series-date-price { grid-column: 1 / -1; text-align: start; }
+  .ls-series-occurrences li { grid-template-columns: minmax(0, 1fr) auto; }
+  .ls-series-occ-tags { grid-column: 1 / -1; }
+  .ls-series-foot { flex-direction: column; align-items: stretch; }
+  .ls-series-actions > * { flex: 1; justify-content: center; }
+  .ls-series-item-side { justify-content: flex-start; }
+}
+
+/* ---- Recurring bookings: switch, payment, money, package (series) ---- */
+.ls-repeat-toggle .ls-switch { appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 36px; height: 20px; margin-top: 2px; border-radius: 999px; background: var(--color-border-strong); cursor: pointer; transition: background var(--ls-t-fast) var(--ls-ease); }
+.ls-repeat-toggle .ls-switch::after { content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--color-surface); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.2)); transition: transform var(--ls-t-fast) var(--ls-ease); }
+.ls-repeat-toggle .ls-switch:checked { background: var(--color-primary); }
+.ls-repeat-toggle .ls-switch:checked::after { transform: translateX(16px); }
+[dir="rtl"] .ls-repeat-toggle .ls-switch:checked::after { transform: translateX(-16px); }
+.ls-repeat-toggle .ls-switch:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-focus-ring); }
+@media (pointer: coarse) { .ls-repeat-toggle { min-height: 44px; align-items: center; } }
+
+.ls-series-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.ls-series-plans .ls-pay-choice-body small { font-size: 12px; color: var(--color-text-muted); }
+.ls-series-pay .ls-field { margin-top: var(--space-4); }
+.ls-series-pay [data-package-apply] { margin-top: var(--space-2); justify-self: start; }
+.ls-series-cover { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); font-size: 14px; color: var(--color-text-secondary); }
+.ls-series-sell { margin-top: var(--space-4); border-top: 1px solid var(--color-border-subtle, var(--color-border)); padding-top: var(--space-3); }
+.ls-series-sell > summary { cursor: pointer; font-weight: var(--fw-medium); color: var(--color-primary); }
+.ls-series-sell[open] > summary { margin-bottom: var(--space-3); }
+.ls-series-sell .ls-pkg-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3); }
+
+.ls-series-money-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-3); }
+.ls-series-money-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3); margin: var(--space-3) 0; }
+.ls-series-money-grid dt { font-size: 13px; color: var(--color-text-muted); }
+.ls-series-money-grid dd { margin: 2px 0 0; font-size: 18px; font-weight: var(--fw-strong); font-variant-numeric: tabular-nums; }
+.ls-series-money-grid dd.is-due { color: var(--color-warning); }
+.ls-series-pay-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); margin-top: var(--space-4); }
+.ls-series-pay-form .ls-field { flex: 1 1 220px; }
+.ls-series-impact { width: 100%; border-collapse: collapse; margin: var(--space-3) 0; font-size: 14px; }
+.ls-series-impact th, .ls-series-impact td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-subtle, var(--color-border)); text-align: start; }
+.ls-series-impact thead th { font-size: 12px; font-weight: var(--fw-medium); color: var(--color-text-muted); }
+.ls-series-impact td.is-money { text-align: end; font-variant-numeric: tabular-nums; }
+
+/* Unpaid date of a series paid upfront — calendar block, dashboard row. */
+.ls-unpaid-tag { display: inline-block; flex: none; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: var(--fw-medium); line-height: 16px; background: var(--color-warning-soft); color: var(--color-warning); text-decoration: none; }
+@media (max-width: 640px) { .ls-series-plans { grid-template-columns: 1fr; } }
+
+/* ---- Repeating booking: two connected steps (quick modal + review page) ---- */
+.ls-flow-steps { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--color-text-muted); }
+.ls-flow-steps li { display: inline-flex; align-items: center; gap: var(--space-2); }
+.ls-flow-steps li > span { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: var(--fw-strong); background: var(--color-surface-subtle); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
+.ls-flow-steps li[aria-current="step"] { color: var(--color-text); font-weight: var(--fw-strong); }
+.ls-flow-steps li[aria-current="step"] > span { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-on-primary); }
+.ls-flow-steps li.is-done > span { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary-text); }
+.ls-flow-steps li + li::before { content: ""; width: 24px; height: 1px; background: var(--color-border); margin-inline-end: var(--space-2); }
+.ls-qb-steps { margin-bottom: calc(var(--space-2) * -1); }
+
+/* Repeat settings fold away once set; the summary line stays. */
+.ls-repeat-summary-row { display: flex; align-items: flex-start; gap: var(--space-2); }
+.ls-repeat-summary-row .ls-repeat-summary { flex: 1; min-width: 0; }
+.ls-repeat-summary-row .ls-repeat-summary:empty + [data-repeat-collapse] { display: none; }
+.ls-repeat.is-collapsed .ls-repeat-fields > fieldset,
+.ls-repeat.is-collapsed .ls-repeat-fields > .ls-hint { display: none; }
+.ls-repeat.is-collapsed .ls-repeat-fields { padding: var(--space-3); }
+
+/* Step 2 — review and confirm (bookings/series/_review). */
+.ls-series-review { display: grid; gap: var(--space-4); min-width: 0; }
+.ls-series-review form { display: grid; gap: var(--space-4); min-width: 0; }
+.ls-series-review[aria-busy="true"] { opacity: .6; pointer-events: none; transition: opacity var(--ls-t-fast) var(--ls-ease); }
+.ls-series-recap { display: grid; gap: 2px; padding: var(--space-3) var(--space-4); border-radius: var(--ls-r-ctl); background: var(--color-surface-brand, var(--color-primary-soft)); font-size: 14px; }
+.ls-series-recap p { margin: 0; overflow-wrap: anywhere; }
+.ls-series-recap .ls-repeat-shift { color: var(--color-warning); font-size: 13px; }
+.ls-series-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: var(--space-3); margin: 0; }
+.ls-series-metrics > div { display: grid; gap: 2px; }
+.ls-series-metrics dt { font-size: 12.5px; color: var(--color-text-muted); }
+.ls-series-metrics dd { margin: 0; font-size: 16px; font-weight: var(--fw-strong); font-variant-numeric: tabular-nums; }
+.ls-series-metrics .is-total dd { color: var(--color-primary-text); }
+.ls-series-fineprint { margin: calc(var(--space-2) * -1) 0 0; font-size: 12.5px; }
+.ls-series-appts { display: grid; gap: var(--space-2); }
+.ls-series-appts-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.ls-series-appts-head h3, .ls-series-pay-plan legend { margin: 0; padding: 0; font-size: 14px; font-weight: var(--fw-strong); color: var(--color-text); }
+.ls-series-appts .ls-series-dates { border: 1px solid var(--color-border-subtle, var(--color-border)); border-radius: var(--ls-r-card); background: var(--color-surface); }
+.ls-series-appts .ls-series-date { padding: var(--space-2) var(--space-3); gap: var(--space-2); font-size: 13.5px; }
+.ls-series-appts .ls-series-date .ls-select { min-height: 34px; padding-block: 4px; font-size: 13px; }
+.ls-series-more-btn { justify-self: start; font-size: 13px; }
+.ls-series-pay-plan { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: var(--space-2); }
+.ls-series-pkg { display: grid; gap: var(--space-2); }
+.ls-series-pkg .ls-series-cover { margin: 0; }
+.ls-series-pkg .ls-series-sell { margin-top: 0; }
+
+/* On the review page the step reads as one card. */
+.ls-series-page .ls-series-review { padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--ls-r-card); background: var(--color-surface); }
+
+/* In the modal: wider for the dates, footer flush with the dialog's bottom edge. */
+.ls-qb.ls-dialog.is-review { width: min(780px, 100%); }
+.ls-qb-review .ls-series-foot { margin-top: 0; bottom: calc(var(--space-5) * -1); border-radius: var(--ls-r-card) var(--ls-r-card) 0 0; }
+
+@media (max-width: 640px) {
+  .ls-qb.ls-dialog.is-review { height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .ls-series-appts .ls-series-date { grid-template-columns: minmax(0, 1fr) auto; }
+  .ls-series-appts .ls-series-date-status { justify-self: end; }
+  .ls-series-appts .ls-series-date-choice { grid-column: 1 / -1; }
+  .ls-series-appts .ls-series-date-price { grid-column: 1 / -1; text-align: start; }
+  .ls-series-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ls-series-metrics .is-total { grid-column: 1 / -1; }
+  .ls-series-page .ls-series-review { padding: var(--space-4); }
+}
+/* A conflict's reason wraps inside its cell instead of running under the time picker. */
+.ls-series-appts .ls-series-date-status { min-width: 0; }
+.ls-series-appts .ls-series-date-status .ls-badge { white-space: normal; text-align: start; line-height: 1.35; }

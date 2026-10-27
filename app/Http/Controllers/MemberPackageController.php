@@ -10,7 +10,6 @@ use App\Services\HourPackageService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 /** Assign (sell) and cancel a member's hour packages — from the member profile. */
 class MemberPackageController extends Controller
@@ -26,15 +25,7 @@ class MemberPackageController extends Controller
         $ownerId = TenantContext::id();
         $member = HotspotUser::where('owner_id', $ownerId)->findOrFail($id);
 
-        $v = $request->validate([
-            'package_template_id' => ['nullable', 'integer', Rule::exists('package_templates', 'id')->where('owner_id', $ownerId)],
-            'name' => 'required|string|max:80',
-            'hours' => 'required|numeric|min:0.25|max:10000',
-            'price_paid' => 'required|numeric|min:0|max:9999999.99',
-            'starts_on' => 'required|date',
-            'expires_on' => 'required|date|after_or_equal:starts_on',
-            'notes' => 'nullable|string|max:500',
-        ]);
+        $v = $request->validate(HourPackageService::saleRules($ownerId));
 
         $template = ! empty($v['package_template_id'])
             ? PackageTemplate::where('owner_id', $ownerId)->findOrFail($v['package_template_id'])
@@ -44,16 +35,7 @@ class MemberPackageController extends Controller
             return back()->withInput()->with('error', __('app.packages.errors.template_inactive'));
         }
 
-        $pkg = $this->packages->assign($member, [
-            'name' => $v['name'],
-            'total_minutes' => (int) round((float) $v['hours'] * 60),
-            'price_paid' => $v['price_paid'],
-            'starts_on' => $v['starts_on'],
-            'expires_on' => $v['expires_on'],
-            // Room restriction is a template term; custom packages cover every room.
-            'room_ids' => $template?->room_ids,
-            'notes' => $v['notes'] ?? null,
-        ], $template);
+        $pkg = $this->packages->sell($member, $v, $template);
 
         $this->activityLogger->log('package.assigned', $member, "Assigned hour package \"{$pkg->name}\" to {$member->name}");
 

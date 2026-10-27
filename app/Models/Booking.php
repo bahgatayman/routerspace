@@ -118,6 +118,31 @@ class Booking extends Model
         return max(0, $this->netRoomCharge() - (float) $this->amount_paid);
     }
 
+    /**
+     * Add a received payment to booking $id in one guarded, engine-independent
+     * write: it applies only while the booking can take payments and the amount
+     * still fits its (net-of-coupon) balance as stored right now, so concurrent
+     * payments can never together exceed it. Then payment_status follows the
+     * new amount. False when nothing was written. Call inside a transaction
+     * (BookingController::recordPayment(), RecurringBookingService::recordSeriesPayment()).
+     */
+    public static function applyPayment(int $id, float $amount): bool
+    {
+        $affected = static::whereKey($id)
+            ->whereNotIn('status', ['cancelled', 'no_show'])
+            ->whereRaw('amount_paid + ? <= total_price - discount_total + 0.005', [$amount])
+            ->increment('amount_paid', $amount);
+
+        if ($affected === 0) {
+            return false;
+        }
+
+        $fresh = static::findOrFail($id);
+        $fresh->update(['payment_status' => static::derivePaymentStatus((float) $fresh->amount_paid, $fresh->netRoomCharge())]);
+
+        return true;
+    }
+
     public const METHOD_PACKAGE = 'package';
 
     /** Paid with prepaid hours (HourPackageService) instead of cash. */
@@ -226,6 +251,29 @@ class Booking extends Model
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
+    }
+
+    /**
+     * The recurring series this booking is an occurrence of (null for a
+     * one-time booking). Not mass-assignable: set only by RecurringBookingService.
+     */
+    public function series(): BelongsTo
+    {
+        return $this->belongsTo(BookingSeries::class, 'booking_series_id');
+    }
+
+    /**
+     * A date of a series the customer pays upfront that still isn't (fully)
+     * paid — the unpaid marker on the calendar, dashboard and booking page.
+     * Load 'series' with the bookings to avoid a query per row.
+     */
+    public function isUnpaidUpfrontDate(): bool
+    {
+        return $this->booking_series_id !== null
+            && ! in_array($this->status, ['cancelled', 'no_show'], true)
+            && ! $this->isPackageCovered()
+            && $this->payment_status !== self::PAYMENT_PAID
+            && $this->series?->isUpfront();
     }
 
     public function hotspotUser(): BelongsTo

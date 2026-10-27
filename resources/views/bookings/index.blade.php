@@ -12,6 +12,9 @@
             <a href="/bookings/calendar" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition text-sm font-medium">
                 {{ __('app.btn.calendar_view') }}
             </a>
+            <a href="{{ route('bookings.series.index') }}" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition text-sm font-medium">
+                {{ __('app.series.nav') }}
+            </a>
             <a href="/bookings/create" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium shadow-sm">
                 + {{ __('app.booking.new_booking') }}
             </a>

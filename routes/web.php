@@ -37,6 +37,7 @@ use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\PackageTemplateController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RecurringBookingController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\RoomImageController;
 use App\Http\Controllers\RouterSyncTaskController;
@@ -249,6 +250,35 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
             Route::get('/bookings/create', [BookingController::class, 'create']);
             Route::post('/bookings', [BookingController::class, 'store']);
         });
+
+        // Recurring bookings (series) — also before the /bookings/{booking} wildcard.
+        Route::middleware('permission:bookings.create')->group(function () {
+            Route::post('/bookings/series/review', [RecurringBookingController::class, 'review'])->name('bookings.series.review');
+            // The review is a form result: opened again from the address bar it starts over, not a 404.
+            Route::get('/bookings/series/review', fn () => redirect('/bookings/create'));
+            Route::post('/bookings/series', [RecurringBookingController::class, 'store'])->name('bookings.series.store');
+            // Books a new date, so it needs the same permission as any new booking.
+            Route::post('/bookings/series/{series}/occurrences', [RecurringBookingController::class, 'addOccurrence'])->whereNumber('series')->name('bookings.series.occurrences.store');
+        });
+        // Selling a package from the review step: the same permission as on the member profile.
+        Route::post('/bookings/series/review/package', [RecurringBookingController::class, 'sellPackage'])
+            ->middleware(['permission:bookings.create', 'permission:packages.assign'])->name('bookings.series.review.package');
+        Route::middleware('permission:bookings.view')->group(function () {
+            Route::get('/bookings/series', [RecurringBookingController::class, 'index'])->name('bookings.series.index');
+            Route::get('/bookings/series/{series}', [RecurringBookingController::class, 'show'])->whereNumber('series')->name('bookings.series.show');
+        });
+        Route::middleware('permission:bookings.edit')->group(function () {
+            Route::post('/bookings/series/{series}/dismiss', [RecurringBookingController::class, 'dismiss'])->whereNumber('series')->name('bookings.series.dismiss');
+            Route::post('/bookings/series/{series}/future', [RecurringBookingController::class, 'updateFuture'])->whereNumber('series')->name('bookings.series.future.update');
+            Route::post('/bookings/series/{series}/stop', [RecurringBookingController::class, 'stop'])->whereNumber('series')->name('bookings.series.stop');
+            // A series payment is a payment on its dates: the same permission as recording one (bookings.edit).
+            Route::post('/bookings/series/{series}/payment', [RecurringBookingController::class, 'recordPayment'])->whereNumber('series')->name('bookings.series.payment');
+            Route::post('/bookings/series/{series}/price/preview', [RecurringBookingController::class, 'pricePreview'])->whereNumber('series')->name('bookings.series.price.preview');
+            Route::post('/bookings/series/{series}/price', [RecurringBookingController::class, 'changePrice'])->whereNumber('series')->name('bookings.series.price');
+        });
+        Route::post('/bookings/series/{series}/cancel-future', [RecurringBookingController::class, 'cancelFuture'])
+            ->whereNumber('series')->middleware('permission:bookings.cancel')->name('bookings.series.future.cancel');
+
         Route::get('/bookings/{booking}', [BookingController::class, 'show'])->middleware('permission:bookings.view');
         Route::middleware('permission:bookings.edit')->group(function () {
             Route::get('/bookings/{booking}/edit', [BookingController::class, 'edit']);

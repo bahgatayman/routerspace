@@ -19,6 +19,19 @@
         <div class="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{{ session('error') }}</div>
     @endif
 
+    @if ($booking->series)
+        {{-- An occurrence of a repeating booking: edited/cancelled here on its own; the series page changes later dates. --}}
+        <div class="ls-series-link">
+            <x-ui.banner :tone="$booking->isUnpaidUpfrontDate() ? 'warn' : 'info'">
+                {{ __('app.series.part_of', ['schedule' => $booking->series->frequencyLabel(), 'time' => $booking->series->timeRange()]) }}
+                @if ($booking->isUnpaidUpfrontDate())
+                    {{ __('app.series.unpaid_upfront_booking') }}
+                @endif
+                <a href="{{ route('bookings.series.show', $booking->series) }}" class="ls-link">{{ __('app.series.manage') }}</a>
+            </x-ui.banner>
+        </div>
+    @endif
+
     <div class="mb-6 flex items-center justify-between">
         <div>
             <a href="/bookings" class="text-sm text-gray-500 hover:text-gray-700">&larr; {{ __('app.btn.back_to_bookings') }}</a>
