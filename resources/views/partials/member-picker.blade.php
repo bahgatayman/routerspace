@@ -112,7 +112,11 @@
         phone.textContent = user.phone;
 
         row.append(name, phone);
-        row.addEventListener('click', () => selectUser(user.id, user.name, user.phone));
+        // mousedown (not click), with preventDefault, so tapping a row on mobile
+        // doesn't first blur #user-search — that closes the keyboard, shifts the
+        // viewport, and the tap misses its target before "click" ever fires.
+        // Same fix already used in bookings/_quick-modal.blade.php and workspaces/create.blade.php.
+        row.addEventListener('mousedown', (e) => { e.preventDefault(); selectUser(user.id, user.name, user.phone); });
         return row;
     }
 
@@ -126,7 +130,7 @@
         label.textContent = @json(__('app.user.add_new_member'));
         row.append(label);
 
-        row.addEventListener('click', () => openQuickAdd(query));
+        row.addEventListener('mousedown', (e) => { e.preventDefault(); openQuickAdd(query); });
         return row;
     }
 
@@ -223,7 +227,8 @@
 
                     results.append(addRow(q));
                     results.classList.remove('hidden');
-                });
+                })
+                .catch(() => { results.classList.add('hidden'); });
         }, 300);
     });
 
