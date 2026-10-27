@@ -44,6 +44,7 @@ class SharedSessionController extends Controller
     {
         $sharedRooms = Room::where('owner_id', TenantContext::id())
             ->where('type', 'shared')
+            ->where('is_available', true) // walk-in picker: switched-off rooms/uses take no new walk-ins
             ->withSum(['sharedSessions as occupied_seats' => function ($q) {
                 $q->where('status', 'open');
             }], 'party_size')
@@ -114,11 +115,32 @@ class SharedSessionController extends Controller
         // defense-in-depth pattern.
         try {
             [$roomName, $error] = DB::transaction(function () use ($request, $ownerId, $user, $partySize, $availability, $packageId, $profile) {
-                $room = Room::where('id', $request->room_id)
+                // Owner/type scope first, then the lock on the PHYSICAL room
+                // (Room::lockInventory()): a walk-in into one use queues with
+                // bookings of the room's other uses, which it would occupy too.
+                // A LOCKING read, as the original query was: a plain SELECT
+                // here would fix the transaction's InnoDB snapshot before the
+                // lock (see Room::lockInventory()).
+                $roomId = Room::where('id', $request->room_id)
                     ->where('owner_id', $ownerId)
                     ->where('type', 'shared')
                     ->lockForUpdate()
-                    ->firstOrFail();
+                    ->value('id') ?? abort(404);
+                $room = Room::lockInventory((int) $roomId);
+
+                // A switched-off room (or use of a room) takes no new walk-ins,
+                // like new bookings (BookingController). Read from the locked row.
+                if (! $room->is_available) {
+                    return [null, __('app.booking.room_disabled')];
+                }
+
+                // No end time: the walk-in occupies its room from its start for
+                // the rest of the day, so it must not run into a booking of
+                // ANOTHER use of the same physical room later that day (its own
+                // shared use's bookings share seats — checked below as before).
+                if ($conflict = $availability->openEndedConflict($room, $request->session_date, $request->start_time, includeOwn: false)) {
+                    return [null, __('app.booking.open_ended_conflict', $conflict)];
+                }
 
                 if ($partySize > $room->effectiveCapacity()) {
                     return [null, "This room only seats {$room->capacity} people."];

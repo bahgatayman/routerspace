@@ -85,6 +85,123 @@ class Room extends Model
         return $this->hasMany(Booking::class);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Multiple uses of one physical room
+    |--------------------------------------------------------------------------
+    | A physical room (physical_room_id IS NULL — every room created the
+    | normal way) can be offered under other independently configured uses
+    | ("Training Room", "Studio"…). Each use is its own room row; all of them
+    | share ONE availability: a booking of any use occupies the physical room
+    | for the other uses (AvailabilityService), and booking writes lock the
+    | physical room's row (lockInventory()). physical_room_id is deliberately
+    | not mass-assignable: only RoomController::storeUse() sets it.
+    */
+
+    /** The physical room this use belongs to (null for a physical room). */
+    public function physicalRoom(): BelongsTo
+    {
+        return $this->belongsTo(Room::class, 'physical_room_id');
+    }
+
+    /** The other uses offered on this physical room (only meaningful on a physical room). */
+    public function uses(): HasMany
+    {
+        return $this->hasMany(Room::class, 'physical_room_id')->orderBy('name')->orderBy('id');
+    }
+
+    public function isAdditionalUse(): bool
+    {
+        return $this->physical_room_id !== null;
+    }
+
+    /** Id of the room row that stands for the physical space (itself for a physical room). */
+    public function inventoryRootId(): int
+    {
+        return (int) ($this->physical_room_id ?? $this->id);
+    }
+
+    /** @var array<int, int>|null */
+    private ?array $inventoryIdsCache = null;
+
+    /**
+     * Every room id sharing this room's availability: the physical room and
+     * all its uses (active or not — a deactivated use's bookings still hold
+     * the room). Just [id] for a room with no other uses.
+     *
+     * @return array<int, int>
+     */
+    public function inventoryRoomIds(): array
+    {
+        if ($this->inventoryIdsCache === null) {
+            $rootId = $this->inventoryRootId();
+            $this->inventoryIdsCache = array_values(array_unique(array_merge(
+                [$rootId],
+                static::where('physical_room_id', $rootId)->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            )));
+        }
+
+        return $this->inventoryIdsCache;
+    }
+
+    /**
+     * Fill inventoryRoomIds() for a whole list of rooms with one query (the
+     * rooms grid, calendars), instead of one query per room.
+     *
+     * @param  iterable<int, Room>  $rooms
+     */
+    public static function primeInventory(iterable $rooms): void
+    {
+        $rooms = collect($rooms);
+        $rootIds = $rooms->map(fn (Room $r) => $r->inventoryRootId())->unique()->values();
+        if ($rootIds->isEmpty()) {
+            return;
+        }
+
+        $byRoot = static::whereIn('physical_room_id', $rootIds)->get(['id', 'physical_room_id'])
+            ->groupBy('physical_room_id')
+            ->map(fn ($uses) => $uses->pluck('id')->map(fn ($id) => (int) $id)->all());
+
+        foreach ($rooms as $room) {
+            $rootId = $room->inventoryRootId();
+            $room->inventoryIdsCache = array_values(array_unique(array_merge([$rootId], $byRoot[$rootId] ?? [])));
+        }
+    }
+
+    /** The ids of the OTHER uses sharing this room's availability (empty for most rooms). */
+    public function otherUseIds(): array
+    {
+        return array_values(array_diff($this->inventoryRoomIds(), [(int) $this->id]));
+    }
+
+    /**
+     * For booking writes, at the START of the DB::transaction(): lock this
+     * use's row, then its physical room's row — every use of one physical
+     * room queues on that one row, so two uses can't be booked for
+     * overlapping times concurrently. Returns this use's (locked) row.
+     *
+     * Only LOCKING reads before the locks are held: on InnoDB a transaction's
+     * REPEATABLE READ snapshot is taken at its first non-locking read, and a
+     * snapshot taken before waiting would hide the booking another request
+     * committed meanwhile (measured: both overlapping bookings succeeded when
+     * the physical room id was read with a plain SELECT first). Callers must
+     * likewise not run plain SELECTs in the transaction before calling this.
+     *
+     * Lock order is always use → physical room, and nothing locks a use while
+     * holding a physical room, so no two requests wait on each other in a
+     * cycle. Genuine row locks on MySQL; a no-op on SQLite, where the callers'
+     * post-write re-check still applies.
+     */
+    public static function lockInventory(int $roomId): self
+    {
+        $use = static::whereKey($roomId)->lockForUpdate()->firstOrFail();
+        if ($use->physical_room_id !== null) {
+            static::whereKey($use->physical_room_id)->lockForUpdate()->firstOrFail();
+        }
+
+        return $use;
+    }
+
     public function coupons(): BelongsToMany
     {
         return $this->belongsToMany(Coupon::class, 'coupon_rooms')->withTimestamps();
@@ -99,7 +216,8 @@ class Room extends Model
         // (SQLite stores the literal string; MySQL's real DATE column type
         // happens to truncate it back to a bare date on insert, which is
         // why this was invisible in a MySQL-backed environment).
-        return $this->bookings()
+        // Any use of the same physical room occupies it (inventoryRoomIds()).
+        return Booking::whereIn('room_id', $this->inventoryRoomIds())
             ->whereDate('booking_date', $date)
             ->where('status', '!=', 'cancelled')
             ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))

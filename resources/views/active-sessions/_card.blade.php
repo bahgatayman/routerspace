@@ -12,6 +12,7 @@
     is it ending → what next (Check out — or Check In — is the one dominant action).
 --}}
 @php
+    $endAlert = $endAlert ?? null; // AvailabilityService::sessionEndAlerts() entry, checked-in sessions only
     $isShared = $row->isShared();
     $model = $row->model;
     $customer = $row->customer;
@@ -58,8 +59,10 @@
         $nextChargeAt = $isShared
             ? app(\App\Services\RoomPricingService::class)->nextSessionChargeAt($model, now())
             : app(\App\Services\RoomPricingService::class)->nextOpenBookingChargeAt($model, now());
-        $endsAt = null;
-        $endingSoon = false;
+        // A checked-in reservation keeps its booked end (AvailabilityService::
+        // sessionEndAlerts()); a walk-in has none. Billing is unaffected.
+        $endsAt = $endAlert['ends_at'] ?? null;
+        $endingSoon = (bool) ($endAlert['soon'] ?? false);
     } elseif ($needsCheckIn) {
         $unit = null;
         $nextChargeAt = null;
@@ -78,6 +81,8 @@
         $endsAt = $model->endsAt();
         $endingSoon = now()->diffInMinutes($endsAt, false) <= 15;
     }
+    $runningLate = (bool) ($endAlert['late'] ?? false);
+    $endConflict = $endAlert['conflict'] ?? null;
     $bill = round($roomCharge + $itemsTotal, 2);
     // Per-minute billing ticks live for shared sessions AND Open Session
     // bookings (both bill by elapsed time); block billing steps server-side.
@@ -96,7 +101,7 @@
         'line_total' => number_format($item->line_total, 2),
     ])->values();
 @endphp
-<article class="ls-session {{ $endingSoon ? 'is-ending' : '' }}"
+<article class="ls-session {{ $runningLate ? 'is-late' : ($endingSoon ? 'is-ending' : '') }}"
          data-ls-item="sessions"
          data-ls-text="{{ $customer->name }} {{ $customer->phone }} {{ $row->room->name }}"
          aria-label="{{ $customer->name }} — {{ $row->room->name }}">
@@ -111,7 +116,9 @@
                 <span class="ls-kind">· {{ $roomIsShared ? __('app.ui.sessions.shared') : __('app.ui.sessions.private') }}@if ($isOpenBooking) · {{ __('app.booking.duration_type.badge') }}@endif</span>
             </span>
         </div>
-        @if ($endingSoon)
+        @if ($runningLate)
+            <x-ui.badge tone="danger">{{ __('app.ui.sessions.running_late') }}</x-ui.badge>
+        @elseif ($endingSoon)
             <x-ui.badge tone="warn">{{ __('app.ui.sessions.ending_soon') }}</x-ui.badge>
         @else
             <span class="ls-status"><span class="ls-dot is-pulse"></span>{{ __('app.ui.sessions.live') }}</span>
@@ -134,10 +141,23 @@
     </div>
 
     @if ($isShared || $isOpenBooking)
-        @if ($model->party_size > 1)
+        @if ($model->party_size > 1 || $endsAt)
             <div class="ls-session-meta">
-                <span class="ls-trunc">{{ __('app.session.party_of', ['count' => $model->party_size]) }}</span>
+                <span class="ls-trunc">@if ($model->party_size > 1){{ __('app.session.party_of', ['count' => $model->party_size]) }}@endif</span>
+                @if ($endsAt)
+                    <span class="{{ $runningLate ? 'is-late' : ($endingSoon ? 'is-soon' : 'ls-faint') }}">{{ __('app.ui.sessions.booked_until', ['time' => $endsAt->translatedFormat('g:i A')]) }}</span>
+                @endif
             </div>
+        @endif
+        @if ($endConflict)
+            {{-- The next booking of another use of this room: say what and when, and what to do. --}}
+            <p class="ls-session-conflict {{ $runningLate ? 'is-late' : '' }}" role="{{ $runningLate ? 'alert' : 'status' }}">
+                <x-ui.icon name="alert" />
+                <span>{{ __($runningLate ? 'app.ui.sessions.late_conflict' : 'app.ui.sessions.soon_conflict', [
+                    'room' => $endConflict['room'],
+                    'time' => \Carbon\Carbon::createFromFormat('H:i', $endConflict['time'])->translatedFormat('g:i A'),
+                ]) }}</span>
+            </p>
         @endif
         @if ($nextChargeAt)
             {{-- Not shown, but kept: when it reaches zero panel.js reloads once so a

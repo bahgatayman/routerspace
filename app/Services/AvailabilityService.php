@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\Room;
+use App\Models\SharedSession;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
@@ -34,6 +35,9 @@ class AvailabilityService
     /** Booking statuses that never hold capacity (everything else does). */
     public const NON_BLOCKING_STATUSES = ['cancelled', 'no_show'];
 
+    /** "Ending soon" on Active Sessions: this many minutes before a booked end. */
+    public const ENDING_SOON_MINUTES = 15;
+
     /** Longest date range rangeReport() answers in one call. */
     public const MAX_RANGE_DAYS = 31;
 
@@ -60,13 +64,38 @@ class AvailabilityService
      */
     public function usedCapacity(Room $room, string $date, string $start, string $end, ?int $excludeBookingId = null): int
     {
+        // Another use of the same physical room holding any part of this
+        // window takes the WHOLE room: its full capacity is added on top of
+        // this use's own seats. availabilityForRange() then answers 0, and
+        // exceedsCapacity()'s post-write re-check fails for a booking that
+        // slipped in concurrently — the same two layers as for one room.
+        $otherUses = $this->otherUsesOccupied($room, $date, $start, $end, $excludeBookingId)
+            ? $room->effectiveCapacity()
+            : 0;
+
+        return $this->ownUsedCapacity($room, $date, $start, $end, $excludeBookingId) + $otherUses;
+    }
+
+    /**
+     * usedCapacity() for this use itself (no other uses of the physical room):
+     * its bookings plus, for a shared room, the seats its open walk-ins hold
+     * over the window (openSessionHolds()). A checked-in reservation is
+     * counted once, through its open session.
+     */
+    private function ownUsedCapacity(Room $room, string $date, string $start, string $end, ?int $excludeBookingId = null): int
+    {
+        $holds = $room->isShared() ? $this->openSessionHolds([$room->id], $date) : collect();
+        $heldBookingIds = $holds->pluck('booking_id')->filter()->values()->all();
+        $holdSeats = (int) $holds->filter(fn (array $h) => $this->holdOverlaps($h, $start, $end))->sum('party_size');
+
         // whereDate(), not where('booking_date', $date) — see the identical
         // comment on Room::hasConflict() for why a bare string comparison
         // silently fails to match on engines without native DATE coercion.
-        return (int) $room->bookings()
+        return $holdSeats + (int) $room->bookings()
             ->whereDate('booking_date', $date)
             ->whereNotIn('status', self::NON_BLOCKING_STATUSES)
             ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))
+            ->when($heldBookingIds !== [], fn ($q) => $q->whereNotIn('id', $heldBookingIds))
             ->where(function ($q) use ($start, $end) {
                 // An Open Session booking has no predictable end (end_time
                 // IS NULL) — 'end_time > $start' would evaluate to SQL NULL
@@ -78,6 +107,251 @@ class AvailabilityService
                     ->orWhere('status', 'open');
             })
             ->sum('party_size');
+    }
+
+    /**
+     * Does another use of the same physical room hold any part of this
+     * window? Same rules as usedCapacity() for its bookings (blocking
+     * statuses, touching bounds allowed, an Open Session booking always
+     * counting on its date), plus an open walk-in (SharedSession) of another
+     * use from its start time on — it has no end yet. Deactivated uses count
+     * too: deactivating a use never releases what it already holds.
+     * $excludeBookingId: the booking being edited, which may be moving
+     * between uses of the same room.
+     */
+    private function otherUsesOccupied(Room $room, string $date, string $start, string $end, ?int $excludeBookingId = null): bool
+    {
+        $others = $room->otherUseIds();
+        if ($others === []) {
+            return false;
+        }
+
+        $booked = Booking::whereIn('room_id', $others)
+            ->whereDate('booking_date', $date)
+            ->whereNotIn('status', self::NON_BLOCKING_STATUSES)
+            ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))
+            ->where(fn ($q) => $q->where(fn ($q2) => $q2->where('start_time', '<', $end)->where('end_time', '>', $start))
+                ->orWhere('status', 'open'))
+            ->exists();
+
+        return $booked || $this->openSessionHolds($others, $date)
+            ->contains(fn (array $h) => $this->holdOverlaps($h, $start, $end));
+    }
+
+    /**
+     * Seats this shared room's open walk-ins hold over the window (part of
+     * usedCapacity()) — so a refusal can say walk-ins are the reason.
+     */
+    public function walkInSeatsHeld(Room $room, string $date, string $start, string $end): int
+    {
+        if (! $room->isShared()) {
+            return 0;
+        }
+
+        return (int) $this->openSessionHolds([$room->id], $date)
+            ->filter(fn (array $h) => $this->holdOverlaps($h, $start, $end))
+            ->sum('party_size');
+    }
+
+    /**
+     * What each OPEN SharedSession of these rooms holds on $from…$to, for the
+     * future-window checks (usedCapacity(), freeBusyForDay(), rangeReport()).
+     * A session records no end time, so:
+     *  - a walk-in (no reservation) holds its seats from its start to the end
+     *    of that day — the explicit conservative rule every open-ended
+     *    occupancy already follows (openEndedConflict());
+     *  - a checked-in reservation holds them until its booked end; once it is
+     *    still open past that end ('late') its real end is unknown, so to the
+     *    end of that day as well.
+     * 'end' => null means "to the end of the day". 'booking_id' is the
+     * reservation the session stands for — callers skip that booking row so
+     * the party is counted once, by its seated headcount (the session's
+     * party_size), exactly as usedCapacityNow() does.
+     *
+     * @param  int[]  $roomIds
+     * @return Collection<int, array{room_id: int, date: string, start: int, end: int|null, party_size: int, booking_id: int|null, late: bool, session: SharedSession}>
+     */
+    private function openSessionHolds(array $roomIds, string $from, ?string $to = null): Collection
+    {
+        if ($roomIds === []) {
+            return collect();
+        }
+
+        $now = Carbon::now();
+        $today = $now->toDateString();
+        $nowMin = $this->toMinutes($now->format('H:i'));
+
+        return SharedSession::whereIn('room_id', $roomIds)
+            ->where('status', 'open')
+            ->whereDate('session_date', '>=', $from)
+            ->whereDate('session_date', '<=', $to ?? $from)
+            ->with(['booking:id,booking_date,end_time', 'hotspotUser:id,name'])
+            ->get(['id', 'room_id', 'hotspot_user_id', 'booking_id', 'session_date', 'start_time', 'party_size'])
+            ->map(function (SharedSession $s) use ($today, $nowMin) {
+                $date = $s->session_date->toDateString();
+                $bookedEnd = $s->booking?->end_time !== null ? $this->toMinutes((string) $s->booking->end_time) : null;
+                $late = $bookedEnd !== null && ($date < $today || ($date === $today && $nowMin >= $bookedEnd));
+
+                return [
+                    'room_id' => (int) $s->room_id,
+                    'date' => $date,
+                    'start' => $this->toMinutes((string) $s->start_time),
+                    'end' => ($bookedEnd === null || $late) ? null : $bookedEnd,
+                    'party_size' => (int) $s->party_size,
+                    'booking_id' => $s->booking_id ? (int) $s->booking_id : null,
+                    'late' => $late,
+                    'session' => $s,
+                ];
+            })
+            ->values();
+    }
+
+    /**
+     * End-of-booking alerts for open CHECKED-IN sessions (Active Sessions):
+     * session id => [
+     *   'ends_at'  => the reservation's booked end (never changed),
+     *   'soon'     => within ENDING_SOON_MINUTES of it,
+     *   'late'     => still open past it,
+     *   'conflict' => ['room' => name, 'time' => 'H:i'] — the next booking on
+     *                 ANOTHER use of the same physical room the session runs
+     *                 into once past its end (openEndedConflict()), or null.
+     * ]
+     * Walk-ins without a reservation have no booked end, and are refused at
+     * open when another use is booked later that day, so they never appear.
+     * Read-only: nothing is closed or rewritten — staff decide.
+     *
+     * @param  iterable<int, SharedSession>  $sessions  open sessions, owner-scoped by the caller
+     * @return array<int, array{ends_at: Carbon, soon: bool, late: bool, conflict: array{room: string, time: string}|null}>
+     */
+    public function sessionEndAlerts(iterable $sessions): array
+    {
+        $now = Carbon::now();
+        $alerts = [];
+
+        foreach ($sessions as $session) {
+            $booking = $session->booking;
+            if (! $booking || $booking->end_time === null || $session->status !== 'open') {
+                continue;
+            }
+
+            $endsAt = $booking->endsAt();
+            $late = $now->gte($endsAt);
+            $soon = ! $late && $now->diffInMinutes($endsAt, false) <= self::ENDING_SOON_MINUTES;
+
+            $alerts[$session->id] = [
+                'ends_at' => $endsAt,
+                'soon' => $soon,
+                'late' => $late,
+                'conflict' => ($soon || $late)
+                    ? $this->openEndedConflict($session->room, $booking->booking_date->toDateString(), $endsAt->format('H:i'), includeOwn: false)
+                    : null,
+            ];
+        }
+
+        return $alerts;
+    }
+
+    /** A rangeReport() conflict entry for an open walk-in (openSessionHolds() span). */
+    private function holdConflict(array $hold, int $winStart, int $winEnd, ?string $otherUse): array
+    {
+        $end = $hold['end'] ?? 24 * 60;
+
+        return [
+            'booking_id' => null,
+            'start' => $this->fromMinutes($hold['start']),
+            'end' => $hold['end'] === null ? null : $this->fromMinutes($hold['end']),
+            'status' => 'open',
+            'customer' => $hold['session']->hotspotUser?->name,
+            'party_size' => $hold['party_size'],
+            'overlap_minutes' => max(0, min($winEnd, $end) - max($winStart, $hold['start'])),
+            'other_use' => $otherUse,
+        ];
+    }
+
+    /** Does an openSessionHolds() span overlap the [start, end) window? Touching bounds don't. */
+    private function holdOverlaps(array $hold, string $start, string $end): bool
+    {
+        return $hold['start'] < $this->toMinutes($end)
+            && ($hold['end'] ?? 24 * 60) > $this->toMinutes($start);
+    }
+
+    /**
+     * An occupancy with NO end time (a walk-in SharedSession, or an Open
+     * Session booking) started at $start runs on for the rest of $date, so it
+     * must not be opened while a booking later that day would collide with
+     * it. Returns the first such booking — ['room' => its room's name,
+     * 'time' => 'H:i' it starts] — or null when the rest of the day is free.
+     *
+     * Checked: blocking bookings (pending/confirmed/checked-in/open) on $date
+     * that end after $start, on the OTHER uses of $room's physical room, plus
+     * — with $includeOwn — on $room itself (an exclusive room's Open Session;
+     * a shared walk-in shares its own use's seats, so its own bookings stay
+     * governed by the existing seat check instead). A never-checked-in
+     * shared-room booking past its no-show grace no longer counts, exactly as
+     * in the live checks (rejectPastGrace()). What is happening RIGHT NOW is
+     * the callers' availableNow() check; this covers what comes later.
+     *
+     * @return array{room: string, time: string}|null
+     */
+    public function openEndedConflict(Room $room, string $date, string $start, bool $includeOwn): ?array
+    {
+        $ids = $includeOwn ? $room->inventoryRoomIds() : $room->otherUseIds();
+        if ($ids === []) {
+            return null;
+        }
+
+        $rooms = Room::whereIn('id', $ids)->get(['id', 'name', 'type'])->keyBy('id');
+        $later = Booking::whereIn('room_id', $ids)
+            ->whereDate('booking_date', $date)
+            ->whereNotIn('status', self::NON_BLOCKING_STATUSES)
+            ->where(fn ($q) => $q->where('end_time', '>', $start)->orWhere('status', 'open'))
+            ->orderBy('start_time')
+            ->get(['id', 'room_id', 'status', 'booking_date', 'start_time', 'end_time', 'party_size']);
+        $later = $this->rejectPastGrace($later, fn (Booking $b) => ($rooms[$b->room_id]->type ?? null) === 'shared');
+
+        $first = $later->first();
+
+        return $first ? [
+            'room' => $rooms[$first->room_id]->name ?? '',
+            'time' => substr((string) $first->start_time, 0, 5),
+        ] : null;
+    }
+
+    /**
+     * Time spans held on $date by the OTHER uses of $room's physical room —
+     * their blocking bookings (an Open Session one with no end) and open
+     * walk-ins (no end yet) — in freeBusyForDay()'s span format, flagged
+     * 'other' so they fill this use completely.
+     *
+     * @return Collection<int, array{start: int, end: int|null, party_size: int, other: bool}>
+     */
+    private function otherUseSpans(Room $room, string $date): Collection
+    {
+        $others = $room->otherUseIds();
+        if ($others === []) {
+            return collect();
+        }
+
+        $bookings = Booking::whereIn('room_id', $others)
+            ->whereDate('booking_date', $date)
+            ->whereNotIn('status', self::NON_BLOCKING_STATUSES)
+            ->get(['start_time', 'end_time', 'status'])
+            ->map(fn ($b) => [
+                'start' => $this->toMinutes((string) $b->start_time),
+                'end' => ($b->status === 'open' || $b->end_time === null) ? null : $this->toMinutes((string) $b->end_time),
+                'party_size' => 0,
+                'other' => true,
+            ]);
+
+        $walkIns = $this->openSessionHolds($others, $date)
+            ->map(fn (array $h) => [
+                'start' => $h['start'],
+                'end' => $h['end'],
+                'party_size' => 0,
+                'other' => true,
+            ]);
+
+        return $bookings->concat($walkIns)->values();
     }
 
     /**
@@ -137,16 +411,46 @@ class AvailabilityService
      *
      * @return array<int, array{start: string, end: string, used: int, capacity: int, available: int, closed: bool}>
      */
-    public function freeBusyForDay(Room $room, string $date): array
+    public function freeBusyForDay(Room $room, string $date, bool $includeOtherUses = true): array
     {
         $capacity = $room->effectiveCapacity();
+
+        // A shared room's open walk-ins hold seats too (openSessionHolds(),
+        // as in usedCapacity()). Left out with the other uses by
+        // peakCommittedUsage(), which counts open sessions on its own.
+        $holds = $includeOtherUses && $room->isShared() ? $this->openSessionHolds([$room->id], $date) : collect();
+        $heldBookingIds = $holds->pluck('booking_id')->filter()->values()->all();
 
         // Same future-window semantics as usedCapacity() — see its docblock
         // for why this deliberately does not live-check no-show grace.
         $bookings = $room->bookings()
             ->whereDate('booking_date', $date)
             ->whereNotIn('status', ['cancelled', 'no_show'])
+            ->when($heldBookingIds !== [], fn ($q) => $q->whereNotIn('id', $heldBookingIds))
             ->get(['start_time', 'end_time', 'party_size']);
+
+        // An Open Session booking has no end yet (end_time IS NULL). It is
+        // resolved below to the end of the displayed day — the same "always
+        // occupied" rule usedCapacity() applies — and never fed to toMinutes().
+        $spans = $bookings->map(fn ($b) => [
+            'start' => $this->toMinutes((string) $b->start_time),
+            'end' => $b->end_time === null ? null : $this->toMinutes((string) $b->end_time),
+            'party_size' => (int) $b->party_size,
+            'other' => false,
+        ])->concat($holds->map(fn (array $h) => [
+            'start' => $h['start'],
+            'end' => $h['end'],
+            'party_size' => $h['party_size'],
+            'other' => false,
+        ]));
+
+        // Other uses of the same physical room: any of their bookings or
+        // open walk-ins fills this use completely for its time (see
+        // usedCapacity()). Left out only by peakCommittedUsage(), which
+        // measures what this use itself has committed.
+        if ($includeOtherUses) {
+            $spans = $spans->concat($this->otherUseSpans($room, $date));
+        }
 
         $hasConfiguredHours = $this->businessHours->hasConfiguredHours($room->owner);
 
@@ -163,8 +467,8 @@ class AvailabilityService
             // before hours existed) — that booking must stay visible, not
             // get silently scrolled out of the displayed range.
             $candidateBounds = $openRanges->flatten()
-                ->merge($bookings->map(fn ($b) => $this->toMinutes((string) $b->start_time)))
-                ->merge($bookings->map(fn ($b) => $this->toMinutes((string) $b->end_time)));
+                ->merge($spans->pluck('start'))
+                ->merge($spans->pluck('end')->filter(fn ($end) => $end !== null));
 
             if ($candidateBounds->isEmpty()) {
                 // Fully closed day, nothing booked either — nothing to
@@ -183,10 +487,14 @@ class AvailabilityService
             $openRanges = null;
         }
 
+        $spans = $spans->map(fn ($span) => $span['end'] === null
+            ? ['end' => max($dayEndMin, $span['start'])] + $span
+            : $span);
+
         $boundaries = collect([$dayStartMin, $dayEndMin]);
-        foreach ($bookings as $booking) {
-            $boundaries->push(max($dayStartMin, $this->toMinutes((string) $booking->start_time)));
-            $boundaries->push(min($dayEndMin, $this->toMinutes((string) $booking->end_time)));
+        foreach ($spans as $span) {
+            $boundaries->push(max($dayStartMin, $span['start']));
+            $boundaries->push(min($dayEndMin, $span['end']));
         }
         if ($openRanges !== null) {
             foreach ($openRanges as [$rangeStart, $rangeEnd]) {
@@ -207,12 +515,16 @@ class AvailabilityService
             }
 
             $used = 0;
-            foreach ($bookings as $booking) {
-                $bookingStartMin = $this->toMinutes((string) $booking->start_time);
-                $bookingEndMin = $this->toMinutes((string) $booking->end_time);
-                if ($bookingStartMin < $segEndMin && $bookingEndMin > $segStartMin) {
-                    $used += (int) $booking->party_size;
+            $otherUse = false;
+            foreach ($spans as $span) {
+                if ($span['start'] < $segEndMin && $span['end'] > $segStartMin) {
+                    $span['other'] ? $otherUse = true : $used += $span['party_size'];
                 }
+            }
+            // Held by another use: the segment is full for this use (shown as
+            // full capacity, not as an inflated seat count).
+            if ($otherUse) {
+                $used = max($used, $capacity);
             }
 
             $closed = $openRanges !== null && ! $openRanges->contains(
@@ -226,6 +538,8 @@ class AvailabilityService
                 'capacity' => $capacity,
                 'available' => $closed ? 0 : max(0, $capacity - $used),
                 'closed' => $closed,
+                // True when another use of the same physical room holds it.
+                'other_use' => $otherUse,
             ];
         }
 
@@ -235,7 +549,7 @@ class AvailabilityService
         $merged = [];
         foreach ($segments as $segment) {
             $last = end($merged);
-            if ($last !== false && $last['used'] === $segment['used'] && $last['closed'] === $segment['closed'] && $last['end'] === $segment['start']) {
+            if ($last !== false && $last['used'] === $segment['used'] && $last['closed'] === $segment['closed'] && $last['other_use'] === $segment['other_use'] && $last['end'] === $segment['start']) {
                 $merged[array_key_last($merged)]['end'] = $segment['end'];
             } else {
                 $merged[] = $segment;
@@ -276,8 +590,14 @@ class AvailabilityService
         $today = now()->toDateString();
         $owner = $rooms->first()->owner;
 
+        // Every room sharing availability with a listed room (other uses of
+        // the same physical room), so their bookings count too.
+        Room::primeInventory($rooms);
+        $inventoryIds = $rooms->flatMap(fn (Room $r) => $r->inventoryRoomIds())->unique()->values();
+        $roomNames = Room::whereIn('id', $inventoryIds)->pluck('name', 'id');
+
         // Every booking that could matter, for every room and day, in one query.
-        $bookings = Booking::whereIn('room_id', $rooms->pluck('id'))
+        $bookings = Booking::whereIn('room_id', $inventoryIds)
             ->whereDate('booking_date', '>=', $dates[0])
             ->whereDate('booking_date', '<=', end($dates))
             ->whereNotIn('status', self::NON_BLOCKING_STATUSES)
@@ -285,6 +605,14 @@ class AvailabilityService
             ->orderBy('start_time')
             ->get(['id', 'room_id', 'hotspot_user_id', 'booking_date', 'start_time', 'end_time', 'party_size', 'status'])
             ->groupBy(fn (Booking $b) => $b->room_id.'|'.$b->booking_date->toDateString());
+
+        // Open walk-ins hold seats too (openSessionHolds(): to the booked end of a
+        // checked-in reservation, else to the end of the day) — a shared use's
+        // own walk-ins take seats, another use's take the whole room.
+        $holds = $this->openSessionHolds($inventoryIds->all(), $dates[0], end($dates));
+        $heldBookingIds = $holds->pluck('booking_id')->filter()->flip();
+        $walkIns = $holds->groupBy(fn (array $h) => $h['room_id'].'|'.$h['date']);
+        $holdOverlapsWindow = fn (array $h) => $h['start'] < $winEnd && ($h['end'] ?? 24 * 60) > $winStart;
 
         // Working hours: same answer for every room on a given date.
         $open = [];
@@ -300,23 +628,60 @@ class AvailabilityService
 
             foreach ($dates as $date) {
                 // Exactly usedCapacity()'s overlap rule, applied in memory.
-                $overlapping = ($bookings[$room->id.'|'.$date] ?? collect())->filter(function (Booking $b) use ($winStart, $winEnd) {
+                $overlaps = function (Booking $b) use ($winStart, $winEnd) {
                     if ($b->status === 'open' || $b->end_time === null) {
                         return true;
                     }
 
                     return $this->toMinutes((string) $b->start_time) < $winEnd && $this->toMinutes((string) $b->end_time) > $winStart;
-                })->values();
+                };
+                $overlapping = ($bookings[$room->id.'|'.$date] ?? collect())
+                    ->reject(fn (Booking $b) => $heldBookingIds->has($b->id)) // counted through its open session
+                    ->filter($overlaps)->values();
+                $ownWalkIns = ($walkIns[$room->id.'|'.$date] ?? collect())->filter($holdOverlapsWindow)->values();
+                // As booking-shaped spans, so the seat sweep below treats them alike.
+                $ownWalkInSpans = $ownWalkIns->map(fn (array $h) => (object) [
+                    'start_time' => $this->fromMinutes($h['start']),
+                    'end_time' => $h['end'] === null ? null : $this->fromMinutes($h['end']),
+                    'party_size' => $h['party_size'],
+                ]);
 
-                $used = (int) $overlapping->sum('party_size');
-                $remaining = max(0, $capacity - $used);
+                // Another use of the same physical room holding part of the
+                // window makes it unavailable for this use (usedCapacity()).
+                $otherBookings = collect($room->otherUseIds())
+                    ->flatMap(fn ($id) => ($bookings[$id.'|'.$date] ?? collect())->filter($overlaps))
+                    ->values();
+                $otherWalkIns = collect($room->otherUseIds())
+                    ->flatMap(fn ($id) => ($walkIns[$id.'|'.$date] ?? collect())->filter($holdOverlapsWindow))
+                    ->values();
+                $heldByOtherUse = $otherBookings->isNotEmpty() || $otherWalkIns->isNotEmpty();
+
+                // Same sum as usedCapacity(): every overlapping booking + walk-in.
+                $used = (int) $overlapping->sum('party_size') + (int) $ownWalkIns->sum('party_size');
+                $remaining = $heldByOtherUse ? 0 : max(0, $capacity - $used);
+                if ($heldByOtherUse) {
+                    $used = max($used, $capacity);
+                }
 
                 $status = match (true) {
                     $date < $today => 'past',
                     ! $open[$date] => 'closed',
-                    $remaining >= $needed => $overlapping->isEmpty() ? 'available' : 'limited',
+                    $remaining >= $needed => ($overlapping->isEmpty() && $ownWalkIns->isEmpty()) ? 'available' : 'limited',
                     default => 'unavailable',
                 };
+
+                $otherConflicts = $otherBookings->map(fn (Booking $b) => [
+                    'booking_id' => $b->id,
+                    'start' => substr((string) $b->start_time, 0, 5),
+                    'end' => ($b->status === 'open' || $b->end_time === null) ? null : substr((string) $b->end_time, 0, 5),
+                    'status' => $b->status,
+                    'customer' => $b->hotspotUser?->name,
+                    'party_size' => (int) $b->party_size,
+                    'overlap_minutes' => max(0, min($winEnd, ($b->status === 'open' || $b->end_time === null) ? $winEnd : $this->toMinutes((string) $b->end_time))
+                        - max($winStart, $this->toMinutes((string) $b->start_time))),
+                    // Booked under another use of this physical room.
+                    'other_use' => $roomNames[$b->room_id] ?? null,
+                ])->concat($otherWalkIns->map(fn (array $h) => $this->holdConflict($h, $winStart, $winEnd, $roomNames[$h['room_id']] ?? null)));
 
                 $days[] = [
                     'date' => $date,
@@ -335,8 +700,10 @@ class AvailabilityService
                         // Minutes of the requested window this booking takes.
                         'overlap_minutes' => max(0, min($winEnd, $b->end_time === null ? $winEnd : $this->toMinutes((string) $b->end_time))
                             - max($winStart, $this->toMinutes((string) $b->start_time))),
-                    ])->all(),
-                    'segments' => $this->windowSegments($overlapping, $winStart, $winEnd, $capacity),
+                        'other_use' => null,
+                    ])->concat($ownWalkIns->map(fn (array $h) => $this->holdConflict($h, $winStart, $winEnd, null)))
+                        ->concat($otherConflicts)->all(),
+                    'segments' => $this->windowSegments($overlapping->concat($ownWalkInSpans), $winStart, $winEnd, $capacity, $otherBookings, $otherWalkIns),
                 ];
             }
 
@@ -367,14 +734,24 @@ class AvailabilityService
      *
      * @return array<int, array{start: string, end: string, used: int, available: int}>
      */
-    private function windowSegments(Collection $overlapping, int $winStart, int $winEnd, int $capacity): array
+    private function windowSegments(Collection $overlapping, int $winStart, int $winEnd, int $capacity, ?Collection $otherBookings = null, ?Collection $otherWalkIns = null): array
     {
+        // Other uses of the same physical room: [start, end) in minutes; no end = rest of the day.
+        $held = collect($otherBookings ?? [])->map(fn (Booking $b) => [
+            $this->toMinutes((string) $b->start_time),
+            ($b->status === 'open' || $b->end_time === null) ? 24 * 60 : $this->toMinutes((string) $b->end_time),
+        ])->concat(collect($otherWalkIns ?? [])->map(fn (array $h) => [$h['start'], $h['end'] ?? 24 * 60]));
+
         $points = collect([$winStart, $winEnd]);
         foreach ($overlapping as $b) {
             $points->push(max($winStart, min($winEnd, $this->toMinutes((string) $b->start_time))));
             if ($b->end_time !== null) {
                 $points->push(max($winStart, min($winEnd, $this->toMinutes((string) $b->end_time))));
             }
+        }
+        foreach ($held as [$hs, $he]) {
+            $points->push(max($winStart, min($winEnd, $hs)));
+            $points->push(max($winStart, min($winEnd, $he)));
         }
         $points = $points->unique()->sort()->values();
 
@@ -387,6 +764,10 @@ class AvailabilityService
 
                 return $bs < $z && $be > $a;
             })->sum('party_size');
+            // Held by another use: full for this use.
+            if ($held->contains(fn ($h) => $h[0] < $z && $h[1] > $a)) {
+                $used = max($used, $capacity);
+            }
 
             $last = end($segments);
             if ($last !== false && $last['used'] === $used) {
@@ -451,7 +832,9 @@ class AvailabilityService
             ->unique();
 
         $peakBookingUsage = $futureDates
-            ->map(fn ($date) => collect($this->freeBusyForDay($room, $date))->max('used') ?? 0)
+            // Own bookings only: another use's bookings must never stop this
+            // use's capacity from being lowered.
+            ->map(fn ($date) => collect($this->freeBusyForDay($room, $date, includeOtherUses: false))->max('used') ?? 0)
             ->max() ?? 0;
 
         $openSessionOccupancy = (int) $room->openSharedSessions()->sum('party_size');
@@ -608,7 +991,56 @@ class AvailabilityService
         // exclusive room's effectiveCapacity() is always 1.
         $openBookingUsage = (! $room->isShared() && $room->bookings()->where('status', 'open')->exists()) ? 1 : 0;
 
-        return (int) $bookingUsage + $sessionUsage + $openBookingUsage;
+        // Another use of the same physical room occupied right now takes the
+        // whole room (same rule as usedCapacity()).
+        $otherUseUsage = $this->otherUsesOccupiedNow($room, $excludeBookingId) ? $room->effectiveCapacity() : 0;
+
+        return (int) $bookingUsage + $sessionUsage + $openBookingUsage + $otherUseUsage;
+    }
+
+    /**
+     * Is another use of $room's physical room occupied RIGHT NOW? usedCapacityNow()'s
+     * own sources, for the other uses: a pending/confirmed booking in progress
+     * (a shared use's never-checked-in booking stops counting once past its
+     * no-show grace, as for the room itself), an open walk-in, or an Open
+     * Session booking.
+     */
+    public function otherUsesOccupiedNow(Room $room, ?int $excludeBookingId = null): bool
+    {
+        $others = $room->otherUseIds();
+        if ($others === []) {
+            return false;
+        }
+
+        $sharedIds = Room::whereIn('id', $others)->where('type', 'shared')->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $inProgress = $this->rejectPastGrace(
+            $this->bookingsOverlappingNow($room->owner_id, ['pending', 'confirmed'], Carbon::now(), $others, $excludeBookingId),
+            fn (Booking $b) => in_array((int) $b->room_id, $sharedIds, true),
+        );
+
+        return $inProgress->isNotEmpty()
+            || SharedSession::whereIn('room_id', $others)->where('status', 'open')->exists()
+            || Booking::whereIn('room_id', $others)->where('status', 'open')
+                ->when($excludeBookingId, fn ($q) => $q->where('id', '!=', $excludeBookingId))->exists();
+    }
+
+    /**
+     * Bulk counterpart of otherUsesOccupiedNow() for a list of rooms (the
+     * rooms grid): room_id => true when another use of its physical room is
+     * occupied right now. Rooms with no other uses are simply false.
+     *
+     * @param  Collection<int, Room>  $rooms
+     * @return array<int, bool>
+     */
+    public function heldByOtherUseNow(Collection $rooms): array
+    {
+        Room::primeInventory($rooms);
+        $result = [];
+        foreach ($rooms as $room) {
+            $result[$room->id] = $room->otherUseIds() !== [] && $this->otherUsesOccupiedNow($room);
+        }
+
+        return $result;
     }
 
     /**

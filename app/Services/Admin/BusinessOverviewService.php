@@ -54,7 +54,8 @@ class BusinessOverviewService
 
         return [
             'locations' => $owner->workspaces()->count(),
-            'rooms' => Room::where('owner_id', $owner->id)->when($wsId, fn ($q) => $q->where('workspace_id', $wsId))->count(),
+            // Physical rooms (what the plan's room limit counts), not each bookable use.
+            'rooms' => Room::where('owner_id', $owner->id)->whereNull('physical_room_id')->when($wsId, fn ($q) => $q->where('workspace_id', $wsId))->count(),
             'members' => HotspotUser::where('owner_id', $owner->id)->count(),
             'staff' => $owner->staff()->count(),
             'active_sessions' => $sessions->count(),

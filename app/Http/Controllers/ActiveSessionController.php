@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\Room;
+use App\Services\AvailabilityService;
 use App\Services\ProductAnalyticsService;
 use App\Services\RoomPricingService;
 use App\Support\ActiveSessionsQuery;
@@ -13,7 +14,7 @@ use Illuminate\View\View;
 
 class ActiveSessionController extends Controller
 {
-    public function index(Request $request, RoomPricingService $pricing): View
+    public function index(Request $request, RoomPricingService $pricing, AvailabilityService $availability): View
     {
         $owner = TenantContext::user();
         $roomId = $request->get('room_id') ? (int) $request->get('room_id') : null;
@@ -38,6 +39,7 @@ class ActiveSessionController extends Controller
         // with party_size > 1 occupies several seats at once.
         $sharedRooms = Room::where('owner_id', $owner->id)
             ->where('type', 'shared')
+            ->where('is_available', true) // walk-in picker: switched-off rooms/uses take no new walk-ins
             ->withSum(['sharedSessions as occupied_seats' => function ($q) {
                 $q->where('status', 'open');
             }], 'party_size')
@@ -80,8 +82,16 @@ class ActiveSessionController extends Controller
                     : $pricing->quoteOpenBooking($row->model, $now),
             ]);
 
+        // Checked-in sessions near or past their booked end, and the next
+        // booking on another use of the same room they would run into.
+        $sessionAlerts = $availability->sessionEndAlerts(
+            $allSessions->filter(fn ($row) => $row->isShared())->map(fn ($row) => $row->model)
+        );
+
         return view('active-sessions.index', [
             'sessions' => $sessions,
+            'sessionAlerts' => $sessionAlerts,
+            'lateConflicts' => collect($sessionAlerts)->filter(fn (array $a) => $a['late'] && $a['conflict'])->count(),
             'roomCounts' => $roomCounts,
             'totalCount' => $allSessions->count(),
             'selectedRoomId' => $roomId,

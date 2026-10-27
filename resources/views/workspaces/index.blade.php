@@ -11,8 +11,23 @@
         arrive pre-computed from WorkspaceController (AvailabilityService,
         RoomPricingService, Room::statusKey()).
     --}}
+    @php
+        // Some rooms are offered as several bookable options (one card each):
+        // then say how many physical rooms sit behind the cards. Otherwise the
+        // two numbers are the same and only the usual count shows.
+        $hasUses = $roomStats && $roomStats['physical'] < $roomStats['total'];
+        $roomsSubtitle = $activeWorkspace ? __('app.workspace.rooms_subtitle', ['workspace' => $activeWorkspace->name]) : null;
+        if ($hasUses) {
+            $roomsSubtitle = collect([
+                $roomsSubtitle,
+                trans_choice('app.workspace.rooms_summary_physical', $roomStats['physical'], ['count' => $roomStats['physical']]),
+                trans_choice('app.workspace.rooms_summary_options', $roomStats['total'], ['count' => $roomStats['total']]),
+                $roomStats['inactive'] ? __('app.workspace.rooms_summary_inactive', ['count' => $roomStats['inactive']]) : null,
+            ])->filter()->implode(' · ');
+        }
+    @endphp
     <x-ui.page-header :title="__('app.workspace.rooms_title')"
-        :subtitle="$activeWorkspace ? __('app.workspace.rooms_subtitle', ['workspace' => $activeWorkspace->name]) : null"
+        :subtitle="$roomsSubtitle"
         :count="$roomStats['total'] ?? null">
         <x-slot:actions>
             @if ($activeWorkspace && $canManage)
@@ -75,7 +90,7 @@
             $status = in_array(request('status'), ['available', 'occupied', 'unavailable'], true) ? request('status') : null;
             $filtered = request('type') || $status;
             $statusTiles = [
-                null => ['label' => __('app.workspace.all_rooms'), 'value' => $roomStats['total'], 'tone' => 'is-brand'],
+                null => ['label' => $hasUses ? __('app.workspace.all_options') : __('app.workspace.all_rooms'), 'value' => $roomStats['total'], 'tone' => 'is-brand'],
                 'available' => ['label' => __('app.workspace.available'), 'value' => $roomStats['available'], 'tone' => ''],
                 'occupied' => ['label' => __('app.workspace.occupied'), 'value' => $roomStats['occupied'], 'tone' => ''],
                 'unavailable' => ['label' => __('app.workspace.unavailable'), 'value' => $roomStats['unavailable'], 'tone' => $roomStats['unavailable'] ? 'is-warn' : ''],

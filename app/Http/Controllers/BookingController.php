@@ -12,6 +12,7 @@ use App\Http\Controllers\Concerns\GeneratesTimeSlots;
 use App\Models\Booking;
 use App\Models\HotspotUser;
 use App\Models\MemberPackage;
+use App\Models\Owner;
 use App\Models\PackageUsage;
 use App\Models\Product;
 use App\Models\Room;
@@ -203,8 +204,9 @@ class BookingController extends Controller
             return $fail(__('app.booking.payment.exceeds_total', ['total' => number_format($quote->totalPrice, 2)]));
         }
 
+        $remainingSeats = null; // seats free under the lock, for the refusal message
         try {
-            $booking = DB::transaction(function () use ($validated, $ownerId, $room, $hotspotUser, $quote, $planId, $people, $availability, $partySize, $amountPaid, $package, $packages, $profile) {
+            $booking = DB::transaction(function () use ($validated, $ownerId, $room, $hotspotUser, $quote, $planId, $people, $availability, $partySize, $amountPaid, $package, $packages, $profile, &$remainingSeats) {
                 // Lock the room row so concurrent store()/update() calls for
                 // this room serialize through here. Genuine row-level locking
                 // on MySQL (production) — compiles to a real `FOR UPDATE`; a
@@ -213,11 +215,12 @@ class BookingController extends Controller
                 // doesn't rely on alone: it re-verifies the actual committed
                 // state after writing, so correctness doesn't hinge solely on
                 // the lock having been honored.
-                $lockedRoom = Room::where('id', $room->id)->lockForUpdate()->firstOrFail();
+                $lockedRoom = Room::lockInventory($room->id); // physical room first: all its uses queue here
 
                 $remaining = $availability->availabilityForRange(
                     $lockedRoom, $validated['booking_date'], $validated['start_time'], $validated['end_time'],
                 );
+                $remainingSeats = $remaining;
 
                 if ($remaining < $partySize) {
                     return null;
@@ -262,7 +265,8 @@ class BookingController extends Controller
         }
 
         if (! $booking) {
-            return $fail('This room is already booked for the selected time slot. Please choose a different time.');
+            return $fail($this->sharedSeatsMessage($availability, $room, $validated, $remainingSeats)
+                ?? 'This room is already booked for the selected time slot. Please choose a different time.');
         }
 
         $paidNote = $amountPaid > 0 ? " (paid {$amountPaid})" : '';
@@ -343,11 +347,22 @@ class BookingController extends Controller
             $packageId = $package->id;
         }
 
+        // An Open Session has no end: it must not run into a later booking of
+        // this room or of any other use of the same physical room today. The
+        // friendly message here; re-checked under the lock below.
+        if ($conflict = $availability->openEndedConflict($room, now()->format('Y-m-d'), now()->format('H:i'), includeOwn: true)) {
+            return $fail(__('app.booking.open_ended_conflict', $conflict));
+        }
+
         try {
             $booking = DB::transaction(function () use ($room, $ownerId, $hotspotUser, $profile, $packageId, $validated, $availability) {
-                $lockedRoom = Room::where('id', $room->id)->lockForUpdate()->firstOrFail();
+                $lockedRoom = Room::lockInventory($room->id); // physical room first: all its uses queue here
 
                 if ($availability->availableNow($lockedRoom) < 1) {
+                    return null;
+                }
+                // Authoritative re-check of the open-ended rule (see above).
+                if ($availability->openEndedConflict($lockedRoom, now()->format('Y-m-d'), now()->format('H:i'), includeOwn: true)) {
                     return null;
                 }
 
@@ -684,16 +699,28 @@ class BookingController extends Controller
             return back()->withInput()->with('error', __('app.booking.payment.exceeds_total', ['total' => number_format($quote->totalPrice, 2)]));
         }
 
+        // A booking that keeps its room, date, times and party (an edit of its
+        // notes, payment, customer…) keeps the seats it already holds: walk-ins
+        // that arrived since never push an existing booking out. Anything that
+        // could need more room is re-checked as before.
+        $keepsSlot = (int) $room->id === (int) $booking->room_id
+            && $booking->booking_date->toDateString() === $validated['booking_date']
+            && substr((string) $booking->start_time, 0, 5) === substr((string) $validated['start_time'], 0, 5)
+            && substr((string) $booking->end_time, 0, 5) === substr((string) $validated['end_time'], 0, 5)
+            && $partySize <= (int) $booking->party_size;
+
+        $remainingSeats = null; // seats free under the lock, for the refusal message
         try {
-            $updated = DB::transaction(function () use ($validated, $room, $booking, $quote, $planId, $people, $availability, $id, $partySize, $amountPaid, $package, $packages, $profile) {
+            $updated = DB::transaction(function () use ($validated, $room, $booking, $quote, $planId, $people, $availability, $id, $partySize, $amountPaid, $package, $packages, $profile, $keepsSlot, &$remainingSeats) {
                 // Same lock + post-write re-verify pattern as store() — see
                 // the comment there for why both layers exist.
-                $lockedRoom = Room::where('id', $room->id)->lockForUpdate()->firstOrFail();
+                $lockedRoom = Room::lockInventory($room->id); // physical room first: all its uses queue here
 
-                $remaining = $availability->availabilityForRange(
+                $remaining = $keepsSlot ? PHP_INT_MAX : $availability->availabilityForRange(
                     $lockedRoom, $validated['booking_date'], $validated['start_time'], $validated['end_time'],
                     excludeBookingId: (int) $id,
                 );
+                $remainingSeats = $remaining;
 
                 if ($remaining < $partySize) {
                     return false;
@@ -721,7 +748,7 @@ class BookingController extends Controller
                     'notes' => $validated['notes'] ?? null,
                 ]);
 
-                if ($availability->exceedsCapacity($lockedRoom, $validated['booking_date'], $validated['start_time'], $validated['end_time'])) {
+                if (! $keepsSlot && $availability->exceedsCapacity($lockedRoom, $validated['booking_date'], $validated['start_time'], $validated['end_time'])) {
                     throw new BookingCapacityExceededException;
                 }
 
@@ -739,7 +766,8 @@ class BookingController extends Controller
 
         if (! $updated) {
             return back()->withInput()->with('error',
-                'This room is already booked for the selected time slot. Please choose a different time.');
+                $this->sharedSeatsMessage($availability, $room, $validated, $remainingSeats)
+                ?? 'This room is already booked for the selected time slot. Please choose a different time.');
         }
 
         $this->activityLogger->log('booking.updated', $booking, "Updated booking #{$booking->id}");
@@ -931,7 +959,7 @@ class BookingController extends Controller
 
         try {
             $session = DB::transaction(function () use ($booking, $ownerId, $actualPartySize, $availability, $pricing, $packageId) {
-                $lockedRoom = Room::where('id', $booking->room_id)->lockForUpdate()->firstOrFail();
+                $lockedRoom = Room::lockInventory((int) $booking->room_id); // physical room first: all its uses queue here
 
                 // Atomic claim: only one concurrent check-in attempt on this
                 // booking can win. If another request (or the no-show sweep)
@@ -2218,5 +2246,25 @@ class BookingController extends Controller
         $redirect = back()->with('success', __('app.sales.item_quantity_updated'));
 
         return $warning ? $redirect->with('warning', $warning) : $redirect;
+    }
+
+    /**
+     * The refusal for a shared-room booking that doesn't fit because open
+     * walk-ins hold seats over its time: how many seats are free and that
+     * walk-ins are the reason. Null otherwise (the usual message stands).
+     */
+    private function sharedSeatsMessage(AvailabilityService $availability, Room $room, array $validated, ?int $remaining): ?string
+    {
+        if (! $room->isShared() || $remaining === null || $remaining === PHP_INT_MAX) {
+            return null;
+        }
+
+        $walkIns = $availability->walkInSeatsHeld($room, $validated['booking_date'], $validated['start_time'], $validated['end_time']);
+        if ($walkIns === 0) {
+            return null;
+        }
+
+        return trans_choice('app.booking.shared_seats_free', $remaining, ['count' => $remaining, 'room' => $room->name])
+            .' '.trans_choice('app.booking.walk_in_seats_held', $walkIns, ['count' => $walkIns]);
     }
 }

@@ -15,6 +15,13 @@
         </x-slot:actions>
     </x-ui.page-header>
 
+    @if ($lateConflicts ?? 0)
+        {{-- A checked-in session past its booked end is in a room another use has booked: staff must act. --}}
+        <div style="margin-bottom: var(--space-4)" data-late-conflicts="{{ $lateConflicts }}">
+            <x-ui.banner tone="danger">{{ trans_choice('app.ui.sessions.late_conflicts_banner', $lateConflicts, ['count' => $lateConflicts]) }}</x-ui.banner>
+        </div>
+    @endif
+
     @if ($totalCount > 0)
         <div class="ls-toolbar">
             {{-- Room filter — only rooms with at least one active session appear, each with its own live count. --}}
@@ -48,6 +55,7 @@
                 @include('active-sessions._card', [
                     'row' => $row,
                     'estimate' => ($row->isShared() || $row->model->isOpenSession()) ? ($estimates[$row->type.'-'.$row->model->id] ?? null) : null,
+                    'endAlert' => $row->isShared() ? ($sessionAlerts[$row->model->id] ?? null) : null,
                 ])
             @endforeach
         </div>

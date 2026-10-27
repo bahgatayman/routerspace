@@ -13,6 +13,8 @@
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h1 class="text-xl font-bold text-gray-900 mb-6">{{ __('app.workspace.edit_room') }}</h1>
 
+            @include('workspaces.rooms.uses._panel')
+
             <form method="POST" action="{{ route('rooms.update', [$workspace, $room]) }}">
                 @csrf
                 @method('PUT')

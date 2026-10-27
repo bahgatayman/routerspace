@@ -43,7 +43,7 @@ class PlanController extends Controller
             'mrr' => $active * (float) $plan->price_per_month,
             'requests' => SubscriptionRequest::where('plan_id', $plan->id)->count(),
             'features' => Feature::orderBy('id')->get(['key', 'name']),
-            'owners' => $plan->owners()->withCount(['rooms', 'products'])->orderBy('business_name')->paginate(20),
+            'owners' => $plan->owners()->withCount(['rooms' => fn ($q) => $q->whereNull('physical_room_id'), 'products'])->orderBy('business_name')->paginate(20),
             'payments' => Subscription::with(['owner:id,business_name,name', 'admin:id,name'])->where('plan_id', $plan->id)->latest()->take(10)->get(),
             'targets' => Plan::where('id', '!=', $plan->id)->orderBy('sort_order')->get(['id', 'name', 'is_active', 'price_per_month']),
             'used' => $this->usage($plan),

@@ -5,9 +5,22 @@
     $showUrl = route('rooms.show', [$workspace, $room]);
     $editUrl = route('rooms.edit', [$workspace, $room]);
     $menuId = 'room-menu-'.$room->id;
+    // Rooms it shares availability with (another use of the same physical
+    // room, or this physical room's uses) — eager-loaded, empty for most rooms.
+    $sharesWith = $room->isAdditionalUse()
+        ? collect([$room->relationLoaded('physicalRoom') ? $room->physicalRoom : null])->filter()
+        : ($room->relationLoaded('uses') ? $room->uses : collect());
+    $sharesWithNames = $sharesWith->pluck('name')->implode(__('app.workspace.uses.name_separator'));
+    $sharesWithText = $sharesWith->isNotEmpty() ? __('app.workspace.uses.shares_with', ['room' => $sharesWithNames]) : null;
+    // Same sentence with the room name(s) set apart, each bidi-isolated (a Latin
+    // name inside Arabic text); names are escaped, the sentence is a trusted translation.
+    $sharesWithHtml = $sharesWith->isNotEmpty()
+        ? __('app.workspace.uses.shares_with', ['room' => '<b class="ls-room-shares-name">'
+            .$sharesWith->map(fn ($r) => '<bdi>'.e($r->name).'</bdi>')->implode(e(__('app.workspace.uses.name_separator'))).'</b>'])
+        : null;
 @endphp
 <article class="ls-room is-{{ $statusKey }}" aria-labelledby="room-{{ $room->id }}-name"
-         data-ls-item="rooms" data-ls-text="{{ $room->name }} {{ $room->typeLabel() }}">
+         data-ls-item="rooms" data-ls-text="{{ $room->name }} {{ $room->typeLabel() }}{{ $sharesWithText ? ' '.$sharesWithText : '' }}">
     <div class="ls-room-photo" @if ($images->count() > 1) data-ls-gallery @endif>
         @if ($images->isEmpty())
             @if ($canManage)
@@ -49,7 +62,9 @@
                             aria-label="{{ __('app.workspace.more_actions') }}: {{ $room->name }}" title="{{ __('app.workspace.more_actions') }}"><x-ui.icon name="more" /></button>
                     <div id="{{ $menuId }}" class="ls-pop" role="menu" hidden>
                         <div class="ls-menu">
-                            <form method="POST" action="{{ route('rooms.toggle', [$workspace, $room]) }}">
+                            <a href="{{ route('rooms.uses.create', [$workspace, $room]) }}" class="ls-menu-item" role="menuitem"><x-ui.icon name="plus" /><span>{{ __('app.workspace.uses.add') }}</span></a>
+                            <form method="POST" action="{{ route('rooms.toggle', [$workspace, $room]) }}"
+                                  @if ($room->is_available && $sharesWithText) onsubmit="return confirm(@js(__('app.workspace.uses.deactivate_confirm', ['name' => $room->name])))" @endif>
                                 @csrf
                                 <button type="submit" class="ls-menu-item" role="menuitem"><x-ui.icon name="power" />
                                     <span>{{ $room->is_available ? __('app.workspace.mark_unavailable') : __('app.workspace.mark_available') }}</span></button>
@@ -69,6 +84,10 @@
             <span class="ls-room-type is-{{ $room->type }}">{{ $room->typeLabel() }}</span>
             <span><x-ui.icon name="users" />{{ trans_choice('app.workspace.seats_count', $room->capacity, ['count' => $room->capacity]) }}</span>
         </div>
+
+        @if ($sharesWithText)
+            <p class="ls-room-shares" title="{{ $sharesWithText }}"><x-ui.icon name="calendar" /><span>{!! $sharesWithHtml !!}</span></p>
+        @endif
 
         @if ($room->isShared() && $room->is_available && $room->effectiveCapacity() > 1)
             @php $cap = max(1, $room->effectiveCapacity()); $used = min($cap, $room->occupied_seats); @endphp

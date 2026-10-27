@@ -57,7 +57,7 @@ class WorkspaceDirectoryController extends Controller
 
         $owners = $this->status($base, $status)
             ->with('plan:id,name')
-            ->withCount(['products', 'rooms', 'workspaces as locations_count', 'hotspotUsers as members_count'])
+            ->withCount(['products', 'rooms' => fn ($q) => $q->whereNull('physical_room_id'), 'workspaces as locations_count', 'hotspotUsers as members_count'])
             ->withCount(['bookings as period_bookings' => fn ($q) => $inPeriod($q)->countsTowardGbv()])
             ->withSum(['bookings as booking_earnings' => fn ($q) => $inPeriod($q)->revenueRecognised()], 'amount_paid')
             ->withSum(['sales as sales_earnings' => fn ($q) => $q->completed()->whereBetween('sold_at', [$period->start, $period->end])], 'total')

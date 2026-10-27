@@ -170,6 +170,10 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
             Route::delete('/workspaces/{workspace}/rooms/{room}', [RoomController::class, 'destroy'])->name('rooms.destroy');
             Route::post('/workspaces/{workspace}/rooms/{room}/toggle', [RoomController::class, 'toggleAvailable'])->name('rooms.toggle');
 
+            // Other uses of one physical room (shared availability)
+            Route::get('/workspaces/{workspace}/rooms/{room}/uses/create', [RoomController::class, 'createUse'])->whereNumber('room')->name('rooms.uses.create');
+            Route::post('/workspaces/{workspace}/rooms/{room}/uses', [RoomController::class, 'storeUse'])->whereNumber('room')->name('rooms.uses.store');
+
             // Room photo gallery
             Route::post('/workspaces/{workspace}/rooms/{room}/images', [RoomImageController::class, 'store'])->name('rooms.images.store');
             Route::delete('/workspaces/{workspace}/rooms/{room}/images/{image}', [RoomImageController::class, 'destroy'])->name('rooms.images.destroy');

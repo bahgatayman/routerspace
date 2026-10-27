@@ -81,29 +81,45 @@ class WorkspaceController extends Controller
     {
         $type = $request->query('type');
 
+        // Every bookable room — another use of a physical room is its own card,
+        // linked to the rooms it shares availability with (names only, for the label).
         $rooms = Room::where('workspace_id', $workspace->id)
             ->where('owner_id', $workspace->owner_id)
             ->when($type, fn ($q) => $q->where('type', $type))
             ->withCount(['plans', 'activePricingProfiles as pricing_profiles_count'])
             ->withSum(['sharedSessions as occupied_seats' => fn ($q) => $q->where('status', 'open')], 'party_size')
-            ->with('images')
+            ->with([
+                'images',
+                'physicalRoom' => fn ($q) => $q->where('owner_id', $workspace->owner_id)->select('id', 'name'),
+                'uses' => fn ($q) => $q->where('owner_id', $workspace->owner_id)->select('id', 'name', 'physical_room_id'),
+            ])
             ->orderBy('name')
             ->get();
 
         $exclusiveIds = $rooms->reject(fn (Room $r) => $r->isShared())->pluck('id')->all();
         $exclusiveUsage = $availability->usedCapacityNowBulk($exclusiveIds, $workspace->owner_id);
+        // A room is occupied when any other use of the same physical room is in use right now.
+        $heldByUse = $availability->heldByOtherUseNow($rooms);
 
-        $rooms->each(function (Room $room) use ($exclusiveUsage) {
+        $rooms->each(function (Room $room) use ($exclusiveUsage, $heldByUse) {
             $room->occupied_seats = $room->isShared()
                 ? (int) ($room->occupied_seats ?? 0)
                 : (int) ($exclusiveUsage[$room->id] ?? 0);
+            if ($heldByUse[$room->id] ?? false) {
+                $room->occupied_seats = max($room->occupied_seats, $room->effectiveCapacity());
+            }
         });
 
         // Stats reflect the type filter (as before) but never the status filter
         // below — same "counts stay put while you switch tabs" behaviour as the
         // stock filter on the Products page, so the strip stays a stable total.
+        // 'total' counts bookable options (one card each, active or not — the
+        // 'unavailable' tab holds the inactive ones); 'physical' counts the
+        // distinct physical rooms behind them (what the plan's room limit counts).
         $roomStats = [
             'total' => $rooms->count(),
+            'physical' => $rooms->map(fn (Room $r) => $r->inventoryRootId())->unique()->count(),
+            'inactive' => $rooms->reject(fn (Room $r) => $r->is_available)->count(),
             'available' => $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === 'available')->count(),
             'occupied' => $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === 'occupied')->count(),
             'unavailable' => $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === 'unavailable')->count(),
@@ -114,14 +130,23 @@ class WorkspaceController extends Controller
             $rooms = $rooms->filter(fn (Room $r) => $r->statusKey($r->occupied_seats) === $status)->values();
         }
 
+        // Uses of one physical room sit together: by name, a physical room is
+        // followed by its uses; by price/availability, they only break ties.
+        $group = fn (Room $r) => [
+            mb_strtolower($r->isAdditionalUse() ? ($r->physicalRoom?->name ?? $r->name) : $r->name),
+            $r->inventoryRootId(),
+            $r->isAdditionalUse() ? 1 : 0,
+            mb_strtolower($r->name),
+        ];
         $sort = $request->query('sort');
-        $rooms = match ($sort) {
-            'price' => $rooms->sortBy(fn (Room $r) => (float) $r->price_per_hour)->values(),
-            'availability' => $rooms->sortBy(fn (Room $r) => match ($r->statusKey($r->occupied_seats)) {
+        $key = match ($sort) {
+            'price' => fn (Room $r) => [(float) $r->price_per_hour, ...$group($r)],
+            'availability' => fn (Room $r) => [match ($r->statusKey($r->occupied_seats)) {
                 'available' => 0, 'occupied' => 1, default => 2,
-            })->values(),
-            default => $rooms->sortBy(fn (Room $r) => mb_strtolower($r->name))->values(),
+            }, ...$group($r)],
+            default => $group,
         };
+        $rooms = $rooms->sort(fn (Room $a, Room $b) => $key($a) <=> $key($b))->values();
 
         return [$rooms, $roomStats];
     }

@@ -2521,3 +2521,22 @@ html[dir="rtl"] .ls-fb-msg, html[dir="rtl"] .ls-fbs-text { text-align: right; } 
 
 /* Admin → business → Coupons tab: status chips + create button on one row. */
 .ls-biz-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+
+/* Other uses of one physical room. On the rooms grid each use is its own card
+   with one quiet "Shares availability with …" line; the room editor lists them. */
+.ls-room-shares { display: flex; align-items: flex-start; gap: 6px; margin: 0; min-width: 0; font-size: 12.5px; color: var(--color-text-muted); }
+.ls-room-shares svg { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+.ls-room-shares span { min-width: 0; line-height: 1.45; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.ls-room-shares-name { font-weight: var(--fw-medium); color: var(--color-text-secondary); }
+.ls-room-uses { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.ls-room-uses li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-3); font-size: 13.5px; }
+.ls-room-use-name { font-weight: var(--fw-medium); color: var(--color-text); text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.ls-room-use-name:hover { color: var(--color-accent); }
+.ls-room-uses-panel .ls-room-uses { margin-bottom: var(--space-3); }
+
+/* Active Sessions: a checked-in session past its booked end (AvailabilityService::sessionEndAlerts()). */
+.ls-session.is-late { --ls-glow: color-mix(in srgb, var(--color-danger) 9%, transparent); border-color: color-mix(in srgb, var(--color-danger) 35%, var(--color-border)); }
+.ls-session-meta .is-late { color: var(--color-danger); font-weight: var(--fw-medium); }
+.ls-session-conflict { display: flex; align-items: flex-start; gap: 6px; margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--ls-r-sm); font-size: 12.5px; line-height: 1.45; background: var(--color-warning-soft); color: var(--color-warning); }
+.ls-session-conflict.is-late { background: var(--color-danger-soft); color: var(--color-danger); }
+.ls-session-conflict svg { flex: none; width: 14px; height: 14px; margin-top: 2px; }

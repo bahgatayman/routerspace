@@ -260,6 +260,16 @@ class Owner extends Authenticatable
         return max(0, $limit - $this->workspaces()->count());
     }
 
+    /**
+     * Rooms counted against the plan's room limit: PHYSICAL rooms only. Other
+     * uses of a physical room (rooms.physical_room_id) are the same space
+     * offered differently, so they never consume a room slot.
+     */
+    public function physicalRoomsCount(): int
+    {
+        return $this->rooms()->whereNull('physical_room_id')->count();
+    }
+
     public function canAddMoreRooms(): bool
     {
         $limit = $this->plan?->max_rooms;
@@ -267,7 +277,7 @@ class Owner extends Authenticatable
             return true;
         }
 
-        return $this->rooms()->count() < $limit;
+        return $this->physicalRoomsCount() < $limit;
     }
 
     public function remainingRoomSlots(): ?int
@@ -277,7 +287,7 @@ class Owner extends Authenticatable
             return null; // unlimited
         }
 
-        return max(0, $limit - $this->rooms()->count());
+        return max(0, $limit - $this->physicalRoomsCount());
     }
 
     public function canAddMoreProducts(): bool

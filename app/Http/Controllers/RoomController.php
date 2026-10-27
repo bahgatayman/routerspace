@@ -176,20 +176,63 @@ class RoomController extends Controller
         }
     }
 
+    /**
+     * The physical room behind $roomId, for "Add another use". Asking to add
+     * a use "to a use" adds it to that use's physical room (no nesting).
+     */
+    private function getPhysicalRoom(Workspace $workspace, int $roomId): Room
+    {
+        $room = $this->getRoom($workspace, $roomId);
+
+        return $room->isAdditionalUse() ? $this->getRoom($workspace, $room->physical_room_id) : $room;
+    }
+
     public function create(int $workspaceId): View
     {
         $workspace = $this->getWorkspace($workspaceId);
 
         $roomTypes = $this->roomTypeOptions();
+        $physicalRoom = null;
 
-        return view('workspaces.rooms.create', compact('workspace', 'roomTypes'));
+        return view('workspaces.rooms.create', compact('workspace', 'roomTypes', 'physicalRoom'));
+    }
+
+    /**
+     * "Add another use" of a physical room: the same space offered under
+     * another name, type, capacity, price, photos and description (a training
+     * room by day, a studio by night…). It is the normal Add Room form and
+     * store path — every pricing model, Plans, Pricing Profiles and billing
+     * options — plus the link to the physical room, whose availability it
+     * shares (AvailabilityService, Room::lockInventory()).
+     */
+    public function createUse(int $workspaceId, int $roomId): View
+    {
+        $workspace = $this->getWorkspace($workspaceId);
+
+        return view('workspaces.rooms.create', [
+            'workspace' => $workspace,
+            'roomTypes' => $this->roomTypeOptions(),
+            'physicalRoom' => $this->getPhysicalRoom($workspace, $roomId),
+        ]);
     }
 
     public function store(Request $request, int $workspaceId): RedirectResponse
     {
+        return $this->storeRoom($request, $this->getWorkspace($workspaceId), null);
+    }
+
+    public function storeUse(Request $request, int $workspaceId, int $roomId): RedirectResponse
+    {
         $workspace = $this->getWorkspace($workspaceId);
 
-        if (! TenantContext::user()->canAddMoreRooms()) {
+        return $this->storeRoom($request, $workspace, $this->getPhysicalRoom($workspace, $roomId));
+    }
+
+    private function storeRoom(Request $request, Workspace $workspace, ?Room $physicalRoom): RedirectResponse
+    {
+        // The plan's room limit counts PHYSICAL rooms (Owner::physicalRoomsCount());
+        // another use of one is not a new room.
+        if (! $physicalRoom && ! TenantContext::user()->canAddMoreRooms()) {
             return back()->withInput()->with('error', __('app.plan_limit.rooms'));
         }
 
@@ -216,11 +259,14 @@ class RoomController extends Controller
         $profiles = $this->validatedProfiles($request);
         unset($data['plans']);
 
-        $room = DB::transaction(function () use ($data, $workspace, $plans, $profiles) {
-            $room = Room::create(array_merge($data, [
+        $room = DB::transaction(function () use ($data, $workspace, $plans, $profiles, $physicalRoom) {
+            $room = new Room(array_merge($data, [
                 'workspace_id' => $workspace->id,
                 'owner_id' => TenantContext::id(),
             ]));
+            // Not mass-assignable: set only here, from the scoped lookup above.
+            $room->physical_room_id = $physicalRoom?->id;
+            $room->save();
             if ($plans !== null) {
                 $this->syncPlans($room, $plans);
             }
@@ -230,6 +276,13 @@ class RoomController extends Controller
 
             return $room;
         });
+
+        if ($physicalRoom) {
+            $this->activityLogger->log('room.use_added', $room, "Added use {$room->name} of room {$physicalRoom->name}");
+
+            return redirect()->route('workspaces.index', ['workspace' => $workspace->id])
+                ->with('success', __('app.workspace.uses.added', ['name' => $room->name, 'room' => $physicalRoom->name]));
+        }
 
         $this->activityLogger->log('room.created', $room, "Added room {$room->name} to {$workspace->name}");
 
@@ -324,6 +377,16 @@ class RoomController extends Controller
     {
         $workspace = $this->getWorkspace($workspaceId);
         $room = $this->getRoom($workspace, $roomId);
+
+        // Multiple uses of one physical room: never delete from under its uses,
+        // and never let deleting a use take booking or walk-in history with it
+        // (bookings/sessions cascade on room delete) — deactivate it instead.
+        if ($room->uses()->exists()) {
+            return back()->with('error', __('app.workspace.uses.delete_room_has_uses'));
+        }
+        if ($room->isAdditionalUse() && ($room->bookings()->exists() || $room->sharedSessions()->exists())) {
+            return back()->with('error', __('app.workspace.uses.delete_use_has_history'));
+        }
 
         $this->activityLogger->log('room.deleted', $room, "Deleted room {$room->name}");
 

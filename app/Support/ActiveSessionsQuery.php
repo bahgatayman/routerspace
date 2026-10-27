@@ -30,7 +30,7 @@ class ActiveSessionsQuery
         $shared = SharedSession::where('owner_id', $ownerId)
             ->where('status', 'open')
             ->when($roomId, fn ($q) => $q->where('room_id', $roomId))
-            ->with(['room.workspace', 'hotspotUser', 'sale.items.product'])
+            ->with(['room.workspace', 'hotspotUser', 'sale.items.product', 'booking'])
             ->orderBy('opened_at')
             ->get()
             ->map(fn (SharedSession $session) => ActiveSessionRow::fromSharedSession($session));
