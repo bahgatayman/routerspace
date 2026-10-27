@@ -83,6 +83,7 @@
         'partial' => __('app.booking.payment.status_partial'),
         'unpaid' => __('app.booking.payment.status_unpaid'),
     ];
+    $couponI18n = ['discount' => __('app.coupons.checkout.discount')];
 @endphp
 <div class="ls-booking-layout">
     <form method="POST" action="{{ $actionUrl }}" class="ls-booking-form" id="booking-form">
@@ -213,7 +214,7 @@
         @endunless
 
         {{-- 4. Payment --}}
-        @include('bookings._payment', ['amountPaid' => $initialAmountPaid, 'paymentChoice' => $initialPaymentChoice, 'memberPackageId' => $isEdit ? $booking->member_package_id : ''])
+        @include('bookings._payment', ['amountPaid' => $initialAmountPaid, 'paymentChoice' => $initialPaymentChoice, 'memberPackageId' => $isEdit ? $booking->member_package_id : '', 'isEdit' => $isEdit])
         </div>{{-- /#fixed-time-sections --}}
 
         @unless ($isEdit)
@@ -747,16 +748,91 @@
     let pkgTimer = null;
     const schedulePackages = () => { clearTimeout(pkgTimer); pkgTimer = setTimeout(fetchPackages, 150); };
 
+    // --- Coupon (live preview only — never a reservation or redemption) ---
+    const couponInput = document.getElementById('f-coupon-code');
+    const couponClearBtn = document.getElementById('coupon-clear');
+    const couponStatus = document.getElementById('coupon-status');
+    const couponErrorBox = document.getElementById('coupon-error');
+    const couponLine = document.getElementById('coupon-line');
+    const CP = @json($couponI18n);
+    let couponBreakdown = null, couponErrorMsg = null, couponToken = 0;
+
+    function renderCoupon() {
+        if (!couponInput) return;
+        couponStatus.hidden = true;
+        couponClearBtn.hidden = !couponInput.value.trim();
+        couponErrorBox.hidden = !couponErrorMsg;
+        if (couponErrorMsg) couponErrorBox.querySelector('span').textContent = couponErrorMsg;
+        couponLine.hidden = !couponBreakdown;
+        if (couponBreakdown) couponLine.textContent = `${CP.discount}: -${formatMoney(couponBreakdown.discount)}`;
+    }
+    function fetchCouponPreview() {
+        if (!couponInput) return;
+        const code = couponInput.value.trim();
+        const opt = rawRoomOption();
+        if (!code || !opt || opt.is_shared || pkgChosen() || !endHidden.value) {
+            couponBreakdown = null; couponErrorMsg = null;
+            renderCoupon(); updateSummaryAndPayment();
+            return;
+        }
+        const params = new URLSearchParams({
+            coupon_code: code, room_id: opt.id, booking_date: dateInput.value,
+            start_time: startHidden.value, end_time: endHidden.value, guest_count: guestInput.value || 1,
+        });
+        if (planInput.value) params.set('room_plan_id', planInput.value);
+        if (profileInput.value) params.set('room_pricing_profile_id', profileInput.value);
+        const uid = document.getElementById('selected-user-id').value;
+        if (uid) params.set('hotspot_user_id', uid);
+        const token = ++couponToken;
+        fetch(`/bookings/coupon-preview?${params}`, { headers: { Accept: 'application/json' } })
+            .then(r => r.json())
+            .then(d => {
+                if (token !== couponToken) return;
+                couponBreakdown = d.coupon || null;
+                couponErrorMsg = d.coupon_error || null;
+                renderCoupon(); updateSummaryAndPayment();
+            })
+            .catch(() => { if (token === couponToken) { couponBreakdown = null; couponErrorMsg = null; renderCoupon(); } });
+    }
+    let couponTimer = null;
+    const scheduleCoupon = () => { clearTimeout(couponTimer); couponTimer = setTimeout(fetchCouponPreview, 350); };
+    if (couponInput) {
+        couponInput.addEventListener('input', () => {
+            couponClearBtn.hidden = !couponInput.value.trim();
+            if (!couponInput.value.trim()) { couponBreakdown = null; couponErrorMsg = null; renderCoupon(); updateSummaryAndPayment(); return; }
+            couponStatus.hidden = false; couponErrorBox.hidden = true; couponLine.hidden = true;
+            scheduleCoupon();
+        });
+        couponClearBtn.addEventListener('click', () => {
+            couponInput.value = ''; couponBreakdown = null; couponErrorMsg = null;
+            renderCoupon(); updateSummaryAndPayment();
+            couponInput.focus();
+        });
+    }
+
     function updateSummaryAndPayment() {
         const opt = currentRoomOption();
+        const isShared = opt ? opt.is_shared : false;
+        const pkg = opt && !isShared ? pkgChosen() : null;
+        // A coupon only ever discounts the room charge, never a package
+        // payment or a shared room (billed later at session close instead) —
+        // same exclusions the server enforces when the booking is actually saved.
+        const coupon = opt && !isShared && !pkg ? couponBreakdown : null;
+        const grossTotal = opt ? opt.total_price : 0;
+        const total = coupon ? Math.max(0, grossTotal - coupon.discount) : grossTotal;
+        const totalDisplay = opt ? (coupon ? formatMoney(total) : opt.total_price_display) : '—';
+
         // The selected room card shows what will actually be charged (plan price when a plan is chosen).
         const selCard = roomGrid.querySelector('[data-room-card].is-selected');
         if (selCard && opt && selCard.dataset.shared !== 'true') {
-            selCard.querySelector('[data-room-price] .ls-room-card-price-value').textContent = opt.total_price_display;
+            selCard.querySelector('[data-room-price] .ls-room-card-price-value').textContent = totalDisplay;
         }
-        const total = opt ? opt.total_price : 0;
-        const isShared = opt ? opt.is_shared : false;
-        const pkg = opt && !isShared ? pkgChosen() : null;
+
+        const couponRow = document.getElementById('confirm-coupon-row');
+        if (couponRow) {
+            couponRow.hidden = !coupon;
+            if (coupon) document.getElementById('confirm-coupon').textContent = '-' + formatMoney(coupon.discount);
+        }
 
         // Always visible; shared rooms are billed at checkout, so the choice gives way to a note.
         // A package covers the whole booking: hide the deposit inputs.
@@ -801,7 +877,7 @@
         const remaining = Math.max(0, total - paid);
         const status = opt ? paymentStatusFor(paid, total) : 'unpaid';
 
-        document.getElementById('pay-total').textContent = opt ? opt.total_price_display : '—';
+        document.getElementById('pay-total').textContent = totalDisplay;
         // An out-of-range partial amount is shown as typed, never as a clamped "Paid" figure.
         document.getElementById('pay-paid').textContent = !opt || needsChoice ? '—' : formatMoney(payError ? typed : paid);
         document.getElementById('pay-remaining').textContent = opt && !pending ? formatMoney(remaining) : '—';
@@ -820,7 +896,7 @@
             : '—';
         document.getElementById('confirm-duration').textContent = (startHidden.value && endHidden.value)
             ? durationLabel(diffMinutes(startHidden.value, endHidden.value)) : '—';
-        document.getElementById('confirm-total').textContent = opt ? opt.total_price_display : '—';
+        document.getElementById('confirm-total').textContent = totalDisplay;
         const pricingRow = document.getElementById('confirm-pricing-row');
         pricingRow.hidden = !(opt && opt.price_note);
         document.getElementById('confirm-pricing').textContent = opt && opt.price_note ? opt.price_note : '';
@@ -829,7 +905,7 @@
         setBadge(document.getElementById('confirm-status-badge'), pending ? 'neutral' : toneFor[status], pending ? '—' : paymentStatusLabels[status]);
 
         const cta = document.getElementById('confirm-cta');
-        cta.textContent = ctaTemplate.replace(':total', opt ? opt.total_price_display : '—');
+        cta.textContent = ctaTemplate.replace(':total', totalDisplay);
 
         if (pkg) {
             document.getElementById('confirm-total').textContent = PK.covered.replace(':time', pkgMinutesLabel || '');
@@ -907,23 +983,32 @@
         baseSelectUser(...args);
         updateSummaryAndPayment();
         schedulePackages();
+        scheduleCoupon();
     };
     const baseClearUserSelection = window.clearUserSelection;
     window.clearUserSelection = function (...args) {
         baseClearUserSelection(...args);
         updateSummaryAndPayment();
         schedulePackages();
+        scheduleCoupon();
     };
 
     // Re-check package eligibility whenever the slot changes (room, date,
     // time, people, plan) — the needed minutes come from the server's quote.
+    // A coupon preview follows the exact same triggers.
     roomGrid.addEventListener('change', schedulePackages);
+    roomGrid.addEventListener('change', scheduleCoupon);
     dateInput.addEventListener('change', schedulePackages);
+    dateInput.addEventListener('change', scheduleCoupon);
     guestInput.addEventListener('input', schedulePackages);
+    guestInput.addEventListener('input', scheduleCoupon);
     document.querySelectorAll('[data-guest-step]').forEach(b => b.addEventListener('click', schedulePackages));
+    document.querySelectorAll('[data-guest-step]').forEach(b => b.addEventListener('click', scheduleCoupon));
     const baseFetchRoomOptions = fetchRoomOptions;
-    fetchRoomOptions = function () { baseFetchRoomOptions(); schedulePackages(); };
+    fetchRoomOptions = function () { baseFetchRoomOptions(); schedulePackages(); scheduleCoupon(); };
     planOptionsBox.addEventListener('change', schedulePackages);
+    planOptionsBox.addEventListener('change', scheduleCoupon);
+    document.querySelectorAll('[data-pay-mode]').forEach(r => r.addEventListener('change', scheduleCoupon));
 
     // --- Initial state ---
     refreshStepperState();
@@ -945,6 +1030,7 @@
         fetchFullDay();
         updateSummaryAndPayment();
         schedulePackages();
+        scheduleCoupon();
     }
 })();
 </script>

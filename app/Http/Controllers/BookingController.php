@@ -30,6 +30,7 @@ use App\Services\HourPackageService;
 use App\Services\InventoryService;
 use App\Services\RoomPricingService;
 use App\Services\SalesService;
+use App\Support\Coupons\CouponCart;
 use App\Support\Duration;
 use App\Support\IdempotencyKey;
 use App\Support\Money;
@@ -104,7 +105,7 @@ class BookingController extends Controller
         ));
     }
 
-    public function store(Request $request, AvailabilityService $availability, BusinessHoursService $businessHours, RoomPricingService $pricing, HourPackageService $packages): RedirectResponse|JsonResponse
+    public function store(Request $request, AvailabilityService $availability, BusinessHoursService $businessHours, RoomPricingService $pricing, HourPackageService $packages, CouponService $coupons): RedirectResponse|JsonResponse
     {
         $owner = TenantContext::user();
 
@@ -132,6 +133,7 @@ class BookingController extends Controller
             'amount_paid' => 'nullable|numeric|min:0',
             'payment_choice' => 'nullable|in:none,partial,full',
             'member_package_id' => 'nullable|integer',
+            'coupon_code' => 'nullable|string|max:40',
             'notes' => 'nullable|string|max:500',
         ];
 
@@ -145,6 +147,14 @@ class BookingController extends Controller
             $validated = $validator->validated();
         } else {
             $validated = $request->validate($rules);
+        }
+
+        $couponCode = trim((string) ($validated['coupon_code'] ?? ''));
+        if ($couponCode !== '') {
+            $staff = auth('staff')->user();
+            if ($staff && ! $staff->hasPermission('coupons.apply')) {
+                return $fail(__('app.msg.permission_denied'));
+            }
         }
 
         $room = Room::where('id', $validated['room_id'])
@@ -207,7 +217,7 @@ class BookingController extends Controller
 
         $remainingSeats = null; // seats free under the lock, for the refusal message
         try {
-            $booking = DB::transaction(function () use ($validated, $ownerId, $room, $hotspotUser, $quote, $planId, $people, $availability, $partySize, $amountPaid, $package, $packages, $profile, &$remainingSeats) {
+            $booking = DB::transaction(function () use ($validated, $ownerId, $room, $hotspotUser, $quote, $planId, $people, $availability, $partySize, $amountPaid, $package, $packages, $profile, $couponCode, $coupons, &$remainingSeats) {
                 // Lock the room row so concurrent store()/update() calls for
                 // this room serialize through here. Genuine row-level locking
                 // on MySQL (production) — compiles to a real `FOR UPDATE`; a
@@ -257,11 +267,21 @@ class BookingController extends Controller
                     $this->coverWithPackage($packages, $newBooking, $package, $quote);
                 }
 
+                // A rejection here (shared room, package-paid, or the code
+                // itself invalid) throws and unwinds this whole transaction —
+                // the booking is never left half-created without the
+                // discount the operator asked for.
+                if ($couponCode !== '') {
+                    $coupons->attachToBooking($newBooking, $couponCode);
+                }
+
                 return $newBooking;
             });
         } catch (BookingCapacityExceededException) {
             $booking = null;
         } catch (InsufficientPackageBalanceException $e) {
+            return $fail($e->getMessage());
+        } catch (CouponRejectedException|CouponUsageLimitExceededException $e) {
             return $fail($e->getMessage());
         }
 
@@ -1709,6 +1729,77 @@ class BookingController extends Controller
             'price_note' => $quote?->note,
             'price_summary' => $room->pricingSummary(),
         ]);
+    }
+
+    /**
+     * Live, read-only coupon preview for the booking-creation forms (full
+     * page + quick modal): the same CouponService::evaluate() math
+     * closePreview() already uses for session-closing, run against a price
+     * quote for a booking that doesn't exist yet. Writes nothing — no
+     * Booking, no coupon attachment, no usage row — and mirrors
+     * closePreview()'s coupon/coupon_error response shape.
+     */
+    public function couponPreview(Request $request, RoomPricingService $pricing, CouponService $coupons): JsonResponse
+    {
+        $owner = TenantContext::user();
+
+        // Always JSON (an AJAX-only preview, never a full-page submission) —
+        // validated explicitly rather than via $request->validate(), whose
+        // automatic exception-to-JSON conversion this app's
+        // shouldRenderJsonWhen() override limits to api/* routes only
+        // (store() above works around the same thing the same way).
+        $validator = Validator::make($request->all(), [
+            'coupon_code' => 'required|string|max:40',
+            'room_id' => 'required|exists:rooms,id',
+            'booking_date' => 'required|date',
+            'start_time' => 'required|date_format:H:i',
+            'end_time' => 'required_without:room_plan_id|nullable|date_format:H:i|after:start_time',
+            'room_plan_id' => 'nullable|integer',
+            'room_pricing_profile_id' => 'nullable|integer',
+            'party_size' => 'nullable|integer|min:1',
+            'guest_count' => 'nullable|integer|min:1|max:999',
+            'hotspot_user_id' => 'nullable|exists:hotspot_users,id',
+            'member_package_id' => 'nullable|integer',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['coupon' => null, 'coupon_error' => null, 'message' => $validator->errors()->first(), 'errors' => $validator->errors()->toArray()], 422);
+        }
+        $validated = $validator->validated();
+
+        $room = Room::where('id', $validated['room_id'])->where('owner_id', $owner->id)->firstOrFail();
+
+        $partySize = (int) ($validated['party_size'] ?? 1);
+        $people = $room->isShared() ? $partySize : (int) ($validated['guest_count'] ?? $partySize);
+        [$quote, , $planError] = $this->priceBooking($pricing, $room, $validated, $people);
+        if ($planError || ! $quote) {
+            // Not a coupon problem — the slot/plan itself isn't priceable yet
+            // (checkAvailability()/the form's own validation already surface
+            // why); nothing to preview against.
+            return response()->json(['coupon' => null, 'coupon_error' => null]);
+        }
+
+        $hotspotUserId = ! empty($validated['hotspot_user_id'])
+            ? HotspotUser::where('id', $validated['hotspot_user_id'])->where('owner_id', $owner->id)->value('id')
+            : null;
+
+        try {
+            // Same two exclusions attachToBooking() enforces on a real
+            // booking — checked here since there's no Booking yet to ask
+            // isShared()/payment_method on.
+            if ($room->isShared()) {
+                throw new CouponRejectedException('shared_room');
+            }
+            if (! empty($validated['member_package_id'])) {
+                throw new CouponRejectedException('package_booking');
+            }
+
+            $coupon = $coupons->find($owner->id, $validated['coupon_code']);
+            $breakdown = $coupons->evaluate($coupon, new CouponCart($room->id, $quote->totalPrice, []), $hotspotUserId);
+        } catch (CouponRejectedException $e) {
+            return response()->json(['coupon' => null, 'coupon_error' => $e->getMessage()]);
+        }
+
+        return response()->json(['coupon' => $breakdown->toArray(), 'coupon_error' => null]);
     }
 
     /**

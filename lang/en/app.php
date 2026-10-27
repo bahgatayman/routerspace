@@ -1028,6 +1028,7 @@ return [
         'checkout' => [
             'title' => 'Coupon Code',
             'placeholder' => 'Enter coupon code',
+            'checking' => 'Checking…',
             'apply' => 'Apply',
             'remove' => 'Remove',
             'applied' => 'Coupon applied.',

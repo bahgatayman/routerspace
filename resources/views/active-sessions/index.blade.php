@@ -5,6 +5,7 @@
 @section('content')
 @php
     $canSell = $owner->hasFeature('sales');
+    $canApplyCoupon = ! ($actingStaff ?? null) || $actingStaff->hasPermission('coupons.apply');
 @endphp
 <div class="ls-page">
     <x-ui.flash />
@@ -340,6 +341,26 @@
 
         <p id="modal-pkg-row" class="ls-co-pkg" hidden><x-ui.icon name="clock" /><span><b>{{ __('app.packages.covered_by') }}</b> <span id="modal-pkg"></span></span></p>
 
+        @if ($canApplyCoupon)
+            {{-- Coupon: typed live, re-evaluated server-side on every keystroke
+                 via the same close-preview the rest of this modal already
+                 calls — no separate endpoint. Hidden whenever an hour package
+                 already covers the session (the two never stack). --}}
+            <div id="modal-coupon-row" style="display:flex;gap:8px;align-items:center" hidden>
+                <div class="ls-search ls-co-search" style="flex:1">
+                    <x-ui.icon name="tag" />
+                    <input type="text" id="modal-coupon-code" class="ls-input" autocomplete="off"
+                           placeholder="{{ __('app.coupons.checkout.placeholder') }}" aria-label="{{ __('app.coupons.checkout.title') }}">
+                </div>
+                <button type="button" id="modal-coupon-clear" class="ls-btn ls-btn--ghost ls-btn--sm ls-btn--icon" hidden aria-label="{{ __('app.coupons.checkout.remove') }}">
+                    <x-ui.icon name="x" />
+                </button>
+            </div>
+            <p id="modal-coupon-status" class="ls-hint" hidden aria-live="polite">{{ __('app.coupons.checkout.checking') }}</p>
+            <p id="modal-coupon-error" class="ls-error" hidden aria-live="polite"><x-ui.icon name="alert" /><span></span></p>
+            <p id="modal-coupon-line" class="ls-co-pkg" hidden aria-live="polite"><x-ui.icon name="check-circle" /><span><b>{{ __('app.coupons.checkout.discount') }}:</b> <span id="modal-coupon-amount"></span></span></p>
+        @endif
+
         @if ($canSell)
             <section class="ls-co-bill" aria-labelledby="modal-bill-title">
                 <div class="ls-co-head">
@@ -516,6 +537,7 @@
 
     /* ---------------- Shared session modal (also serves Open Session bookings) ---------------- */
     let currentSessionId = null, currentMode = 'checkout', currentKind = 'shared', lastPreview = null, itemsChanged = false;
+    let couponCode = '', previewToken = 0;
 
     // 'shared' -> /shared-sessions/{id}/..., 'open-booking' -> /bookings/{id}/...
     // (an Open Session exclusive booking, which has the identical
@@ -526,6 +548,10 @@
 
     window.openSessionModal = (sessionId, mode = 'checkout', kind = 'shared') => {
         currentSessionId = sessionId; currentMode = mode; currentKind = kind; itemsChanged = false; lastPreview = null;
+        couponCode = '';
+        if ($('modal-coupon-code')) $('modal-coupon-code').value = '';
+        show('modal-coupon-error', false); show('modal-coupon-status', false); show('modal-coupon-line', false);
+        if ($('modal-coupon-clear')) $('modal-coupon-clear').hidden = true;
         $('session-modal-title').textContent = L.titles[mode] || L.titles.checkout;
         $('session-modal-sub').textContent = '';
         const confirmBtn = $('confirm-close-btn');
@@ -541,10 +567,19 @@
     window.retryPreview = () => { show('modal-error', false); show('modal-loading', true); loadPreview(); };
 
     function loadPreview() {
-        return fetch(`${sessionBaseUrl()}/close-preview`, { headers: { 'Accept': 'application/json' } })
+        const token = ++previewToken;
+        const params = couponCode ? `?${new URLSearchParams({ coupon_code: couponCode })}` : '';
+        return fetch(`${sessionBaseUrl()}/close-preview${params}`, { headers: { 'Accept': 'application/json' } })
             .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-            .then(data => { populatePreview(data); show('modal-loading', false); show('modal-error', false); show('modal-content', true); show('modal-summary', true); })
-            .catch(() => { show('modal-loading', false); show('modal-content', false); show('modal-summary', false); show('modal-error', true); });
+            .then(data => {
+                if (token !== previewToken) return; // a newer request (coupon typed again) already landed
+                populatePreview(data);
+                show('modal-loading', false); show('modal-error', false); show('modal-content', true); show('modal-summary', true);
+            })
+            .catch(() => {
+                if (token !== previewToken) return;
+                show('modal-loading', false); show('modal-content', false); show('modal-summary', false); show('modal-error', true);
+            });
     }
 
     function populatePreview(data) {
@@ -573,7 +608,23 @@
             $('modal-pkg').textContent = pkg.message;
             if (pkg.covers) $('modal-total').textContent = PKG_COVERED.replace(':time', pkg.hours);
         }
-        data.collect = SALES_ENABLED ? data.grand_total : (pkg && pkg.covers ? '0.00' : data.total_price);
+
+        // Coupon: hidden outright once a package already covers the session
+        // (the two never stack — same rule the server enforces at close()).
+        if ($('modal-coupon-row')) {
+            show('modal-coupon-row', !(pkg && pkg.covers));
+            show('modal-coupon-status', false);
+            show('modal-coupon-error', !!data.coupon_error);
+            if (data.coupon_error) $('modal-coupon-error').querySelector('span').textContent = data.coupon_error;
+            show('modal-coupon-line', !!data.coupon);
+            if (data.coupon) $('modal-coupon-amount').textContent = '-' + money(data.coupon.discount.toFixed(2));
+            $('modal-coupon-clear').hidden = !couponCode;
+        }
+
+        // grand_total already reflects any package/coupon discount server-side
+        // (identical to total_price when neither applies) — always correct,
+        // regardless of whether sales/line-items are even enabled.
+        data.collect = (pkg && pkg.covers) ? '0.00' : data.grand_total;
         const total = data.collect;
         if (SALES_ENABLED) {
             $('modal-items-total').textContent = money(data.items_total);
@@ -628,6 +679,34 @@
         pickerList.addEventListener('click', (e) => {
             const btn = e.target.closest('[data-add-product]');
             if (btn) sessionAddItem(btn);
+        });
+    }
+
+    /* Coupon: live preview on every keystroke, debounced, via the same
+       close-preview this modal already loads for everything else — no
+       separate endpoint, and no "Apply" button (automatic like the rest
+       of this modal's previews). */
+    const couponInput = $('modal-coupon-code');
+    if (couponInput) {
+        let couponTimer = null;
+        couponInput.addEventListener('input', () => {
+            clearTimeout(couponTimer);
+            const typed = couponInput.value.trim();
+            couponTimer = setTimeout(() => {
+                if (typed === couponCode) return;
+                couponCode = typed;
+                $('modal-coupon-clear').hidden = !couponCode;
+                if (couponCode) { show('modal-coupon-status', true); show('modal-coupon-error', false); show('modal-coupon-line', false); }
+                loadPreview();
+            }, 400);
+        });
+        $('modal-coupon-clear').addEventListener('click', () => {
+            clearTimeout(couponTimer);
+            couponInput.value = '';
+            couponCode = '';
+            $('modal-coupon-clear').hidden = true;
+            loadPreview();
+            couponInput.focus();
         });
     }
 
@@ -699,6 +778,10 @@
         fetch(`${sessionBaseUrl()}/close`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+            // The server re-validates and recalculates independently of this
+            // preview — carrying the code through only means "use the one the
+            // owner last typed", never a trusted amount.
+            body: JSON.stringify({ coupon_code: couponCode || null }),
         })
         .then(r => r.json())
         .then(data => {

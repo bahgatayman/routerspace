@@ -69,8 +69,10 @@
         'repeatEstimate' => __('app.series.series_estimate', ['count' => ':count', 'total' => ':total']),
         'repeatNoPlan' => __('app.series.errors.no_plans'),
         'repeatNoDays' => __('app.series.errors.no_dates'),
+        'couponDiscount' => __('app.coupons.checkout.discount'),
     ];
     $qbCanAddMember = ! ($actingStaff ?? null) || $actingStaff->hasPermission('members.create');
+    $qbCanApplyCoupon = ! ($actingStaff ?? null) || $actingStaff->hasPermission('coupons.apply');
 @endphp
 <x-ui.modal id="quick-book" :title="__('app.quick_booking.title')" size="wide" class="ls-qb">
     {{-- Repeating: two steps in this one dialog — the details, then review and confirm. --}}
@@ -200,6 +202,28 @@
         --}}
         @include('bookings._repeat-fields', ['rp' => 'qb-repeat', 'useOld' => false, 'withReview' => false, 'class' => 'ls-qb-step'])
 
+        @if ($qbCanApplyCoupon)
+            {{--
+                Coupon: live preview on every keystroke (debounced), via the new
+                read-only /bookings/coupon-preview endpoint — never a reservation
+                or redemption, just a quote. Hidden while repeating (each date is
+                its own booking) or once an hour package already covers it.
+            --}}
+            <div class="ls-qb-field" id="qb-coupon-wrap">
+                <label class="ls-qb-field-label" for="qb-coupon-code">{{ __('app.coupons.checkout.title') }}</label>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="text" id="qb-coupon-code" class="ls-input" autocomplete="off" style="flex:1"
+                           placeholder="{{ __('app.coupons.checkout.placeholder') }}" aria-label="{{ __('app.coupons.checkout.title') }}">
+                    <button type="button" id="qb-coupon-clear" class="ls-btn ls-btn--ghost ls-btn--sm ls-btn--icon" hidden aria-label="{{ __('app.coupons.checkout.remove') }}">
+                        <x-ui.icon name="x" />
+                    </button>
+                </div>
+                <p class="ls-hint" id="qb-coupon-status" hidden>{{ __('app.coupons.checkout.checking') }}</p>
+                <span class="ls-error" id="qb-coupon-error" hidden><x-ui.icon name="alert" /><span></span></span>
+                <p class="ls-hint" id="qb-coupon-line" hidden></p>
+            </div>
+        @endif
+
         {{--
             Payment + note: always on screen, nothing to expand. One click picks
             No / Partial / Full; Partial reveals the amount field. The server
@@ -262,7 +286,8 @@
     const fill = (s, map) => Object.entries(map).reduce((o, [k, v]) => o.split(':' + k).join(v), s);
 
     const S = { user: null, date: '', start: '', minutes: 60, end: '', people: 1, roomId: null, planId: null, preferRoom: null, rooms: [], fullDay: null, token: 0,
-        pkgs: [], pkgId: null, pkgMinutesLabel: null, pkgKey: '', pkgToken: 0 };
+        pkgs: [], pkgId: null, pkgMinutesLabel: null, pkgKey: '', pkgToken: 0,
+        couponCode: '', coupon: null, couponError: null, couponKey: '', couponToken: 0 };
 
     // ---------- helpers ----------
     const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -635,11 +660,80 @@
     }
     document.querySelectorAll('[data-qb-pay-mode]').forEach((r) => r.addEventListener('change', () => { renderPackages(); update(); }));
 
+    // ---------- coupon (live preview only — never a reservation or redemption) ----------
+    const couponInput = $('qb-coupon-code');
+    let couponTimer = null;
+    function refreshCouponPreview() {
+        if (!couponInput) return;
+        const room = currentRoom(), end = endMinutes();
+        const pkg = room && !repeatOn() ? currentPkg() : null;
+        const eligible = !!room && !room.is_shared && !pkg && !repeatOn() && !!end;
+        $('qb-coupon-wrap').hidden = repeatOn();
+        if (!S.couponCode) {
+            S.coupon = null; S.couponError = null; S.couponKey = '';
+            renderCoupon();
+            return;
+        }
+        if (!eligible) {
+            // Nothing to show yet (no room/time picked) or excluded outright
+            // (shared room, package already chosen) — quiet until it applies.
+            S.coupon = null; S.couponError = null; S.couponKey = '';
+            renderCoupon();
+            return;
+        }
+        const key = [S.couponCode, room.id, S.date, S.start, toHm(end), S.people, S.planId || '', S.user ? S.user.id : ''].join('|');
+        if (key === S.couponKey) return;
+        S.couponKey = key;
+        S.coupon = null; S.couponError = null;
+        renderCoupon();
+        clearTimeout(couponTimer);
+        $('qb-coupon-status').hidden = false;
+        couponTimer = setTimeout(() => {
+            const params = new URLSearchParams({
+                coupon_code: S.couponCode, room_id: room.id, booking_date: S.date,
+                start_time: S.start, end_time: toHm(end), party_size: S.people, guest_count: S.people,
+            });
+            if (S.planId) params.set('room_plan_id', S.planId);
+            if (S.user) params.set('hotspot_user_id', S.user.id);
+            const token = ++S.couponToken;
+            fetch(`/bookings/coupon-preview?${params}`, { headers: { Accept: 'application/json' } })
+                .then((r) => r.json())
+                .then((d) => {
+                    if (token !== S.couponToken) return;
+                    S.coupon = d.coupon || null; S.couponError = d.coupon_error || null;
+                    renderCoupon(); update();
+                })
+                .catch(() => { if (token === S.couponToken) { S.coupon = null; S.couponError = null; renderCoupon(); } });
+        }, 400);
+    }
+    function renderCoupon() {
+        if (!couponInput) return;
+        $('qb-coupon-status').hidden = true;
+        $('qb-coupon-clear').hidden = !S.couponCode;
+        $('qb-coupon-error').hidden = !S.couponError;
+        if (S.couponError) $('qb-coupon-error').querySelector('span').textContent = S.couponError;
+        $('qb-coupon-line').hidden = !S.coupon;
+        if (S.coupon) $('qb-coupon-line').textContent = `${T.couponDiscount}: -${money(S.coupon.discount)}`;
+    }
+    if (couponInput) {
+        couponInput.addEventListener('input', () => {
+            S.couponCode = couponInput.value.trim();
+            update();
+        });
+        $('qb-coupon-clear').addEventListener('click', () => {
+            clearTimeout(couponTimer);
+            couponInput.value = ''; S.couponCode = ''; S.couponKey = ''; S.coupon = null; S.couponError = null;
+            renderCoupon(); update();
+            couponInput.focus();
+        });
+    }
+
     // ---------- price + CTA (the one summary) ----------
     const submit = $('qb-submit');
     function currentRoom() { return S.rooms.find((r) => String(r.id) === S.roomId) || null; }
     function update() {
         refreshPackages();
+        refreshCouponPreview();
         const room = currentRoom();
         const plan = currentChoice();
         const missing = !S.user ? T.needCustomer : !endMinutes() ? T.needTime : !room ? T.needRoom : '';
@@ -655,7 +749,18 @@
         submit.textContent = room ? fill(T.cta, { total: plan ? plan.price_display : room.total_price_display }) : T.ctaIdle;
         // Covered by an hour package: no deposit, one clear total.
         const pkg = room && !missing && !repeatOn() ? currentPkg() : null;
-        updatePayment(room, plan, pkg);
+        // A coupon only ever applies to the one thing it was just evaluated
+        // against — never shown once a package already covers the booking,
+        // the room is shared, or any of that has since changed underneath it.
+        const coupon = (!pkg && room && !room.is_shared && !repeatOn()) ? S.coupon : null;
+        if (coupon && room) {
+            const rawTotal = plan ? plan.price : room.total_price;
+            const netTotal = Math.max(0, rawTotal - coupon.discount);
+            $('qb-total').textContent = money(netTotal);
+            submit.textContent = fill(T.cta, { total: money(netTotal) });
+            if (selRow) selRow.querySelector('.ls-qb-room-price b').textContent = money(netTotal);
+        }
+        updatePayment(room, plan, pkg, coupon);
         // Repeating: the review step books (and prices) every date; no payment or package here.
         // The footer shows one date's price — never as the total — and an estimate for the series.
         const dates = repeatSummary();
@@ -692,9 +797,10 @@
     let payError = '';
     // No payment → 0 · Full → the live total (follows every price change) ·
     // Partial → what was typed, never silently clamped: out of range blocks Book.
-    function updatePayment(room, plan, pkg) {
+    function updatePayment(room, plan, pkg, coupon) {
         const shared = !!(room && room.is_shared);
-        const total = room ? Number(plan ? plan.price : room.total_price) || 0 : null;
+        const rawTotal = room ? Number(plan ? plan.price : room.total_price) || 0 : null;
+        const total = rawTotal !== null && coupon ? Math.max(0, rawTotal - coupon.discount) : rawTotal;
         $('qb-paid-wrap').hidden = !!pkg || shared;
         $('qb-pay-shared').hidden = !shared || !!pkg;
         const fullRadio = document.querySelector('[data-qb-pay-choice][value="full"]');
@@ -883,6 +989,10 @@
             body.append('payment_choice', payChoice());
             if (payChoice() === 'partial') body.append('amount_paid', $('qb-paid').value);
         }
+        // The server re-validates and re-evaluates this independently of the
+        // preview above — only the code itself is carried through, never a
+        // trusted amount.
+        if (S.couponCode && !currentPkg() && !room.is_shared) body.append('coupon_code', S.couponCode);
         if ($('qb-notes').value.trim()) body.append('notes', $('qb-notes').value.trim());
         LS.busy(submit);
         fetch('/bookings', { method: 'POST', body, headers: { Accept: 'application/json', 'X-CSRF-TOKEN': CSRF } })
@@ -913,6 +1023,8 @@
         $('qb-picked-name').textContent = ''; $('qb-picked-phone').textContent = '';
         S.user = null; S.roomId = null; S.planId = null; S.profileId = null; S.rooms = []; S.people = 1; peopleInput.value = 1;
         S.pkgs = []; S.pkgId = null; S.pkgKey = ''; S.pkgMinutesLabel = null; $('qb-pkg').hidden = true;
+        S.couponCode = ''; S.coupon = null; S.couponError = null; S.couponKey = '';
+        if ($('qb-coupon-code')) { $('qb-coupon-code').value = ''; renderCoupon(); }
         document.querySelector('[data-qb-pay-mode][value="normal"]').checked = true;
         // Every open starts as a one-time booking.
         repeatToggle.checked = false; $('qb-repeat-fields').hidden = true;

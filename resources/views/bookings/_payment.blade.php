@@ -18,6 +18,9 @@
         'partial' => __('app.booking.payment.choice_partial_hint'),
         'full' => __('app.booking.payment.choice_full_hint'),
     ];
+    // Creation only (store()) — editing an existing booking still uses the
+    // attach/detach endpoints from its own detail page, not this field.
+    $canApplyCoupon = (! ($isEdit ?? false)) && (! ($actingStaff ?? null) || $actingStaff->hasPermission('coupons.apply'));
 @endphp
 <section class="ls-plain-section" id="payment-section">
     <h2 class="ls-section-label">{{ __('app.booking.payment.title') }}</h2>
@@ -37,6 +40,29 @@
         <div class="ls-pkg-options" id="pkg-options" role="radiogroup" aria-label="{{ __('app.packages.pick_package') }}" hidden></div>
         <div class="ls-pkg-covered" id="pkg-covered" hidden><x-ui.icon name="check-circle" /><span></span></div>
     </div>
+
+    @if ($canApplyCoupon)
+        {{--
+            Coupon: live preview on every keystroke (debounced), via the
+            read-only /bookings/coupon-preview endpoint — never a reservation
+            or redemption, just a quote. Hidden once an hour package covers
+            the booking or the room is shared (the two never apply).
+        --}}
+        <div class="ls-field" id="coupon-wrap">
+            <label class="ls-label" for="f-coupon-code">{{ __('app.coupons.checkout.title') }}</label>
+            <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" name="coupon_code" id="f-coupon-code" class="ls-input" autocomplete="off" style="flex:1"
+                       placeholder="{{ __('app.coupons.checkout.placeholder') }}" value="{{ old('coupon_code') }}">
+                <button type="button" id="coupon-clear" class="ls-btn ls-btn--ghost ls-btn--sm ls-btn--icon" hidden aria-label="{{ __('app.coupons.checkout.remove') }}">
+                    <x-ui.icon name="x" />
+                </button>
+            </div>
+            <p class="ls-hint" id="coupon-status" hidden>{{ __('app.coupons.checkout.checking') }}</p>
+            <span class="ls-error" id="coupon-error" hidden><x-ui.icon name="alert" /><span></span></span>
+            <p class="ls-hint" id="coupon-line" hidden></p>
+            @error('coupon_code') <span class="ls-error"><x-ui.icon name="alert" />{{ $message }}</span> @enderror
+        </div>
+    @endif
 
     <div id="pay-deposit" class="ls-pay">
         <div class="ls-pay-choices" role="radiogroup" aria-label="{{ __('app.booking.payment.choice_label') }}">

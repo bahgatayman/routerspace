@@ -23,6 +23,7 @@
         <dl class="ls-confirm-list">
             <div class="ls-confirm-total"><dt>{{ __('app.booking.total') }}</dt><dd id="confirm-total" class="ls-num">&mdash;</dd></div>
             <div id="confirm-pricing-row" hidden><dt>{{ __('app.pricing.applied') }}</dt><dd id="confirm-pricing"></dd></div>
+            <div id="confirm-coupon-row" hidden><dt>{{ __('app.coupons.checkout.discount') }}</dt><dd id="confirm-coupon" class="ls-num">&mdash;</dd></div>
             <div><dt>{{ __('app.booking.payment.paid_now') }}</dt><dd id="confirm-paid" class="ls-num">&mdash;</dd></div>
             <div><dt>{{ __('app.booking.payment.remaining') }}</dt><dd id="confirm-remaining" class="ls-num">&mdash;</dd></div>
         </dl>

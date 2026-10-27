@@ -946,6 +946,7 @@ return [
         'checkout' => [
             'title' => 'كود الكوبون',
             'placeholder' => 'أدخل كود الكوبون',
+            'checking' => 'جاري التحقق…',
             'apply' => 'تطبيق',
             'remove' => 'إزالة',
             'applied' => 'تم تطبيق الكوبون.',

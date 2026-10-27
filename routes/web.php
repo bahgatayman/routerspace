@@ -230,6 +230,12 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
         Route::get('/bookings/package-options', [BookingController::class, 'packageOptions'])
             ->middleware('permission:bookings.view,shared_sessions.manage');
 
+        // Live, read-only coupon preview for the booking-creation forms —
+        // also before the {booking} wildcard. Needs both grants, same as
+        // actually attaching one (bookings.coupon.apply below).
+        Route::get('/bookings/coupon-preview', [BookingController::class, 'couponPreview'])
+            ->middleware(['permission:bookings.view', 'permission:coupons.apply']);
+
         // Hour Package templates + assigning/cancelling a member's packages.
         Route::get('/packages', [PackageTemplateController::class, 'index'])->name('packages.index')->middleware('permission:packages.view');
         Route::middleware('permission:packages.manage')->group(function () {
