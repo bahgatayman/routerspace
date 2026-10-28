@@ -221,4 +221,41 @@ class RoomImagesTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
     }
+
+    // ------------------------------------------- shared ImageUploadService regression
+
+    public function test_room_upload_still_stores_under_the_room_folder_with_a_webp_thumbnail(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner);
+
+        $this->actingAs($owner, 'owner')->post(route('rooms.images.store', [$room->workspace, $room]), [
+            'images' => [UploadedFile::fake()->image('photo.jpg', 1600, 1200)],
+        ])->assertSessionHas('success');
+
+        $image = $room->images()->sole();
+        $this->assertStringStartsWith("room-images/{$room->id}/", $image->path);
+        $this->assertSame(preg_replace('/\.[^.]+$/', '', $image->path).'-thumb.webp', $image->thumbnail_path);
+        Storage::disk('public')->assertExists([$image->path, $image->thumbnail_path]);
+
+        [$w, $h] = getimagesizefromstring(Storage::disk('public')->get($image->thumbnail_path));
+        $this->assertSame(640, max($w, $h), 'Thumbnail keeps the 640px bound.');
+        $this->assertSame(asset('storage/'.$image->thumbnail_path), $image->thumbnailUrl());
+    }
+
+    public function test_room_upload_that_fails_to_save_leaves_no_orphaned_files(): void
+    {
+        $owner = $this->owner();
+        $room = $this->room($owner);
+        RoomImage::creating(function () {
+            throw new \RuntimeException('simulated database failure');
+        });
+
+        $this->actingAs($owner, 'owner')->post(route('rooms.images.store', [$room->workspace, $room]), [
+            'images' => [UploadedFile::fake()->image('a.jpg')],
+        ])->assertSessionHas('error');
+
+        $this->assertCount(0, $room->fresh()->images);
+        $this->assertSame([], Storage::disk('public')->allFiles());
+    }
 }

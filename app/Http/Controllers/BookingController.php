@@ -7,10 +7,14 @@ use App\Exceptions\CouponRejectedException;
 use App\Exceptions\CouponUsageLimitExceededException;
 use App\Exceptions\InsufficientPackageBalanceException;
 use App\Exceptions\InsufficientStockException;
+use App\Exceptions\InvalidIdempotencyKeyException;
+use App\Exceptions\PaymentNotRecordedException;
+use App\Exceptions\RoomUnavailableException;
 use App\Exceptions\SharedSessionCapacityExceededException;
 use App\Http\Controllers\Concerns\GeneratesTimeSlots;
 use App\Models\Booking;
 use App\Models\HotspotUser;
+use App\Models\IdempotencyKey as IdempotencyKeyRecord;
 use App\Models\MemberPackage;
 use App\Models\Owner;
 use App\Models\PackageUsage;
@@ -35,9 +39,11 @@ use App\Support\Duration;
 use App\Support\IdempotencyKey;
 use App\Support\Money;
 use App\Support\Pricing\PriceQuote;
+use App\Support\RequestIdempotency;
 use App\Support\TenantContext;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -157,10 +163,26 @@ class BookingController extends Controller
             }
         }
 
+        // Once-only guard for this create (RequestIdempotency): a repeat of a
+        // request that already created its booking gets that booking back.
+        try {
+            $idempotencyKey = RequestIdempotency::keyFrom($request);
+        } catch (InvalidIdempotencyKeyException) {
+            return $fail(__('app.booking.idempotency_invalid'));
+        }
+        $idempotencyHash = $idempotencyKey ? $this->bookingFingerprint('fixed', $validated) : null;
+        if ($idempotencyKey && ($claim = RequestIdempotency::find($ownerId, RequestIdempotency::SCOPE_BOOKING_CREATE, $idempotencyKey))) {
+            return $this->bookingReplay($request, $claim, $idempotencyHash);
+        }
         $room = Room::where('id', $validated['room_id'])
             ->where('owner_id', $ownerId)
             ->firstOrFail();
 
+        // Server-side, not just the pickers: a room switched off by the owner
+        // takes no new bookings, whatever a direct request submits.
+        if (! $room->is_available) {
+            return $fail(__('app.booking.room_disabled'));
+        }
         // Shared rooms are advance-bookable (Phase 5) exactly like exclusive
         // ones — the capacity math below already handles both via
         // Room::effectiveCapacity(). What stays deferred is check-in/close
@@ -217,7 +239,12 @@ class BookingController extends Controller
 
         $remainingSeats = null; // seats free under the lock, for the refusal message
         try {
-            $booking = DB::transaction(function () use ($validated, $ownerId, $room, $hotspotUser, $quote, $planId, $people, $availability, $partySize, $amountPaid, $package, $packages, $profile, $couponCode, $coupons, &$remainingSeats) {
+            $booking = DB::transaction(function () use ($validated, $ownerId, $room, $hotspotUser, $quote, $planId, $people, $availability, $partySize, $amountPaid, $package, $packages, $profile, $idempotencyKey, $idempotencyHash, $couponCode, $coupons, &$remainingSeats) {
+                // First write: the key commits only together with the booking,
+                // so a rejected attempt leaves its key free for a retry.
+                $claim = $idempotencyKey
+                    ? RequestIdempotency::claim($ownerId, RequestIdempotency::SCOPE_BOOKING_CREATE, $idempotencyKey, $idempotencyHash)
+                    : null;
                 // Lock the room row so concurrent store()/update() calls for
                 // this room serialize through here. Genuine row-level locking
                 // on MySQL (production) — compiles to a real `FOR UPDATE`; a
@@ -228,13 +255,20 @@ class BookingController extends Controller
                 // the lock having been honored.
                 $lockedRoom = Room::lockInventory($room->id); // physical room first: all its uses queue here
 
+                // Re-read under the lock: the owner may have switched the room off since the check above.
+                if (! $lockedRoom->is_available) {
+                    throw new RoomUnavailableException;
+                }
+
                 $remaining = $availability->availabilityForRange(
                     $lockedRoom, $validated['booking_date'], $validated['start_time'], $validated['end_time'],
                 );
+
                 $remainingSeats = $remaining;
 
+                // Thrown, not returned: returning would commit the idempotency claim for a booking that was never made.
                 if ($remaining < $partySize) {
-                    return null;
+                    throw new BookingCapacityExceededException;
                 }
 
                 $newBooking = Booking::create([
@@ -275,14 +309,20 @@ class BookingController extends Controller
                     $coupons->attachToBooking($newBooking, $couponCode);
                 }
 
+                $claim?->update(['booking_id' => $newBooking->id]);
+
                 return $newBooking;
-            });
+            }, 3);
         } catch (BookingCapacityExceededException) {
             $booking = null;
         } catch (InsufficientPackageBalanceException $e) {
             return $fail($e->getMessage());
         } catch (CouponRejectedException|CouponUsageLimitExceededException $e) {
             return $fail($e->getMessage());
+        } catch (RoomUnavailableException) {
+            return $fail(__('app.booking.room_disabled'));
+        } catch (UniqueConstraintViolationException $e) {
+            return $this->replayAfterRace($request, $e, $ownerId, $idempotencyKey, $idempotencyHash);
         }
 
         if (! $booking) {
@@ -339,10 +379,33 @@ class BookingController extends Controller
             $validated = $request->validate($rules);
         }
 
+        // Once-only guard for this create (RequestIdempotency): a repeat of a
+        // request that already created its booking gets that booking back.
+        try {
+            $idempotencyKey = RequestIdempotency::keyFrom($request);
+        } catch (InvalidIdempotencyKeyException) {
+            return $fail(__('app.booking.idempotency_invalid'));
+        }
+        $idempotencyHash = $idempotencyKey ? $this->bookingFingerprint('open', $validated) : null;
+        if ($idempotencyKey && ($claim = RequestIdempotency::find($ownerId, RequestIdempotency::SCOPE_BOOKING_CREATE, $idempotencyKey))) {
+            return $this->bookingReplay($request, $claim, $idempotencyHash);
+        }
         $room = Room::where('id', $validated['room_id'])->where('owner_id', $ownerId)->firstOrFail();
 
+        // Server-side, not just the pickers: a room switched off by the owner
+        // takes no new bookings, whatever a direct request submits.
+        if (! $room->is_available) {
+            return $fail(__('app.booking.room_disabled'));
+        }
         if ($room->isShared()) {
             return $fail(__('app.booking.duration_type.shared_room_not_allowed'));
+        }
+
+        // An Open Session has no end: it must not run into a later booking of
+        // this room or of any other use of the same physical room today. The
+        // friendly message here; re-checked under the lock below.
+        if ($conflict = $availability->openEndedConflict($room, now()->format('Y-m-d'), now()->format('H:i'), includeOwn: true)) {
+            return $fail(__('app.booking.open_ended_conflict', $conflict));
         }
 
         $hotspotUser = HotspotUser::where('id', $validated['hotspot_user_id'])->where('owner_id', $ownerId)->firstOrFail();
@@ -368,23 +431,26 @@ class BookingController extends Controller
             $packageId = $package->id;
         }
 
-        // An Open Session has no end: it must not run into a later booking of
-        // this room or of any other use of the same physical room today. The
-        // friendly message here; re-checked under the lock below.
-        if ($conflict = $availability->openEndedConflict($room, now()->format('Y-m-d'), now()->format('H:i'), includeOwn: true)) {
-            return $fail(__('app.booking.open_ended_conflict', $conflict));
-        }
-
         try {
-            $booking = DB::transaction(function () use ($room, $ownerId, $hotspotUser, $profile, $packageId, $validated, $availability) {
+            $booking = DB::transaction(function () use ($room, $ownerId, $hotspotUser, $profile, $packageId, $validated, $availability, $idempotencyKey, $idempotencyHash) {
+                // First write: the key commits only together with the booking,
+                // so a rejected attempt leaves its key free for a retry.
+                $claim = $idempotencyKey
+                    ? RequestIdempotency::claim($ownerId, RequestIdempotency::SCOPE_BOOKING_CREATE, $idempotencyKey, $idempotencyHash)
+                    : null;
                 $lockedRoom = Room::lockInventory($room->id); // physical room first: all its uses queue here
 
+                if (! $lockedRoom->is_available) {
+                    throw new RoomUnavailableException;
+                }
+
+                // Thrown, not returned — see store().
                 if ($availability->availableNow($lockedRoom) < 1) {
-                    return null;
+                    throw new BookingCapacityExceededException;
                 }
                 // Authoritative re-check of the open-ended rule (see above).
                 if ($availability->openEndedConflict($lockedRoom, now()->format('Y-m-d'), now()->format('H:i'), includeOwn: true)) {
-                    return null;
+                    throw new BookingCapacityExceededException;
                 }
 
                 $now = now();
@@ -416,10 +482,16 @@ class BookingController extends Controller
                     throw new BookingCapacityExceededException;
                 }
 
+                $claim?->update(['booking_id' => $newBooking->id]);
+
                 return $newBooking;
-            });
+            }, 3);
         } catch (BookingCapacityExceededException) {
             $booking = null;
+        } catch (RoomUnavailableException) {
+            return $fail(__('app.booking.room_disabled'));
+        } catch (UniqueConstraintViolationException $e) {
+            return $this->replayAfterRace($request, $e, $ownerId, $idempotencyKey, $idempotencyHash);
         }
 
         if (! $booking) {
@@ -657,6 +729,14 @@ class BookingController extends Controller
             ->where('owner_id', $ownerId)
             ->firstOrFail();
 
+        // Moving a booking into a switched-off room is refused (it would be a new
+        // booking there in all but name); editing one that already lives in a
+        // since-disabled room stays allowed, so the owner can still fix it.
+        $movesRoom = (int) $room->id !== (int) $booking->room_id;
+        if ($movesRoom && ! $room->is_available) {
+            return back()->withInput()->with('error', __('app.booking.room_disabled'));
+        }
+
         $partySize = (int) ($validated['party_size'] ?? 1);
         $people = $room->isShared() ? $partySize : (int) ($validated['guest_count'] ?? $booking->guest_count ?? 1);
         // A form that doesn't send the field keeps the booking's profile (same room, no plan).
@@ -710,7 +790,7 @@ class BookingController extends Controller
         // notes, payment, customer…) keeps the seats it already holds: walk-ins
         // that arrived since never push an existing booking out. Anything that
         // could need more room is re-checked as before.
-        $keepsSlot = (int) $room->id === (int) $booking->room_id
+        $keepsSlot = ! $movesRoom
             && $booking->booking_date->toDateString() === $validated['booking_date']
             && substr((string) $booking->start_time, 0, 5) === substr((string) $validated['start_time'], 0, 5)
             && substr((string) $booking->end_time, 0, 5) === substr((string) $validated['end_time'], 0, 5)
@@ -718,10 +798,14 @@ class BookingController extends Controller
 
         $remainingSeats = null; // seats free under the lock, for the refusal message
         try {
-            $updated = DB::transaction(function () use ($validated, $room, $booking, $quote, $planId, $people, $availability, $id, $partySize, $amountPaid, $package, $packages, $profile, $keepsSlot, &$remainingSeats) {
+            $updated = DB::transaction(function () use ($validated, $room, $booking, $quote, $planId, $people, $availability, $id, $partySize, $amountPaid, $package, $packages, $profile, $movesRoom, $keepsSlot, &$remainingSeats) {
                 // Same lock + post-write re-verify pattern as store() — see
                 // the comment there for why both layers exist.
                 $lockedRoom = Room::lockInventory($room->id); // physical room first: all its uses queue here
+
+                if ($movesRoom && ! $lockedRoom->is_available) {
+                    throw new RoomUnavailableException;
+                }
 
                 $remaining = $keepsSlot ? PHP_INT_MAX : $availability->availabilityForRange(
                     $lockedRoom, $validated['booking_date'], $validated['start_time'], $validated['end_time'],
@@ -769,6 +853,8 @@ class BookingController extends Controller
             $updated = false;
         } catch (InsufficientPackageBalanceException $e) {
             return back()->withInput()->with('error', $e->getMessage());
+        } catch (RoomUnavailableException) {
+            return back()->withInput()->with('error', __('app.booking.room_disabled'));
         }
 
         if (! $updated) {
@@ -2024,12 +2110,14 @@ class BookingController extends Controller
      * booking time, since nothing else in the app ever touches amount_paid
      * again.
      */
-    public function recordPayment(Request $request, $id): RedirectResponse
+    public function recordPayment(Request $request, $id): RedirectResponse|JsonResponse
     {
         $ownerId = TenantContext::id();
 
         $booking = Booking::where('owner_id', $ownerId)->findOrFail($id);
 
+        // Early, friendly answer for the common case only — the guarded write
+        // below re-decides against the row as it is at write time.
         if (in_array($booking->status, ['cancelled', 'no_show'], true)) {
             return back()->with('error', __('app.booking.payment.cannot_record_cancelled'));
         }
@@ -2039,26 +2127,173 @@ class BookingController extends Controller
         ]);
 
         $amount = round((float) $validated['amount'], 2);
-        $balanceDue = $booking->balanceDue();
 
-        if ($amount > $balanceDue) {
-            return back()->with('error', __('app.booking.payment.exceeds_balance', ['balance' => number_format($balanceDue, 2)]));
+        try {
+            $key = RequestIdempotency::keyFrom($request);
+        } catch (InvalidIdempotencyKeyException) {
+            return back()->with('error', __('app.booking.idempotency_invalid'));
+        }
+        $hash = $key ? RequestIdempotency::fingerprint(['booking_id' => (int) $booking->id, 'amount' => number_format($amount, 2, '.', '')]) : null;
+
+        // A repeat of a payment that already went through (double click,
+        // resubmitted form): answer it, never apply it a second time.
+        if ($key && ($claim = RequestIdempotency::find($ownerId, RequestIdempotency::SCOPE_BOOKING_PAYMENT, $key))) {
+            return $this->paymentReplay($request, $claim, $hash);
         }
 
-        DB::transaction(function () use ($id, $ownerId, $amount) {
-            $locked = Booking::where('id', $id)->where('owner_id', $ownerId)->lockForUpdate()->firstOrFail();
-            $newPaid = round((float) $locked->amount_paid + $amount, 2);
+        try {
+            DB::transaction(function () use ($id, $ownerId, $amount, $key, $hash) {
+                // First write: the key commits only together with the payment.
+                if ($key) {
+                    RequestIdempotency::claim($ownerId, RequestIdempotency::SCOPE_BOOKING_PAYMENT, $key, $hash, (int) $id);
+                }
 
-            $locked->update([
-                'amount_paid' => $newPaid,
-                'payment_status' => Booking::derivePaymentStatus($newPaid, $locked->netRoomCharge()),
-            ]);
-        });
+                // Real row lock on MySQL (production) — concurrent payments on
+                // this booking serialize here. A documented no-op on SQLite,
+                // which is why the decision itself is the guarded UPDATE below.
+                $locked = Booking::where('id', $id)->where('owner_id', $ownerId)->lockForUpdate()->firstOrFail();
+
+                // One atomic, engine-independent write (same pattern as
+                // HourPackageService::consume()) — see Booking::applyPayment().
+                if (! Booking::applyPayment($locked->id, $amount)) {
+                    throw new PaymentNotRecordedException($locked->fresh());
+                }
+            }, 3);
+        } catch (PaymentNotRecordedException $e) {
+            if (in_array($e->booking->status, ['cancelled', 'no_show'], true)) {
+                return back()->with('error', __('app.booking.payment.cannot_record_cancelled'));
+            }
+
+            return back()->with('error', __('app.booking.payment.exceeds_balance', ['balance' => number_format($e->booking->balanceDue(), 2)]));
+        } catch (UniqueConstraintViolationException $e) {
+            // Lost the race to an identical request: it has committed by now.
+            $claim = $key ? RequestIdempotency::find($ownerId, RequestIdempotency::SCOPE_BOOKING_PAYMENT, $key) : null;
+            if (! $claim) {
+                throw $e;
+            }
+
+            return $this->paymentReplay($request, $claim, $hash);
+        }
 
         $booking->refresh();
         $this->activityLogger->log('booking.payment_recorded', $booking, "Recorded a payment of {$amount} for booking #{$booking->id}");
 
         return back()->with('success', __('app.booking.payment.recorded'));
+    }
+
+    /**
+     * Fingerprint of a create request: its validated input, normalised so the
+     * form (strings) and the quick modal (JSON numbers) agree for the same
+     * booking. Server-derived values (price, availability) are not part of it.
+     */
+    private function bookingFingerprint(string $durationType, array $validated): string
+    {
+        $int = fn (string $field) => isset($validated[$field]) && $validated[$field] !== '' ? (int) $validated[$field] : null;
+
+        return RequestIdempotency::fingerprint([
+            'duration_type' => $durationType,
+            'room_id' => $int('room_id'),
+            'hotspot_user_id' => $int('hotspot_user_id'),
+            'booking_date' => isset($validated['booking_date']) ? Carbon::parse($validated['booking_date'])->toDateString() : null,
+            'start_time' => $validated['start_time'] ?? null,
+            'end_time' => $validated['end_time'] ?? null,
+            'room_plan_id' => $int('room_plan_id'),
+            'room_pricing_profile_id' => $int('room_pricing_profile_id'),
+            'party_size' => $int('party_size'),
+            'guest_count' => $int('guest_count'),
+            'amount_paid' => isset($validated['amount_paid']) && $validated['amount_paid'] !== '' ? number_format((float) $validated['amount_paid'], 2, '.', '') : null,
+            'payment_choice' => $validated['payment_choice'] ?? null,
+            'member_package_id' => $int('member_package_id'),
+            'coupon_code' => $validated['coupon_code'] ?? null,
+            'notes' => $validated['notes'] ?? null,
+        ]);
+    }
+
+    /**
+     * Answer a create request whose key was already used: the identical request
+     * gets the booking it created (never a second one); a different request,
+     * or one whose booking has since been deleted, is refused with 409.
+     */
+    private function bookingReplay(Request $request, IdempotencyKeyRecord $claim, string $hash): RedirectResponse|JsonResponse
+    {
+        $booking = null;
+        if (! hash_equals($claim->request_hash, $hash)) {
+            $error = __('app.booking.idempotency_mismatch');
+        } elseif (! $claim->booking_id || ! ($booking = Booking::where('owner_id', $claim->owner_id)->find($claim->booking_id))) {
+            $error = __('app.booking.idempotency_gone');
+        }
+
+        if (! $booking) {
+            return $request->wantsJson()
+                ? response()->json(['success' => false, 'message' => $error], 409)
+                : back()->withInput()->with('error', $error);
+        }
+
+        $message = __('app.booking.already_created');
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'booking_id' => $booking->id,
+                'url' => "/bookings/{$booking->id}",
+                'message' => $message,
+            ], 200, ['Idempotent-Replayed' => 'true']);
+        }
+
+        return redirect("/bookings/{$booking->id}")->with('success', $message);
+    }
+
+    /**
+     * The refusal for a shared-room booking that doesn't fit because open
+     * walk-ins hold seats over its time: how many seats are free and that
+     * walk-ins are the reason. Null otherwise (the usual message stands).
+     */
+    private function sharedSeatsMessage(AvailabilityService $availability, Room $room, array $validated, ?int $remaining): ?string
+    {
+        if (! $room->isShared() || $remaining === null || $remaining === PHP_INT_MAX) {
+            return null;
+        }
+
+        $walkIns = $availability->walkInSeatsHeld($room, $validated['booking_date'], $validated['start_time'], $validated['end_time']);
+        if ($walkIns === 0) {
+            return null;
+        }
+
+        return trans_choice('app.booking.shared_seats_free', $remaining, ['count' => $remaining, 'room' => $room->name])
+            .' '.trans_choice('app.booking.walk_in_seats_held', $walkIns, ['count' => $walkIns]);
+    }
+
+    /**
+     * A create transaction hit a unique-index violation. If it's this request's
+     * own idempotency key (an identical request committed first), answer as a
+     * replay; any other unique violation is a genuine error and is re-thrown.
+     */
+    private function replayAfterRace(Request $request, UniqueConstraintViolationException $e, int $ownerId, ?string $key, ?string $hash): RedirectResponse|JsonResponse
+    {
+        $claim = $key ? RequestIdempotency::find($ownerId, RequestIdempotency::SCOPE_BOOKING_CREATE, $key) : null;
+        if (! $claim) {
+            throw $e;
+        }
+
+        return $this->bookingReplay($request, $claim, $hash);
+    }
+
+    /** Answer a payment request whose key was already used: the same payment again, or a different one (rejected). */
+    private function paymentReplay(Request $request, IdempotencyKeyRecord $claim, string $hash): RedirectResponse|JsonResponse
+    {
+        if (! hash_equals($claim->request_hash, $hash)) {
+            $message = __('app.booking.payment.idempotency_mismatch');
+
+            return $request->wantsJson()
+                ? response()->json(['success' => false, 'message' => $message], 409)
+                : back()->with('error', $message);
+        }
+
+        $message = __('app.booking.payment.already_recorded');
+
+        return $request->wantsJson()
+            ? response()->json(['success' => true, 'message' => $message], 200, ['Idempotent-Replayed' => 'true'])
+            : back()->with('success', $message);
     }
 
     /**
@@ -2297,25 +2532,5 @@ class BookingController extends Controller
         $redirect = back()->with('success', __('app.sales.item_quantity_updated'));
 
         return $warning ? $redirect->with('warning', $warning) : $redirect;
-    }
-
-    /**
-     * The refusal for a shared-room booking that doesn't fit because open
-     * walk-ins hold seats over its time: how many seats are free and that
-     * walk-ins are the reason. Null otherwise (the usual message stands).
-     */
-    private function sharedSeatsMessage(AvailabilityService $availability, Room $room, array $validated, ?int $remaining): ?string
-    {
-        if (! $room->isShared() || $remaining === null || $remaining === PHP_INT_MAX) {
-            return null;
-        }
-
-        $walkIns = $availability->walkInSeatsHeld($room, $validated['booking_date'], $validated['start_time'], $validated['end_time']);
-        if ($walkIns === 0) {
-            return null;
-        }
-
-        return trans_choice('app.booking.shared_seats_free', $remaining, ['count' => $remaining, 'room' => $room->name])
-            .' '.trans_choice('app.booking.walk_in_seats_held', $walkIns, ['count' => $walkIns]);
     }
 }

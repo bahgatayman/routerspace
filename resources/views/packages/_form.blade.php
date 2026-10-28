@@ -5,7 +5,9 @@
 @php
     $currency = app()->getLocale() === 'ar' ? 'ج.م' : 'EGP';
     $selectedRooms = array_map('intval', old('room_ids', $template->room_ids ?? []));
-    $roomScope = old('room_scope', empty($template->room_ids) ? 'all' : 'specific');
+    // New templates start with neither option picked — the owner must choose
+    // explicitly. Editing an existing template still reflects its saved scope.
+    $roomScope = old('room_scope', $template->exists ? (empty($template->room_ids) ? 'all' : 'specific') : null);
     $hoursValue = old('hours', $template->total_minutes ? rtrim(rtrim(number_format($template->total_minutes / 60, 2, '.', ''), '0'), '.') : '');
 @endphp
 <div class="ls-pkg-form">
@@ -25,11 +27,12 @@
     </div>
 
     <fieldset class="ls-inv-group">
-        <legend class="ls-inv-legend">{{ __('app.packages.rooms') }}</legend>
+        <legend class="ls-inv-legend">{{ __('app.packages.rooms') }} <span class="ls-req" aria-hidden="true">*</span></legend>
         <div class="ls-inv-seg" role="radiogroup">
-            <label><input type="radio" name="room_scope" value="all" data-pkg-scope @checked($roomScope === 'all')><span>{{ __('app.packages.all_rooms') }}</span></label>
-            <label><input type="radio" name="room_scope" value="specific" data-pkg-scope @checked($roomScope === 'specific')><span>{{ __('app.packages.specific_rooms') }}</span></label>
+            <label><input type="radio" name="room_scope" value="all" data-pkg-scope required @checked($roomScope === 'all')><span>{{ __('app.packages.all_rooms') }}</span></label>
+            <label><input type="radio" name="room_scope" value="specific" data-pkg-scope required @checked($roomScope === 'specific')><span>{{ __('app.packages.specific_rooms') }}</span></label>
         </div>
+        @error('room_scope') <span class="ls-error"><x-ui.icon name="alert" />{{ $message }}</span> @enderror
         <div class="ls-pkg-rooms" data-pkg-rooms @if ($roomScope !== 'specific') hidden @endif>
             @foreach ($roomGroups as $group => $rooms)
                 <div class="ls-pkg-room-group">

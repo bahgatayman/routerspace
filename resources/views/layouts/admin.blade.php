@@ -44,6 +44,8 @@
         $pendingRenewals = \App\Models\SubscriptionRequest::pending()->count();
         // Guarded so admin pages keep working on a server where the feedback migration hasn't run yet.
         $newFeedback = \Illuminate\Support\Facades\Schema::hasTable('feedback') ? \App\Models\Feedback::where('status', 'new')->count() : 0;
+        $pendingPublications = \Illuminate\Support\Facades\Schema::hasColumn('workspaces', 'publication_status')
+            ? \App\Models\Workspace::where('publication_status', \App\Models\Workspace::PENDING_REVIEW)->count() : 0;
     @endphp
     <div class="app-shell flex flex-col lg:flex-row">
         <!-- Mobile header -->
@@ -88,6 +90,15 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
                     </svg>
                     <span>{{ __('app.nav.notifications') }}</span>
+                </a>
+                <a href="{{ route('admin.publications.index') }}" class="{{ $navItem(request()->is('admin/publications*')) }}">
+                    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/>
+                    </svg>
+                    <span class="flex-1">{{ __('app.publication.admin.nav') }}</span>
+                    @if ($pendingPublications > 0)
+                        <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold text-white bg-red-500 rounded-full">{{ $pendingPublications }}</span>
+                    @endif
                 </a>
                 <a href="{{ route('admin.feedback.index') }}" class="{{ $navItem(request()->is('admin/feedback*')) }}">
                     <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">

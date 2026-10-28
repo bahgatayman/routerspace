@@ -6,7 +6,10 @@
     <div class="max-w-2xl mx-auto">
         <a href="{{ route('workspaces.index', ['workspace' => $workspace->id]) }}" class="text-sm text-blue-600 hover:text-blue-800 mb-4 inline-block">&larr; {{ __('app.btn.back_to_workspaces') }}</a>
 
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        {{-- Photo upload results (success toast / limit and failure banners). --}}
+        <x-ui.flash />
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6" id="workspace-details" style="scroll-margin-top: var(--space-6)">
             <h1 class="text-xl font-bold text-gray-900 mb-6">{{ __('app.workspace.edit_workspace') }}</h1>
 
             <form method="POST" action="{{ route('workspaces.update', $workspace) }}">
@@ -60,5 +63,27 @@
                 </div>
             </form>
         </div>
+
+        @include('workspaces._publication')
+
+        {{-- Workspace photos: own gallery (separate from room photos), same manager UI as rooms. --}}
+        @include('workspaces._photo-manager', [
+            'anchor' => 'workspace-photos',
+            'title' => __('app.workspace.workspace_photos'),
+            'hint' => __('app.workspace.workspace_photos_hint'),
+            'emptyText' => __('app.workspace.workspace_photos_empty'),
+            'coverLabel' => __('app.workspace.primary_photo'),
+            'setCoverLabel' => __('app.workspace.set_as_primary'),
+            'limitsHint' => __('app.workspace.photos_limits', ['max' => \App\Http\Controllers\WorkspaceImageController::MAX_IMAGES_PER_WORKSPACE]),
+            'images' => $workspace->images->map(fn ($image) => [
+                'id' => $image->id,
+                'thumb' => $image->thumbnailUrl(),
+                'cover' => $image->is_primary,
+                'coverUrl' => route('workspaces.images.primary', [$workspace, $image]),
+                'deleteUrl' => route('workspaces.images.destroy', [$workspace, $image]),
+            ])->all(),
+            'reorderUrl' => route('workspaces.images.reorder', $workspace),
+            'storeUrl' => route('workspaces.images.store', $workspace),
+        ])
     </div>
 @endsection

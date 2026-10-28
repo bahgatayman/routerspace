@@ -7,6 +7,7 @@ use App\Models\Workspace;
 use App\Services\ActivityLogger;
 use App\Services\AvailabilityService;
 use App\Services\OnboardingService;
+use App\Services\WorkspaceReadinessService;
 use App\Support\PhoneNumber;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
@@ -226,8 +227,16 @@ class WorkspaceController extends Controller
         $workspace = Workspace::where('id', $id)
             ->where('owner_id', TenantContext::id())
             ->firstOrFail();
+        $workspace->load(['images', 'rooms', 'owner']);
 
-        return view('workspaces.edit', compact('workspace'));
+        return view('workspaces.edit', [
+            'workspace' => $workspace,
+            // Publication section: live checklist, recent history, and whether
+            // the viewer may act (only the Owner submits — staff see status only).
+            'readiness' => app(WorkspaceReadinessService::class)->check($workspace),
+            'publicationHistory' => $workspace->publicationReviews()->limit(10)->get(),
+            'canPublish' => auth('owner')->check() && ! auth('staff')->check(),
+        ]);
     }
 
     public function update(Request $request, int $id): RedirectResponse
@@ -264,6 +273,8 @@ class WorkspaceController extends Controller
 
         $this->activityLogger->log('workspace.deleted', $workspace, "Deleted workspace {$workspace->name}");
 
+        // The DB cascade removes workspace_images rows but not their files — delete those first.
+        $workspace->images()->get()->each->deleteWithFile();
         $workspace->delete();
 
         return redirect()->route('workspaces.index')

@@ -288,6 +288,11 @@
     const SLOTS = @json($qbSlots);
     const SLOT_KEYS = Object.keys(SLOTS);
     const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+    // One key per booking attempt (RequestIdempotency): a double tap or a retried
+    // request creates the booking once. Renewed when the modal opens and after a
+    // rejected attempt (which never consumes it server-side anyway).
+    const newIdemKey = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
+    let idemKey = newIdemKey();
     const $ = (id) => document.getElementById(id);
     const fill = (s, map) => Object.entries(map).reduce((o, [k, v]) => o.split(':' + k).join(v), s);
 
@@ -986,6 +991,7 @@
         }
         const body = new FormData();
         body.append('_token', CSRF);
+        body.append('idempotency_key', idemKey);
         body.append('hotspot_user_id', S.user.id);
         body.append('booking_date', S.date);
         body.append('start_time', S.start);
@@ -1015,6 +1021,7 @@
                     else LS.toast(b.message, { action: { label: T.view, onClick: () => { location.href = b.url; } } });
                     return;
                 }
+                idemKey = newIdemKey();
                 err.querySelector('span').textContent = !b ? T.sessionLost : (b.errors ? Object.values(b.errors)[0][0] : b.message) || T.error;
                 err.hidden = false;
                 err.scrollIntoView({ block: 'nearest' });
@@ -1026,6 +1033,7 @@
 
     // ---------- open with prefill ----------
     function open(prefill = {}) {
+        idemKey = newIdemKey();
         $('qb-error').hidden = true;
         $('qb-paid').value = ''; $('qb-notes').value = '';
         document.querySelectorAll('[data-qb-pay-choice]').forEach((r) => { r.checked = false; });

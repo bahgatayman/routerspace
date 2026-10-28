@@ -11,6 +11,7 @@ use App\Models\Room;
 use App\Models\RoomImage;
 use App\Models\SharedSession;
 use App\Models\Workspace;
+use App\Models\WorkspaceImage;
 use App\Services\Admin\BusinessOverviewService;
 use App\Services\AvailabilityService;
 use Carbon\Carbon;
@@ -20,7 +21,9 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -152,6 +155,7 @@ class RoomUsesTest extends TestCase
         $this->assertSame($room->id, $use->physical_room_id);
         $this->assertSame(['studio', 12, '320.00', 'Mats included', true], [$use->type, $use->capacity, $use->price_per_hour, $use->description, $use->is_available]);
         $this->assertSame($this->ws->id, $use->workspace_id);
+        $this->assertNotSame($room->public_id, $use->public_id, 'Each use is listed under its own public id.');
         // The physical room itself is untouched.
         $this->assertSame(['meeting', 8, '200.00'], [$room->fresh()->type, $room->fresh()->capacity, $room->fresh()->price_per_hour]);
     }
@@ -580,6 +584,9 @@ class RoomUsesTest extends TestCase
         $this->assertSame(['confirmed', '800.00'], [$kept->fresh()->status, $kept->fresh()->total_price]);
         $this->assertSame(0, $this->free($this->shared, '14:00', '16:00'), 'A switched-off use still holds what it booked.');
         $this->assertSame(0, $this->free($this->studio, '15:00', '16:00'));
+        // No new bookings on the switched-off use.
+        $this->postBooking($this->training, '18:00', '19:00')->assertSessionHas('error');
+        $this->assertSame(1, Booking::where('room_id', $this->training->id)->count());
     }
 
     // ------------------------------------------------------------------ plan limit
@@ -786,5 +793,18 @@ class RoomUsesTest extends TestCase
         $this->assertSame(1, $this->free($plain, '16:00', '17:00'));
         $this->assertSame($plain->id, Room::lockInventory($plain->id)->id);
         $this->assertSame($this->training->id, Room::lockInventory($this->training->id)->id);
+    }
+
+    public function test_public_listing_shows_each_active_use_separately_and_hides_inactive_ones(): void
+    {
+        RateLimiter::clear('public-api|127.0.0.1');
+        $this->ws->forceFill(['address' => '10 Tahrir St', 'city' => 'Cairo', 'description' => 'Quiet coworking.', 'latitude' => 30.04, 'longitude' => 31.23])->save();
+        WorkspaceImage::create(['owner_id' => $this->owner->id, 'workspace_id' => $this->ws->id, 'path' => "workspace-images/{$this->ws->id}/main.jpg", 'is_primary' => true, 'sort_order' => 1]);
+        $this->ws->forceFill(['publication_status' => Workspace::PUBLISHED, 'slug' => Str::slug('Main').'-'.$this->ws->id, 'published_at' => now()])->save();
+        $this->studio->update(['is_available' => false]);
+
+        $res = $this->getJson('/api/v1/workspaces/'.$this->ws->fresh()->slug)->assertOk();
+        $names = collect($res->json('data.rooms'))->pluck('name')->sort()->values()->all();
+        $this->assertSame(['Shared Workspace', 'Training Room'], $names);
     }
 }

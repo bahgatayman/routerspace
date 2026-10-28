@@ -330,5 +330,7 @@ class SharedRoomConflictsTest extends TestCase
                 .' '.trans_choice('app.booking.walk_in_seats_held', 5, ['count' => 5]));
         $this->assertSame(2, (int) $booking->fresh()->party_size);
 
+        // New bookings of the switched-off use are refused as before.
+        $this->postBooking($this->shared, '18:00', '19:00')->assertSessionHas('error', __('app.booking.room_disabled'));
     }
 }

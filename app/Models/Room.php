@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Str;
 
 class Room extends Model
 {
@@ -29,6 +30,26 @@ class Room extends Model
         'description',
         'is_available',
     ];
+
+    /**
+     * public_id: stable, random UUID used by the customer API instead of the
+     * internal primary key. Generated on create, never mass-assignable, and
+     * immutable once set. It identifies a room — it authorizes nothing.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Room $room) {
+            if (blank($room->public_id)) {
+                $room->public_id = (string) Str::uuid();
+            }
+        });
+
+        static::updating(function (Room $room) {
+            if ($room->isDirty('public_id') && filled($room->getOriginal('public_id'))) {
+                $room->public_id = $room->getOriginal('public_id');
+            }
+        });
+    }
 
     protected function casts(): array
     {
@@ -50,6 +71,12 @@ class Room extends Model
     public function pricingSummary(): string
     {
         return app(RoomPricingService::class)->summary($this);
+    }
+
+    /** True when the price customers would see (RoomPricingService::displayPrice) is above zero. */
+    public function hasDisplayablePrice(): bool
+    {
+        return app(RoomPricingService::class)->displayPrice($this) > 0;
     }
 
     public function workspace(): BelongsTo

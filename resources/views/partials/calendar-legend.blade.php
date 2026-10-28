@@ -6,9 +6,8 @@
     each dot carries its own adjacent text label, so that's never ambiguous
     even compressed into one row.
 
-    Default-open (not collapsed) to match the always-visible compact bar the
-    calendar is designed around, but still a real <details> so an owner who
-    wants it out of the way can collapse it — not removed outright.
+    Collapsed by default so the calendar itself comes first; a real <details>
+    the owner opens when they need the key.
 
     Expects: $showRoomAvailability (bool) — the timeline/slot pills only make
     sense on the day/week views, which are the only ones that render
@@ -28,7 +27,7 @@
     ];
 @endphp
 
-<details open class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4 group">
+<details class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4 group">
     <summary class="cursor-pointer select-none list-none px-4 py-2.5 flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-xl transition">
         <span class="flex items-center gap-2">
             <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -17,6 +17,7 @@ use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\SubscriptionRequestController;
 use App\Http\Controllers\Admin\WorkspaceController as AdminWorkspaceController;
 use App\Http\Controllers\Admin\WorkspaceDirectoryController;
+use App\Http\Controllers\Admin\WorkspacePublicationController as AdminPublicationController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RegisterController;
@@ -50,6 +51,8 @@ use App\Http\Controllers\StaffActivityController;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\SubscriptionController as OwnerSubscriptionController;
 use App\Http\Controllers\WorkspaceController;
+use App\Http\Controllers\WorkspaceImageController;
+use App\Http\Controllers\WorkspacePublicationController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -152,6 +155,10 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
         Route::get('/workspaces/{workspace}/rooms/{room}', [RoomController::class, 'show'])
             ->whereNumber('room')->name('rooms.show')->middleware('permission:workspaces.view');
 
+        // Workspace photo gallery — listing is read-only (JSON).
+        Route::get('/workspaces/{workspace}/images', [WorkspaceImageController::class, 'index'])
+            ->whereNumber('workspace')->name('workspaces.images.index')->middleware('permission:workspaces.view');
+
         Route::middleware('permission:workspaces.manage')->group(function () {
             Route::get('/workspaces/create', [WorkspaceController::class, 'create'])->name('workspaces.create');
             Route::post('/workspaces', [WorkspaceController::class, 'store'])->name('workspaces.store');
@@ -180,6 +187,12 @@ Route::middleware(['auth:owner,staff', 'subscription.active', 'staff.active'])->
             Route::delete('/workspaces/{workspace}/rooms/{room}/images/{image}', [RoomImageController::class, 'destroy'])->name('rooms.images.destroy');
             Route::post('/workspaces/{workspace}/rooms/{room}/images/{image}/cover', [RoomImageController::class, 'setCover'])->name('rooms.images.cover');
             Route::post('/workspaces/{workspace}/rooms/{room}/images/reorder', [RoomImageController::class, 'reorder'])->name('rooms.images.reorder');
+
+            // Workspace photo gallery
+            Route::post('/workspaces/{workspace}/images', [WorkspaceImageController::class, 'store'])->whereNumber('workspace')->name('workspaces.images.store');
+            Route::post('/workspaces/{workspace}/images/reorder', [WorkspaceImageController::class, 'reorder'])->whereNumber('workspace')->name('workspaces.images.reorder');
+            Route::post('/workspaces/{workspace}/images/{image}/primary', [WorkspaceImageController::class, 'setPrimary'])->whereNumber(['workspace', 'image'])->name('workspaces.images.primary');
+            Route::delete('/workspaces/{workspace}/images/{image}', [WorkspaceImageController::class, 'destroy'])->whereNumber(['workspace', 'image'])->name('workspaces.images.destroy');
         });
     });
 
@@ -421,6 +434,14 @@ Route::middleware(['auth:owner', 'subscription.active'])->prefix('onboarding')->
     Route::post('/checklist/show', [OnboardingController::class, 'showChecklist'])->name('onboarding.checklist.show');
 });
 
+// Workspace publication requests — Owner only (staff sessions can't reach these).
+Route::middleware(['auth:owner', 'subscription.active', 'feature:workspace'])->group(function () {
+    Route::post('/workspaces/{workspace}/publication/submit', [WorkspacePublicationController::class, 'submit'])
+        ->whereNumber('workspace')->name('workspaces.publication.submit');
+    Route::post('/workspaces/{workspace}/publication/withdraw', [WorkspacePublicationController::class, 'withdraw'])
+        ->whereNumber('workspace')->name('workspaces.publication.withdraw');
+});
+
 Route::middleware(['auth:owner', 'subscription.active', 'permission:staff.view'])->group(function () {
     Route::get('/staff', [StaffController::class, 'index'])->name('staff.index');
     Route::get('/staff/{staff}/activity', [StaffActivityController::class, 'show'])->name('staff.activity');
@@ -477,6 +498,13 @@ Route::middleware('auth:admin')->prefix('admin')->group(function () {
     // Admin → Owner notifications (broadcast)
     Route::get('/notifications', [AdminNotificationController::class, 'index'])->name('admin.notifications.index');
     Route::post('/notifications', [AdminNotificationController::class, 'store'])->name('admin.notifications.store');
+
+    // Workspace publication review (public website listings)
+    Route::get('/publications', [AdminPublicationController::class, 'index'])->name('admin.publications.index');
+    Route::get('/publications/{workspace}', [AdminPublicationController::class, 'show'])->whereNumber('workspace')->name('admin.publications.show');
+    Route::post('/publications/{workspace}/approve', [AdminPublicationController::class, 'approve'])->whereNumber('workspace')->name('admin.publications.approve');
+    Route::post('/publications/{workspace}/reject', [AdminPublicationController::class, 'reject'])->whereNumber('workspace')->name('admin.publications.reject');
+    Route::post('/publications/{workspace}/unpublish', [AdminPublicationController::class, 'unpublish'])->whereNumber('workspace')->name('admin.publications.unpublish');
 
     // Platform feedback from the public /feedback page
     Route::get('/feedback', [AdminFeedbackController::class, 'index'])->name('admin.feedback.index');

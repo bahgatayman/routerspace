@@ -10,7 +10,7 @@
     <x-ui.page-header :title="__('app.packages.title')" :subtitle="__('app.packages.subtitle')" :count="$templates->count() ?: null">
         @if ($canManage)
             <x-slot:actions>
-                <x-ui.button variant="primary" icon="plus" :href="route('packages.create')">{{ __('app.packages.new_template') }}</x-ui.button>
+                <x-ui.button variant="primary" icon="plus" data-ls-open="create-package-modal">{{ __('app.packages.new_template') }}</x-ui.button>
             </x-slot:actions>
         @endif
     </x-ui.page-header>
@@ -21,7 +21,7 @@
         <div class="ls-card">
             <x-ui.empty-state illustration="quiet" :title="__('app.packages.empty_title')" :text="__('app.packages.empty_body')">
                 @if ($canManage)
-                    <x-ui.button variant="primary" icon="plus" :href="route('packages.create')">{{ __('app.packages.new_template') }}</x-ui.button>
+                    <x-ui.button variant="primary" icon="plus" data-ls-open="create-package-modal">{{ __('app.packages.new_template') }}</x-ui.button>
                 @endif
             </x-ui.empty-state>
         </div>
@@ -83,5 +83,30 @@
                 </article>
             @endforeach
         </div>
+    @endif
+
+    @if ($canManage)
+        {{-- Was a standalone page (packages/create); now a modal here so adding
+             a template never leaves this list. Plain form POST to the existing
+             packages.store route — unchanged server-side, including its
+             redirect back to packages.index on both success and validation
+             failure, which is exactly this page. --}}
+        <x-ui.modal id="create-package-modal" :title="__('app.packages.create_title')" size="wide">
+            <form id="create-package-form" method="POST" action="{{ route('packages.store') }}">
+                @csrf
+                @include('packages._form', ['template' => $template, 'roomGroups' => $roomGroups])
+            </form>
+
+            <x-slot:footer>
+                <x-ui.button variant="ghost" data-ls-close>{{ __('app.packages.cancel') }}</x-ui.button>
+                <div class="ls-push">
+                    <x-ui.button type="submit" form="create-package-form" variant="primary">{{ __('app.packages.save') }}</x-ui.button>
+                </div>
+            </x-slot:footer>
+        </x-ui.modal>
+
+        @if ($errors->any() && old('name') !== null)
+            <script>document.addEventListener('DOMContentLoaded', () => LS.open('create-package-modal'));</script>
+        @endif
     @endif
 @endsection

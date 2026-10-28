@@ -90,6 +90,9 @@
         @csrf
         @if ($isEdit)
             @method('PUT')
+        @else
+            {{-- One key per rendered form: a double submit creates the booking once (RequestIdempotency). --}}
+            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         @endif
 
         {{-- 1. Customer — the operator's starting point, styled as an actual selection, not a form field. --}}

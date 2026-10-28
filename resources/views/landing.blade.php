@@ -710,7 +710,7 @@
          Demo Modal
          ═══════════════════════════════════════════ -->
     <div id="demo-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="demo-modal-title">
-        <div onclick="closeDemoModal()" class="absolute inset-0 modal-overlay"></div>
+        <div class="absolute inset-0 modal-overlay"></div>
         <div class="relative bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
             <button type="button" onclick="closeDemoModal()" class="absolute top-4 right-4 text-surface-400 hover:text-surface-600 transition" aria-label="{{ __('app.common.close') }}">
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -785,8 +785,8 @@
             }
             return true;
         }
-        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDemoModal(); });
-        document.addEventListener('click', e => { if (e.target.id === 'demo-modal') closeDemoModal(); });
+        // Dismissible only via the explicit X button above — no backdrop
+        // click, no Escape — consistent with every other modal.
 
         // Mobile menu
         const mobileMenu       = document.getElementById('mobile-menu');

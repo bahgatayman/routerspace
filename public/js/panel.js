@@ -221,7 +221,9 @@
     if (opener) { e.preventDefault(); LS.open(opener.dataset.lsOpen); return; }
     const closer = t.closest('[data-ls-close]');
     if (closer) { LS.close(closer.closest('.ls-overlay')); return; }
-    if (t.classList && t.classList.contains('ls-overlay')) { LS.close(t); return; }
+    // Backdrop click intentionally does NOT close modals/drawers — only the
+    // explicit X (data-ls-close) or an in-dialog action does. Prevents
+    // accidental loss of in-progress form input.
     const themeBtn = t.closest('[data-ls-theme-option]');
     if (themeBtn) { LS.theme.set(themeBtn.dataset.lsThemeOption); closeMenu(true); return; }
     const menuBtn = t.closest('[data-ls-menu]');
@@ -234,7 +236,8 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (openMenu) { closeMenu(true); return; }
-      if (openStack.length) { LS.close(); return; }
+      // Escape intentionally does NOT close modals/drawers — only the
+      // explicit X (data-ls-close) or an in-dialog action does.
       const s = document.getElementById('sidebar');
       if (s && s.classList.contains('is-open')) { side(false); return; }
     }

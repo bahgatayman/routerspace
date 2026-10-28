@@ -327,15 +327,27 @@ class RoomPricingService
         return $window['minutes'] ?? 24 * 60;
     }
 
-    /** Short, owner-facing summary for room lists and cards: "EGP 100.00/hr", "From EGP 50.00". */
-    public function summary(Room $room): string
+    /**
+     * The headline price a customer would see for this room — the same number
+     * summary() prints: the hourly rate, or the lowest cell of a rule-based grid
+     * ("From EGP x"). A room only has a usable public price when this is > 0.
+     */
+    public function displayPrice(Room $room): float
     {
         $rules = $room->pricingRules();
 
-        return match ($rules->model) {
-            PricingRules::HOURLY => Money::format((float) $room->price_per_hour).__('app.common.slash_hr'),
-            PricingRules::PEOPLE => __('app.pricing.from', ['price' => Money::format($rules->lowestPrice())]).__('app.common.slash_hr'),
-            default => __('app.pricing.from', ['price' => Money::format($rules->lowestPrice())]),
+        return $rules->model === PricingRules::HOURLY ? (float) $room->price_per_hour : $rules->lowestPrice();
+    }
+
+    /** Short, owner-facing summary for room lists and cards: "EGP 100.00/hr", "From EGP 50.00". */
+    public function summary(Room $room): string
+    {
+        $price = Money::format($this->displayPrice($room));
+
+        return match ($room->pricingRules()->model) {
+            PricingRules::HOURLY => $price.__('app.common.slash_hr'),
+            PricingRules::PEOPLE => __('app.pricing.from', ['price' => $price]).__('app.common.slash_hr'),
+            default => __('app.pricing.from', ['price' => $price]),
         };
     }
 

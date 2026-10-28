@@ -7,8 +7,12 @@ use App\Services\NotificationService;
 use App\Services\OnboardingService;
 use App\Support\ActiveSessionsQuery;
 use App\Support\TenantContext;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
@@ -29,6 +33,16 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Customer API (/api/v1): per-IP limit for the public, read-only endpoints.
+        RateLimiter::for('public-api', fn (Request $request) => Limit::perMinute(max(1, (int) config('api.public_rate_limit', 60)))
+            ->by('public-api|'.$request->ip()));
+
+        // Trust X-Forwarded-* only from explicitly configured proxies (TRUSTED_PROXIES).
+        // Unset (the default) keeps today's behaviour: no proxy headers are trusted.
+        if ($proxies = config('app.trusted_proxies')) {
+            TrustProxies::at($proxies === '*' ? '*' : array_values(array_filter(array_map('trim', explode(',', $proxies)))));
+        }
+
         View::composer('*', function ($view) {
             $owner = TenantContext::user();
             if ($owner) {

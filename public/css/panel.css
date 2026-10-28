@@ -2532,6 +2532,60 @@ html[dir="rtl"] .ls-fb-msg, html[dir="rtl"] .ls-fbs-text { text-align: right; } 
 /* Admin → business → Coupons tab: status chips + create button on one row. */
 .ls-biz-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
 
+/* Workspace edit → Public listing (publication) card. */
+.ls-pub .ls-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.ls-pub-body { display: grid; gap: var(--space-5); }
+.ls-pub-status-text { margin: 0; font-size: 14px; color: var(--color-text-secondary); }
+.ls-pub-note { padding: var(--space-3) var(--space-4); border-radius: 10px; background: var(--color-warning-soft); border: 1px solid color-mix(in srgb, var(--color-warning) 25%, transparent); font-size: 13.5px; }
+.ls-pub-note strong { display: block; color: var(--color-warning); margin-bottom: 2px; }
+.ls-pub-note p { margin: 0; color: var(--color-text); white-space: pre-line; overflow-wrap: anywhere; }
+.ls-pub-address { margin: 0; font-size: 13.5px; color: var(--color-text-secondary); }
+.ls-pub-address bdi { font-weight: var(--fw-medium); color: var(--color-text); }
+.ls-pub-subtitle { font-size: 13px; font-weight: var(--fw-strong); color: var(--color-text); margin: 0 0 var(--space-2); }
+.ls-pub-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ls-pub-check { display: flex; align-items: flex-start; gap: var(--space-3); padding: 8px 10px; border-radius: 10px; background: var(--color-surface-subtle); }
+.ls-pub-check-icon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.ls-pub-check-icon .ls-icon { width: 13px; height: 13px; stroke-width: 2.6; }
+.ls-pub-check.is-ok .ls-pub-check-icon { background: var(--color-success-soft); color: var(--color-success); }
+.ls-pub-check.is-missing .ls-pub-check-icon { background: var(--color-danger-soft); color: var(--color-danger); }
+.ls-pub-check.is-flagged { outline: 1px solid var(--color-danger); }
+.ls-pub-check-text { display: grid; gap: 1px; flex: 1; min-width: 0; }
+.ls-pub-check-text b { font-size: 13.5px; font-weight: var(--fw-medium); color: var(--color-text); }
+.ls-pub-check-text small { font-size: 12.5px; color: var(--color-text-secondary); }
+.ls-pub-fix { font-size: 12.5px; white-space: nowrap; align-self: center; }
+.ls-pub-ready { display: flex; align-items: center; gap: 6px; margin: var(--space-2) 0 0; font-size: 13px; font-weight: var(--fw-medium); color: var(--color-success); }
+.ls-pub-ready .ls-icon { width: 16px; height: 16px; }
+.ls-pub-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.ls-pub-actions .ls-hint { flex-basis: 100%; margin: 0; }
+.ls-pub-history { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); font-size: 13px; }
+.ls-pub-history li { padding-inline-start: var(--space-3); border-inline-start: 2px solid var(--color-border); }
+.ls-pub-history-action { font-weight: var(--fw-medium); color: var(--color-text); }
+.ls-pub-history-reason { margin: 2px 0 0; color: var(--color-text-secondary); white-space: pre-line; overflow-wrap: anywhere; }
+
+/* Admin → Publication requests. */
+.ls-pubq { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.ls-pubq-item { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: var(--space-4); align-items: center; padding: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; }
+.ls-pubq-thumb { width: 112px; height: 80px; border-radius: 10px; object-fit: cover; background: var(--color-surface-subtle); display: grid; place-items: center; font-size: 11.5px; color: var(--color-text-muted); }
+.ls-pubq-main { display: grid; gap: 4px; min-width: 0; }
+.ls-pubq-main a.ls-pubq-name { font-size: 15px; font-weight: var(--fw-strong); color: var(--color-text); text-decoration: none; }
+.ls-pubq-main a.ls-pubq-name:hover { color: var(--color-primary); }
+.ls-pubq-meta { font-size: 12.5px; color: var(--color-text-secondary); display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.ls-pubq-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
+.ls-pubs { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: var(--space-4); align-items: start; }
+.ls-pubs-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--space-2); }
+.ls-pubs-photos figure { margin: 0; position: relative; }
+.ls-pubs-photos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; display: block; }
+.ls-pubs-photos figcaption { position: absolute; top: 6px; inset-inline-start: 6px; font-size: 11px; font-weight: var(--fw-strong); background: #fff; color: var(--color-primary); padding: 2px 7px; border-radius: 999px; }
+.ls-pubs-desc { white-space: pre-line; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; margin: 0; }
+.ls-pubs-form { display: grid; gap: var(--space-3); }
+.ls-pubs-form + .ls-pubs-form { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--color-border-subtle); }
+@media (max-width: 900px) { .ls-pubs { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .ls-pubq-item { grid-template-columns: 80px minmax(0, 1fr); }
+  .ls-pubq-thumb { width: 80px; height: 60px; }
+  .ls-pubq-side { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; align-items: center; }
+}
+
 /* Other uses of one physical room. On the rooms grid each use is its own card
    with one quiet "Shares availability with …" line; the room editor lists them. */
 .ls-room-shares { display: flex; align-items: flex-start; gap: 6px; margin: 0; min-width: 0; font-size: 12.5px; color: var(--color-text-muted); }

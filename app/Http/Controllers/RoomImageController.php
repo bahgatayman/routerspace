@@ -4,12 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Room;
 use App\Models\Workspace;
+use App\Services\ImageUploadService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -22,7 +21,7 @@ class RoomImageController extends Controller
 {
     private const MAX_IMAGES_PER_ROOM = 20;
 
-    private const THUMBNAIL_MAX_DIMENSION = 640;
+    public function __construct(private ImageUploadService $uploads) {}
 
     private function getWorkspace(int $workspaceId): Workspace
     {
@@ -55,19 +54,35 @@ class RoomImageController extends Controller
 
         $nextSort = (int) $room->images()->max('sort_order');
         $hasCover = $room->images()->where('is_cover', true)->exists();
+        $failed = 0;
 
         foreach ($request->file('images') as $file) {
-            $nextSort++;
-            $path = $file->store("room-images/{$room->id}", 'public');
+            $stored = null;
+            try {
+                $stored = $this->uploads->store($file, "room-images/{$room->id}");
+                $sort = $nextSort + 1; // only advanced once the row is saved, so a failure can't skip the cover
 
-            $room->images()->create([
-                'owner_id' => $room->owner_id,
-                'path' => $path,
-                'thumbnail_path' => $this->makeThumbnail($file, $path),
-                'is_cover' => ! $hasCover && $nextSort === 1,
-                'sort_order' => $nextSort,
-            ]);
-            $hasCover = true;
+                $room->images()->create([
+                    'owner_id' => $room->owner_id,
+                    'path' => $stored['path'],
+                    'thumbnail_path' => $stored['thumbnail_path'],
+                    'is_cover' => ! $hasCover && $sort === 1,
+                    'sort_order' => $sort,
+                ]);
+                $nextSort = $sort;
+                $hasCover = true;
+            } catch (\Throwable $e) {
+                // No row was saved for this file — don't leave its files behind.
+                if ($stored) {
+                    $this->uploads->delete($stored['path'], $stored['thumbnail_path']);
+                }
+                report($e);
+                $failed++;
+            }
+        }
+
+        if ($failed > 0) {
+            return back()->with('error', trans_choice('app.workspace.images_partial_failure', $failed, ['count' => $failed]));
         }
 
         return back()->with('success', __('app.workspace.room_images_uploaded'));
@@ -135,44 +150,5 @@ class RoomImageController extends Controller
         }
 
         return back()->with('success', $message);
-    }
-
-    /** Best-effort: a thumbnail failure never blocks the upload — the model falls back to the full image. */
-    private function makeThumbnail(UploadedFile $file, string $originalPath): ?string
-    {
-        if (! function_exists('imagecreatefromstring')) {
-            return null;
-        }
-
-        try {
-            $source = @imagecreatefromstring(file_get_contents($file->getRealPath()));
-            if (! $source) {
-                return null;
-            }
-
-            $width = imagesx($source);
-            $height = imagesy($source);
-            $scale = min(1, self::THUMBNAIL_MAX_DIMENSION / max($width, $height));
-            $targetW = max(1, (int) round($width * $scale));
-            $targetH = max(1, (int) round($height * $scale));
-
-            $thumb = imagecreatetruecolor($targetW, $targetH);
-            imagesavealpha($thumb, true);
-            imagefill($thumb, 0, 0, imagecolorallocatealpha($thumb, 0, 0, 0, 127));
-            imagecopyresampled($thumb, $source, 0, 0, 0, 0, $targetW, $targetH, $width, $height);
-            imagedestroy($source);
-
-            $thumbPath = preg_replace('/\.[^.]+$/', '', $originalPath).'-thumb.webp';
-            $tmp = tempnam(sys_get_temp_dir(), 'room-thumb');
-            imagewebp($thumb, $tmp, 80);
-            imagedestroy($thumb);
-
-            Storage::disk('public')->put($thumbPath, file_get_contents($tmp));
-            @unlink($tmp);
-
-            return $thumbPath;
-        } catch (\Throwable) {
-            return null;
-        }
     }
 }

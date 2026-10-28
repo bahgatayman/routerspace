@@ -55,6 +55,14 @@ return [
     'url' => env('APP_URL', 'http://localhost'),
 
     /*
+    | Reverse proxies whose X-Forwarded-* headers are trusted (comma-separated
+    | IPs/CIDRs, or "*"). Leave empty when PHP sees HTTPS directly. Needed if a
+    | proxy/CDN terminates TLS, so generated URLs (e.g. image URLs in the API)
+    | come out as https:// rather than http://.
+    */
+    'trusted_proxies' => env('TRUSTED_PROXIES'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------

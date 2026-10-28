@@ -206,7 +206,7 @@
     </div>
 
     @if (session('permission_denied'))
-        <div id="permission-modal" class="ls-overlay is-open" onclick="if (event.target === this) closePermissionModal()">
+        <div id="permission-modal" class="ls-overlay is-open">
             <div class="ls-dialog ls-dialog--narrow" role="alertdialog" aria-modal="true" aria-labelledby="permission-title" aria-describedby="permission-text">
                 <div class="ls-dialog-body" style="padding-top:26px;justify-items:center;text-align:center">
                     <span class="ls-icon-circle ls-icon-circle--danger"><x-ui.icon name="lock" /></span>
@@ -219,11 +219,12 @@
             </div>
         </div>
         <script>
+            // Dismissible only via the explicit Close button below — no
+            // backdrop click, no Escape — consistent with every other modal.
             function closePermissionModal() {
                 const modal = document.getElementById('permission-modal');
                 if (modal) modal.remove();
             }
-            document.addEventListener('keydown', e => { if (e.key === 'Escape') closePermissionModal(); });
             document.getElementById('permission-close').focus();
         </script>
     @endif

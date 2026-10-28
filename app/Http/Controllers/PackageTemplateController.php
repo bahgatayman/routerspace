@@ -26,11 +26,16 @@ class PackageTemplateController extends Controller
             ->get();
 
         $staff = auth('staff')->user();
+        $canManage = ! $staff || $staff->hasPermission('packages.manage');
 
         return view('packages.index', [
             'templates' => $templates,
             'roomNames' => Room::where('owner_id', $owner->id)->pluck('name', 'id'),
-            'canManage' => ! $staff || $staff->hasPermission('packages.manage'),
+            'canManage' => $canManage,
+            // Only needed to render the create modal, which is hidden when the
+            // staff member can't manage packages anyway.
+            'template' => $canManage ? new PackageTemplate(['is_active' => true, 'validity_days' => 30]) : null,
+            'roomGroups' => $canManage ? $this->ownerRoomsGrouped($owner) : collect(),
         ]);
     }
 

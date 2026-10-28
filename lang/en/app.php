@@ -68,6 +68,7 @@ return [
     |--------------------------------------------------------------------------
     */
     'auth' => [
+        'throttle' => 'Too many sign-in attempts. Please try again in :seconds seconds.',
         'linkspace' => 'Link Space Panel',
         'coworking_management' => 'Coworking Internet Management',
         'email' => 'Email',
@@ -1258,6 +1259,19 @@ return [
         'room_image_deleted' => 'Photo removed.',
         'room_image_cover_set' => 'Cover photo updated.',
         'room_images_reordered' => 'Photo order updated.',
+        'workspace_photos' => 'Workspace Photos',
+        'workspace_photos_hint' => 'Photos of the space itself — entrance, lounge, desks. The primary photo is shown first.',
+        'workspace_photos_empty' => 'No workspace photos yet.',
+        'photos_limits' => 'JPG, PNG or WebP · up to 5 MB each · up to :max photos',
+        'primary_photo' => 'Primary photo',
+        'set_as_primary' => 'Set as primary',
+        'workspace_images_limit' => 'A workspace can have at most :max photos.',
+        'workspace_images_uploaded' => 'Photos uploaded.',
+        'images_partial_failure' => '{1} 1 photo couldn’t be uploaded. Please try again.|[2,*] :count photos couldn’t be uploaded. Please try again.',
+        'workspace_image_deleted' => 'Photo removed.',
+        'workspace_image_primary_set' => 'Primary photo updated.',
+        'workspace_images_reordered' => 'Photo order updated.',
+        'edit_details_photos' => 'Details & photos',
         'previous_photo' => 'Previous photo',
         'next_photo' => 'Next photo',
         'photo_of' => 'Photo :current of :total',
@@ -1310,13 +1324,16 @@ return [
     |--------------------------------------------------------------------------
     */
     'booking' => [
-        'room_disabled' => 'This room is currently unavailable for booking.',
-        'idempotency_invalid' => 'The request key is invalid. Please reload the page and try again.',
         'bookings' => 'Bookings',
+        'room_disabled' => 'This room is currently unavailable for booking.',
         // A walk-in / Open Session has no end time, so it may not run into a later booking that day.
         'open_ended_conflict' => ':room is booked from :time today. A session without an end time would run into it — make a booking with an end time instead.',
         'shared_seats_free' => '{0} No seats are free in :room for that time.|{1} Only 1 seat is free in :room for that time.|[2,*] Only :count seats are free in :room for that time.',
         'walk_in_seats_held' => '{1} 1 seat is taken by a walk-in still in the room, and stays taken until they check out.|[2,*] :count seats are taken by walk-ins still in the room, and stay taken until they check out.',
+        'already_created' => 'This booking was already created.',
+        'idempotency_mismatch' => 'This request was already used for a different booking. Please reload the page and try again.',
+        'idempotency_gone' => 'This request already created a booking that no longer exists. Please reload the page and try again.',
+        'idempotency_invalid' => 'The request key is invalid. Please reload the page and try again.',
         'new_booking' => 'New Booking',
         'customer' => 'Customer',
         'customer_hint' => 'Who is this booking for?',
@@ -1436,8 +1453,6 @@ return [
             'loading' => 'Checking rooms…',
         ],
         'payment' => [
-            'already_recorded' => 'This payment was already recorded.',
-            'idempotency_mismatch' => 'This payment request was already used with a different amount. Please reload the page and try again.',
             'title' => 'Payment',
             'total' => 'Total bill',
             'no_deposit' => 'No Deposit',
@@ -1456,6 +1471,8 @@ return [
             'record' => 'Record payment',
             'record_submit' => 'Record payment',
             'recorded' => 'Payment recorded.',
+            'already_recorded' => 'This payment was already recorded.',
+            'idempotency_mismatch' => 'This payment request was already used with a different amount. Please reload the page and try again.',
             'balance_due' => 'Balance due',
             'shared_estimate_note' => 'Shared rooms are billed at checkout, once the actual time is known — payment is collected when the session closes.',
             'choice_label' => 'How much has the customer paid?',
@@ -1510,6 +1527,7 @@ return [
         'room_capacity_note' => 'This room can hold up to :capacity people at a time.',
         'failed_to_close_session' => 'Failed to close session. Please try again.',
         'already_closed' => 'This session has already been closed.',
+        'reservation_state_changed' => 'The reservation for this session changed. Please reload the page and try again.',
         'party_size' => 'Number of People',
         'party_size_hint' => 'How many people are sharing this session? Defaults to 1.',
         'party_of' => 'party of :count',
@@ -2527,6 +2545,7 @@ return [
         'session_hint' => 'Covers the member’s own seat; the actual time is deducted when the session closes.',
         'session_covered' => 'Covered by “:name” · :hours',
         'session_fallback' => 'Hour package couldn’t cover this session (:remaining left) — billed normally.',
+        'session_fallback_prepaid' => 'Hour package not used: this reservation already has :amount paid in cash — billed normally so that payment is kept.',
         'covered_by' => 'Covered by hour package',
         'worth' => 'worth :amount',
 
@@ -3321,6 +3340,139 @@ return [
             'statuses' => ['new' => 'New', 'reviewing' => 'Under review', 'planned' => 'Planned', 'completed' => 'Completed', 'rejected' => 'Rejected'],
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Workspace publication (public website listing + admin review)
+    |--------------------------------------------------------------------------
+    */
+    'publication' => [
+        'title' => 'Public listing',
+        'subtitle' => 'List this workspace on the Link Space website. Our team reviews it before it goes live.',
+        'status' => [
+            'draft' => 'Not submitted',
+            'pending_review' => 'In review',
+            'rejected' => 'Changes requested',
+            'published' => 'Published',
+            'unpublished' => 'Unpublished',
+        ],
+        'status_text' => [
+            'draft' => 'Complete the checklist, then submit it for review.',
+            'pending_review' => 'Submitted — our team is reviewing it. You can keep editing meanwhile.',
+            'rejected' => 'Our team asked for a few changes before it can go live. Fix them and resubmit.',
+            'published' => 'Live on the public website. Your edits to details and photos show immediately.',
+            'unpublished' => 'Removed from the public website by our team. Fix the issue below and resubmit.',
+        ],
+        'checklist' => 'Publication checklist',
+        'all_ready' => 'Everything is ready.',
+        'checks' => [
+            'name' => ['label' => 'Workspace name', 'fix' => 'Add a name in the form above.'],
+            'location' => ['label' => 'Address and city', 'fix' => 'Add the address and city in the form above.'],
+            'description' => ['label' => 'Description', 'fix' => 'Describe the space in the form above.'],
+            'primary_image' => ['label' => 'Primary photo', 'fix' => 'Upload a workspace photo below — the first one becomes primary.'],
+            'priced_room' => ['label' => 'A bookable room with a price', 'fix' => 'Add an available room with a price above zero.'],
+            'owner_active' => ['label' => 'Active account', 'fix' => 'Your account is suspended — please contact support.'],
+            'subscription' => ['label' => 'Active subscription', 'fix' => 'Renew your subscription (any plan works, including Free).'],
+        ],
+        'fix' => 'Fix',
+        'submit' => 'Submit for review',
+        'resubmit' => 'Resubmit for review',
+        'withdraw' => 'Withdraw request',
+        'withdraw_confirm' => 'Withdraw this publication request?',
+        'owner_only' => 'Only the account owner can submit this workspace for publication.',
+        'not_ready_hint' => 'Complete every item in the checklist to submit.',
+        'public_address' => 'Public address',
+        'reason_label' => 'Note from the Link Space team',
+        'history' => 'History',
+        'no_history' => 'No activity yet.',
+        'team' => 'Link Space team',
+        'actions' => [
+            'submitted' => 'Submitted for review',
+            'withdrawn' => 'Request withdrawn',
+            'approved' => 'Approved and published',
+            'rejected' => 'Changes requested',
+            'unpublished' => 'Unpublished',
+        ],
+        'flash' => [
+            'submitted' => 'Submitted for review. We’ll notify you once it’s reviewed.',
+            'withdrawn' => 'Request withdrawn.',
+            'approved' => 'Workspace approved and published.',
+            'rejected' => 'Changes requested — the owner has been notified.',
+            'unpublished' => 'Workspace unpublished — the owner has been notified.',
+        ],
+        'errors' => [
+            'invalid_transition' => 'That action isn’t available for this workspace right now.',
+            'not_ready' => 'This workspace isn’t ready to publish yet.',
+            'reason_required' => 'Please give a reason.',
+            'reason_short' => 'Please write at least 5 characters.',
+            'reason_long' => 'Please keep the reason under 1000 characters.',
+        ],
+        'notify' => [
+            'approved' => ['title' => '“:name” is now published', 'body' => 'It’s live on the Link Space website.', 'body_reason' => 'It’s live on the Link Space website.'],
+            'rejected' => ['title' => 'Changes requested for “:name”', 'body' => 'Please review the checklist and resubmit.', 'body_reason' => 'Reason: :reason'],
+            'unpublished' => ['title' => '“:name” was unpublished', 'body' => 'It’s no longer on the public website.', 'body_reason' => 'Reason: :reason'],
+        ],
+        'audit' => [
+            'approved' => 'Approved publication of :name',
+            'rejected' => 'Requested changes to :name',
+            'unpublished' => 'Unpublished :name',
+        ],
+        'admin' => [
+            'nav' => 'Publication requests',
+            'title' => 'Publication requests',
+            'subtitle' => 'Review workspaces before they appear on the public Link Space website.',
+            'empty' => 'Nothing here.',
+            'empty_pending' => 'No workspaces are waiting for review.',
+            'review' => 'Review',
+            'updated' => 'Updated :when',
+            'ready' => 'Ready to publish',
+            'missing' => '{1} 1 item missing|[2,*] :count items missing',
+            'eligible_rooms' => ':count of :total rooms bookable with a price',
+            'no_photo' => 'No photo',
+            'approve' => 'Approve & publish',
+            'approve_confirm' => 'Publish this workspace on the public website?',
+            'reject' => 'Request changes',
+            'reject_reason' => 'What should the owner change?',
+            'unpublish' => 'Unpublish',
+            'unpublish_reason' => 'Why is it being unpublished?',
+            'reason_ph' => 'Be specific — the owner will see this.',
+            'readiness' => 'Readiness (checked now)',
+            'details' => 'Workspace details',
+            'description' => 'Description',
+            'address' => 'Address',
+            'photos' => 'Photos',
+            'rooms' => 'Rooms',
+            'owner' => 'Owner',
+            'back' => 'All requests',
+            'history' => 'Review history',
+            'owner_actor' => 'Owner',
+            'live' => 'Visible on the public website now',
+            'not_live' => 'Not visible publicly — it fails current checks',
+            'not_bookable' => 'Not bookable',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Customer API (/api/v1) messages
+    |--------------------------------------------------------------------------
+    */
+    'api' => [
+        'not_found' => 'Not found.',
+        'unauthenticated' => 'Authentication is required.',
+        'forbidden' => 'You are not allowed to do this.',
+        'invalid' => 'The request is invalid.',
+        'too_many' => 'Too many requests. Please try again shortly.',
+        'method_not_allowed' => 'Method not allowed.',
+        'error' => 'The request could not be completed.',
+        'server_error' => 'Something went wrong. Please try again later.',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Recurring bookings (booking series)
+    |--------------------------------------------------------------------------
+    */
     'series' => [
         'nav' => 'Repeating bookings',
         'every_day' => 'Every day',

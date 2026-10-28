@@ -154,6 +154,8 @@
                 @if ($booking->balanceDue() > 0 && ! in_array($booking->status, ['cancelled', 'no_show']))
                     <form method="POST" action="/bookings/{{ $booking->id }}/payment" class="mt-4 pt-4 border-t border-gray-100 flex items-end gap-2">
                         @csrf
+                        {{-- One key per rendered form: a double click / resubmit records the payment once (RequestIdempotency). --}}
+                        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                         <div>
                             <label class="block text-xs font-medium text-gray-500 mb-1">{{ __('app.booking.payment.record') }}</label>
                             <input type="number" name="amount" min="0.01" max="{{ $booking->balanceDue() }}" step="0.01"

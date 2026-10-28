@@ -31,6 +31,9 @@
         :count="$roomStats['total'] ?? null">
         <x-slot:actions>
             @if ($activeWorkspace && $canManage)
+                <x-ui.button icon="image" :href="route('workspaces.edit', $activeWorkspace).'#workspace-photos'">
+                    {{ __('app.workspace.edit_details_photos') }}
+                </x-ui.button>
                 <x-ui.button variant="primary" icon="plus" :href="route('rooms.create', $activeWorkspace)">
                     {{ __('app.workspace.add_room') }}
                 </x-ui.button>
