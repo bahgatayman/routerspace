@@ -194,25 +194,19 @@
             </div>
         </section>
 
-        {{--
-            Repeat (same fields as the full form). On: Book becomes "Review
-            dates", which opens the recurring review step with this choice;
-            payment and hour packages step aside (each date is its own unpaid
-            booking), and a Custom Plan can't repeat. Off: nothing changes.
-        --}}
-        @include('bookings._repeat-fields', ['rp' => 'qb-repeat', 'useOld' => false, 'withReview' => false, 'class' => 'ls-qb-step'])
-
         @if ($qbCanApplyCoupon)
             {{--
-                Coupon: live preview on every keystroke (debounced), via the new
-                read-only /bookings/coupon-preview endpoint — never a reservation
-                or redemption, just a quote. Hidden while repeating (each date is
-                its own booking) or once an hour package already covers it.
+                Coupon: directly below the room/price card, before Repeat —
+                live preview on every keystroke (debounced), via the
+                read-only /bookings/coupon-preview endpoint — never a
+                reservation or redemption, just a quote. Hidden while
+                repeating (each date is its own booking) or once an hour
+                package already covers it.
             --}}
-            <div class="ls-qb-field" id="qb-coupon-wrap">
+            <div class="ls-qb-coupon" id="qb-coupon-wrap">
                 <label class="ls-qb-field-label" for="qb-coupon-code">{{ __('app.coupons.checkout.title') }}</label>
-                <div style="display:flex;gap:8px;align-items:center">
-                    <input type="text" id="qb-coupon-code" class="ls-input" autocomplete="off" style="flex:1"
+                <div class="ls-qb-coupon-row">
+                    <input type="text" id="qb-coupon-code" class="ls-input" autocomplete="off"
                            placeholder="{{ __('app.coupons.checkout.placeholder') }}" aria-label="{{ __('app.coupons.checkout.title') }}">
                     <button type="button" id="qb-coupon-clear" class="ls-btn ls-btn--ghost ls-btn--sm ls-btn--icon" hidden aria-label="{{ __('app.coupons.checkout.remove') }}">
                         <x-ui.icon name="x" />
@@ -220,9 +214,17 @@
                 </div>
                 <p class="ls-hint" id="qb-coupon-status" hidden>{{ __('app.coupons.checkout.checking') }}</p>
                 <span class="ls-error" id="qb-coupon-error" hidden><x-ui.icon name="alert" /><span></span></span>
-                <p class="ls-hint" id="qb-coupon-line" hidden></p>
+                <p class="ls-hint ls-qb-coupon-line" id="qb-coupon-line" hidden></p>
             </div>
         @endif
+
+        {{--
+            Repeat (same fields as the full form). On: Book becomes "Review
+            dates", which opens the recurring review step with this choice;
+            payment and hour packages step aside (each date is its own unpaid
+            booking), and a Custom Plan can't repeat. Off: nothing changes.
+        --}}
+        @include('bookings._repeat-fields', ['rp' => 'qb-repeat', 'useOld' => false, 'withReview' => false, 'class' => 'ls-qb-step'])
 
         {{--
             Payment + note: always on screen, nothing to expand. One click picks
@@ -269,7 +271,11 @@
     <x-slot:footer>
         <div class="ls-qb-total" aria-live="polite">
             <span class="ls-qb-total-label" id="qb-total-label">{{ __('app.quick_booking.total') }}</span>
-            <b class="ls-num" id="qb-total">—</b>
+            <span class="ls-qb-total-row">
+                <s class="ls-qb-total-original" id="qb-total-original" hidden></s>
+                <b class="ls-num" id="qb-total">—</b>
+            </span>
+            <small id="qb-total-discount" class="ls-qb-coupon-line" hidden></small>
             <small id="qb-hint"></small>
         </div>
         <button type="submit" form="qb-form" class="ls-btn ls-btn--primary ls-qb-cta" id="qb-submit" disabled>{{ __('app.quick_booking.cta_idle') }}</button>
@@ -753,10 +759,14 @@
         // against — never shown once a package already covers the booking,
         // the room is shared, or any of that has since changed underneath it.
         const coupon = (!pkg && room && !room.is_shared && !repeatOn()) ? S.coupon : null;
+        $('qb-total-original').hidden = !coupon;
+        $('qb-total-discount').hidden = !coupon;
         if (coupon && room) {
             const rawTotal = plan ? plan.price : room.total_price;
             const netTotal = Math.max(0, rawTotal - coupon.discount);
             $('qb-total').textContent = money(netTotal);
+            $('qb-total-original').textContent = plan ? plan.price_display : room.total_price_display;
+            $('qb-total-discount').textContent = `${T.couponDiscount}: -${money(coupon.discount)}`;
             submit.textContent = fill(T.cta, { total: money(netTotal) });
             if (selRow) selRow.querySelector('.ls-qb-room-price b').textContent = money(netTotal);
         }

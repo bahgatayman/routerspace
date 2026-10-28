@@ -1053,7 +1053,7 @@ html[dir="rtl"] .ls-room-badge { padding: 3px 8px 3px 10px; }
 
 /* ---------- 10a+. EXPERIMENT — quick booking modal (bookings/_quick-modal) ---------- */
 .ls-qb.ls-dialog { width: min(600px, 100%); }
-#qb-form { display: grid; gap: var(--space-6); min-width: 0; }
+#qb-form { display: grid; gap: var(--space-5); min-width: 0; }
 .ls-qb-step { display: grid; gap: var(--space-3); min-width: 0; }
 .ls-qb-label { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: 13.5px; font-weight: var(--fw-strong); color: var(--color-text); }
 .ls-qb-n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: var(--fw-strong); background: var(--color-primary-soft); color: var(--color-primary-text); flex: none; }
@@ -1090,16 +1090,23 @@ html[data-theme="dark"] .ls-qb-datechip input::-webkit-calendar-picker-indicator
 .ls-qb-room input { position: absolute; opacity: 0; pointer-events: none; }
 .ls-qb-room:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--color-focus-ring); }
 .ls-qb-room.is-selected { border-color: var(--color-accent); background: var(--color-surface-brand); box-shadow: inset 0 0 0 1px var(--color-accent); }
-.ls-qb-room-main { flex: 1; min-width: 0; display: grid; }
-.ls-qb-room-main b { font-weight: var(--fw-strong); font-size: 14px; }
+.ls-qb-room-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.ls-qb-room-main b { font-weight: var(--fw-strong); font-size: 15px; }
 .ls-qb-room-meta { font-size: 12.5px; color: var(--color-text-muted); }
-.ls-qb-room-price { display: grid; justify-items: end; text-align: end; flex: none; max-width: 55%; }
-.ls-qb-room-price b { font-size: 15px; font-weight: var(--fw-figure); }
+.ls-qb-room-price { display: grid; justify-items: end; text-align: end; gap: 1px; flex: none; max-width: 55%; }
+.ls-qb-room-price b { font-size: 16px; font-weight: var(--fw-figure); }
 .ls-qb-room-price small { font-size: 12px; color: var(--color-text-muted); }
 .ls-qb-room.is-selected .ls-qb-room-price b { color: var(--color-primary-text); }
 .ls-qb-room.is-off { cursor: not-allowed; background: var(--color-surface-subtle); border-style: dashed; }
 .ls-qb-room.is-off .ls-qb-room-main b { color: var(--color-text-secondary); }
 .ls-qb-room.is-off .ls-qb-room-price small { color: var(--color-warning); font-weight: var(--fw-medium); }
+/* Coupon: directly below the room/price card — a top border (same device as
+   .ls-qb-pay below) reads as a continuation of the form, not an isolated
+   add-on. Collapses to just the input row when nothing is typed. */
+.ls-qb-coupon { display: grid; gap: 6px; min-width: 0; border-top: 1px solid var(--color-border-subtle); padding-top: var(--space-4); }
+.ls-qb-coupon-row { display: flex; gap: var(--space-2); align-items: center; }
+.ls-qb-coupon-row .ls-input { flex: 1; min-width: 0; }
+.ls-qb-coupon-line { color: var(--color-success); font-weight: var(--fw-medium); }
 /* Payment (always visible): compact No / Partial / Full cards — shared with the
    full booking page (.ls-pay-*) — then the amount for Partial and a summary. */
 .ls-qb-pay { display: grid; gap: var(--space-3); border-top: 1px solid var(--color-border-subtle); padding-top: var(--space-4); }
@@ -1112,8 +1119,11 @@ html[data-theme="dark"] .ls-qb-datechip input::-webkit-calendar-picker-indicator
 .ls-qb .ls-dialog-foot { gap: var(--space-4); }
 .ls-qb-total { display: grid; min-width: 0; flex: 1; }
 .ls-qb-total-label { font-size: 12px; color: var(--color-text-muted); }
+.ls-qb-total-row { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
 .ls-qb-total b { font-size: 22px; font-weight: var(--fw-figure); letter-spacing: -.015em; line-height: 1.2; }
+.ls-qb-total-original { font-size: 13.5px; font-weight: var(--fw-regular); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .ls-qb-total small { font-size: 12.5px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-qb-total .ls-qb-coupon-line { display: block; }
 .ls-qb-cta { min-width: 180px; min-height: 44px; }
 @media (max-width: 640px) {
   .ls-qb.ls-dialog { max-height: 96dvh; }
